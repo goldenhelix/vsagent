@@ -46,6 +46,13 @@ export type AutocompleteResult = {
   /** True when `input` was already an existing directory (so the suggestions
    *  list lists *children* of the input). */
   inputIsExistingDir: boolean
+  /** Absolute, tilde-expanded canonical form of `input`. Useful for the
+   *  picker UI to submit a clean path regardless of what the user typed
+   *  (`~/foo`, `./foo`, trailing slash, etc.). */
+  inputAbsolute: string
+  /** True when `inputAbsolute` exists as a directory. The picker uses this
+   *  to decide whether Enter can submit the typed value immediately. */
+  inputExists: boolean
 }
 
 export function registerFolderPickerHandlers(): void {
@@ -62,9 +69,11 @@ export function registerFolderPickerHandlers(): void {
       let parent: string
       let prefix: string
       let inputIsExistingDir = false
+      let inputExists = false
       try {
         const stat = await import('fs/promises').then((m) => m.stat(absoluteInput))
         if (stat.isDirectory()) {
+          inputExists = true
           // Why: if the user typed `…/foo` (no trailing slash) and `foo` is
           // a real folder, we want suggestions for `…/foo/` rather than
           // returning `foo` itself. That matches shell tab-completion.
@@ -90,8 +99,15 @@ export function registerFolderPickerHandlers(): void {
       // canonical parent we're about to read, not the user input — symlinks
       // outside the root are rejected as if the path didn't exist.
       const canonicalParent = normalize(parent)
+      const baseResult = {
+        parent: canonicalParent,
+        suggestions: [] as string[],
+        inputIsExistingDir,
+        inputAbsolute: absoluteInput,
+        inputExists
+      }
       if (!isPathAllowed(canonicalParent)) {
-        return { parent: canonicalParent, suggestions: [], inputIsExistingDir: false }
+        return { ...baseResult, suggestions: [] }
       }
 
       let entries: { name: string; isDirectory: boolean }[]
@@ -101,7 +117,7 @@ export function registerFolderPickerHandlers(): void {
           .filter((e) => e.isDirectory() || e.isSymbolicLink())
           .map((e) => ({ name: e.name, isDirectory: true }))
       } catch {
-        return { parent: canonicalParent, suggestions: [], inputIsExistingDir }
+        return baseResult
       }
 
       const lowerPrefix = prefix.toLowerCase()
@@ -118,7 +134,7 @@ export function registerFolderPickerHandlers(): void {
         // /tmp on busy hosts). 200 matches is more than any picker UX needs.
         .slice(0, 200)
 
-      return { parent: canonicalParent, suggestions, inputIsExistingDir }
+      return { ...baseResult, suggestions }
     }
   )
 }

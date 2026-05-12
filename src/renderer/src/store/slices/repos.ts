@@ -11,7 +11,7 @@ export type RepoSlice = {
   repos: Repo[]
   activeRepoId: string | null
   fetchRepos: () => Promise<void>
-  addRepo: () => Promise<Repo | null>
+  addRepo: (suppliedPath?: string) => Promise<Repo | null>
   addNonGitFolder: (path: string) => Promise<Repo | null>
   removeRepo: (repoId: string) => Promise<void>
   updateRepo: (
@@ -53,25 +53,19 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
   },
 
-  addRepo: async () => {
+  addRepo: async (suppliedPath?: string) => {
     try {
-      // Why: in web mode the Electron open-dialog isn't available. Defer to
-      // the remote folder picker modal — it sets store.modalData.folderPath
-      // and re-invokes this action when the user accepts.
+      // Why: in web mode the Electron open-dialog isn't available. The
+      // picker dialog calls `addRepo(absolutePath)` directly once the user
+      // accepts; legacy callers (e.g. AddRepoDialog's Browse button) pass
+      // no argument and we open the picker modal instead.
       const { isWebMode } = await import('@/lib/runtime-flavor')
-      let path: string | null = null
-      if (isWebMode()) {
-        const { openModal, modalData } = get()
-        const queued = (modalData as { remotePickedPath?: string })?.remotePickedPath ?? null
-        if (queued) {
-          path = queued
-          // Clear the queued path so a future addRepo invocation re-prompts.
-          set((s) => ({ modalData: { ...s.modalData, remotePickedPath: undefined } }))
-        } else {
-          openModal('remote-folder-picker', { mode: 'add-repo' })
+      let path: string | null = suppliedPath ?? null
+      if (!path) {
+        if (isWebMode()) {
+          get().openModal('remote-folder-picker', { mode: 'add-repo' })
           return null
         }
-      } else {
         path = await window.api.repos.pickFolder()
       }
       if (!path) {

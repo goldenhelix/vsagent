@@ -5,6 +5,7 @@ import { useAppStore } from '../store'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { ShortcutKeyCombo } from './ShortcutKeyCombo'
 import logo from '../../../../resources/logo.svg'
+import { isWebMode } from '@/lib/runtime-flavor'
 
 type ShortcutItem = {
   id: string
@@ -310,9 +311,11 @@ export default function Landing(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="absolute bottom-6 left-0 right-0 flex justify-center">
-        <GitHubStarButton hasRepos={repos.length > 0} />
-      </div>
+      {!isWebMode() && (
+        <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+          <GitHubStarButton hasRepos={repos.length > 0} />
+        </div>
+      )}
     </div>
   )
 }

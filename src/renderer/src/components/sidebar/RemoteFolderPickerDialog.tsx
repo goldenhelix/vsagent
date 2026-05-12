@@ -17,13 +17,11 @@ const RemoteFolderPickerDialog = React.memo(function RemoteFolderPickerDialog() 
 
   const handlePick = useCallback(
     (path: string) => {
-      useAppStore.setState((s) => ({ modalData: { ...s.modalData, remotePickedPath: path } }))
       closeModal()
-      // Why: re-enter the originating flow so the caller picks the queued
-      // path off modalData and proceeds. For now the only flow is add-repo;
-      // future flows would dispatch by `mode`.
+      // Why: pass the picked path directly into addRepo. modalData is
+      // cleared by closeModal so we can't round-trip it through there.
       if (mode === 'add-repo') {
-        void addRepo()
+        void addRepo(path)
       }
     },
     [addRepo, closeModal, mode]

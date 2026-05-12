@@ -1496,8 +1496,13 @@ const api = {
      *  default, plus ORCA_WEB_PICKER_ROOTS). Never returns files. */
     autocompleteDir: (
       input: string
-    ): Promise<{ parent: string; suggestions: string[]; inputIsExistingDir: boolean }> =>
-      ipcRenderer.invoke('fs:autocompleteDir', { input }),
+    ): Promise<{
+      parent: string
+      suggestions: string[]
+      inputIsExistingDir: boolean
+      inputAbsolute: string
+      inputExists: boolean
+    }> => ipcRenderer.invoke('fs:autocompleteDir', { input }),
     readDir: (args: {
       dirPath: string
       connectionId?: string

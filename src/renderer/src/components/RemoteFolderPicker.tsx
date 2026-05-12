@@ -2,15 +2,26 @@
 // the native Electron open-dialog is unavailable.
 //
 // UX:
-// - Type a path. As the user types we debounce-call `window.api.fs.autocomplete
-//   Dir(path)` and render suggested subdirectory names.
-// - Tab / ArrowDown moves into the suggestion list.
-// - Enter accepts the selected suggestion (joins it to the current parent +
-//   `/`), or, if nothing is selected, returns the typed path verbatim.
-// - Escape closes the popover.
+// - Type a path. Each keystroke kicks `window.api.fs.autocompleteDir(path)`
+//   to list folder-name completions under the parent of the typed path.
+// - Enter (or "Use this folder") submits the typed path as-is. The backend's
+//   tilde-expanded absolute form (returned in `inputAbsolute`) is what
+//   actually gets passed to the caller, so `~/foo` → `/home/.../foo`.
+// - Tab + ArrowKeys navigate suggestions; Tab also completes-and-drills
+//   (appends `/`). Mouse hover does NOT change keyboard selection — only
+//   arrow keys do, so Enter never accidentally picks a hovered suggestion.
+// - Click on a suggestion drills in (appends `name/` to the input, just
+//   like Tab) rather than submitting — submitting takes a deliberate Enter.
+// - Escape cancels the picker.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-type Result = { parent: string; suggestions: string[]; inputIsExistingDir: boolean }
+type Result = {
+  parent: string
+  suggestions: string[]
+  inputIsExistingDir: boolean
+  inputAbsolute: string
+  inputExists: boolean
+}
 
 export type RemoteFolderPickerProps = {
   /** Initial value of the path input. */
@@ -19,10 +30,10 @@ export type RemoteFolderPickerProps = {
   label?: string
   /** Placeholder for the input. */
   placeholder?: string
-  /** Called when the user accepts a path (Enter without an open dropdown,
-   *  or by clicking the confirm button). */
+  /** Called when the user accepts a path. The absolutePath is the
+   *  canonical tilde-expanded form. */
   onPick: (absolutePath: string) => void
-  /** Optional cancel handler — called on Escape. */
+  /** Optional cancel handler — called on Escape or the Cancel button. */
   onCancel?: () => void
 }
 
@@ -37,6 +48,10 @@ export function RemoteFolderPicker({
 }: RemoteFolderPickerProps): React.JSX.Element {
   const [value, setValue] = useState(initialValue)
   const [result, setResult] = useState<Result | null>(null)
+  // Why: -1 means "no keyboard selection". Only ArrowKeys promote this above
+  // -1. Mouse hover styles `.hover:bg-muted` on the suggestion row but does
+  // NOT change activeIdx — that way Enter on the input never accidentally
+  // picks a hovered suggestion. Idiomatic Spotlight/Quick-Open behaviour.
   const [activeIdx, setActiveIdx] = useState(-1)
   const inputRef = useRef<HTMLInputElement | null>(null)
   // Why: every keystroke kicks an autocomplete request. We tag each request
@@ -50,12 +65,14 @@ export function RemoteFolderPicker({
       const r = await window.api.fs.autocompleteDir(input)
       if (seq === reqSeq.current) {
         setResult(r)
+        // Reset selection — a typed character invalidates the prior
+        // suggestion-list position.
         setActiveIdx(-1)
       }
     } catch (err) {
       console.warn('[picker] autocomplete failed', err)
       if (seq === reqSeq.current) {
-        setResult({ parent: '', suggestions: [], inputIsExistingDir: false })
+        setResult(null)
       }
     }
   }, [])
@@ -67,29 +84,37 @@ export function RemoteFolderPicker({
 
   useEffect(() => {
     inputRef.current?.focus()
-    inputRef.current?.select()
+    // Why: don't select-all on focus. The default value is `~` which the
+    // user usually keeps; auto-select would have them backspace it away
+    // every time. Place the caret at end instead.
+    const len = inputRef.current?.value.length ?? 0
+    inputRef.current?.setSelectionRange(len, len)
   }, [])
 
-  const accept = useCallback(
-    (raw: string) => {
-      // Why: trim a trailing slash so callers receive a clean canonical path.
-      const trimmed = raw.replace(/\/+$/, '') || '/'
-      onPick(trimmed)
-    },
-    [onPick]
-  )
+  const acceptTyped = useCallback(() => {
+    // Why: prefer the backend's canonical inputAbsolute (tilde-expanded,
+    // resolved) over the raw typed string. If we don't have a result yet
+    // (network race), fall back to the typed value — caller-side `repos.add`
+    // will surface a helpful error if the path doesn't exist.
+    const trimmedTyped = value.replace(/\/+$/, '') || '/'
+    const path = result?.inputAbsolute || trimmedTyped
+    onPick(path)
+  }, [onPick, result, value])
 
-  const buildAcceptedPath = useCallback(
-    (suggestion: string): string => {
-      if (!result) return value
-      // Why: if the current input already ends in `/` the parent IS what we
-      // listed, so we just append. Otherwise the user typed a prefix we
-      // matched, so we replace the trailing prefix with the full name.
+  const drillInto = useCallback(
+    (suggestion: string) => {
+      // Why: completing a suggestion means "navigate into this folder",
+      // matching shell Tab-completion. We strip the typed prefix and replace
+      // with the full folder name plus a trailing `/` so the next debounce
+      // lists that folder's contents.
       const trailingSlash = value.endsWith('/')
       const base = trailingSlash ? value : value.slice(0, value.lastIndexOf('/') + 1)
-      return base + suggestion
+      const next = base + suggestion + '/'
+      setValue(next)
+      setActiveIdx(-1)
+      inputRef.current?.focus()
     },
-    [value, result]
+    [value]
   )
 
   const onKeyDown = useCallback(
@@ -113,65 +138,82 @@ export function RemoteFolderPicker({
       if (e.key === 'Tab' && result && result.suggestions.length > 0) {
         e.preventDefault()
         const idx = activeIdx >= 0 ? activeIdx : 0
-        const completed = buildAcceptedPath(result.suggestions[idx])
-        setValue(completed + '/')
-        setActiveIdx(-1)
+        drillInto(result.suggestions[idx])
         return
       }
       if (e.key === 'Enter') {
         e.preventDefault()
-        if (activeIdx >= 0 && result?.suggestions[activeIdx]) {
-          const completed = buildAcceptedPath(result.suggestions[activeIdx])
-          accept(completed)
-        } else {
-          accept(value)
-        }
+        // Why: Enter always submits the typed value, even when a suggestion
+        // is highlighted via ArrowKeys. To navigate INTO a highlighted
+        // suggestion, the user presses Tab (or clicks the row). This
+        // separation is what makes "pick a folder that has sub-folders"
+        // possible — Enter is unambiguously "accept what's in the input".
+        acceptTyped()
       }
     },
-    [accept, activeIdx, buildAcceptedPath, onCancel, result, value]
+    [acceptTyped, activeIdx, drillInto, onCancel, result]
   )
 
   const visibleSuggestions = useMemo(() => result?.suggestions ?? [], [result])
+  const inputExists = result?.inputExists ?? false
+  const acceptLabel = inputExists ? 'Use this folder' : 'Use this path'
 
   return (
     <div className="flex flex-col gap-2 w-full">
       {label && <label className="text-xs text-muted-foreground">{label}</label>}
-      <div className="relative">
-        <input
-          ref={inputRef}
-          className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-mono outline-none focus:ring-2 focus:ring-ring"
-          value={value}
-          placeholder={placeholder}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={onKeyDown}
-          spellCheck={false}
-          autoCapitalize="none"
-          autoCorrect="off"
-        />
-        {visibleSuggestions.length > 0 && (
-          <div className="absolute z-10 left-0 right-0 mt-1 max-h-72 overflow-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md">
-            {visibleSuggestions.map((s, idx) => (
-              <button
-                type="button"
-                key={s}
-                className={`flex w-full items-center justify-between px-2.5 py-1.5 text-sm font-mono ${
-                  idx === activeIdx ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
-                }`}
-                onMouseEnter={() => setActiveIdx(idx)}
-                onClick={() => {
-                  const completed = buildAcceptedPath(s)
-                  setValue(completed + '/')
-                  setActiveIdx(-1)
-                  inputRef.current?.focus()
-                }}
-              >
-                <span>{s}</span>
-                <span className="text-muted-foreground text-xs">↹</span>
-              </button>
-            ))}
+      <input
+        ref={inputRef}
+        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-mono outline-none focus:ring-2 focus:ring-ring"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={onKeyDown}
+        spellCheck={false}
+        autoCapitalize="none"
+        autoCorrect="off"
+      />
+      {visibleSuggestions.length > 0 && (
+        // Why: this is rendered as part of the flex column rather than
+        // absolutely-positioned so it doesn't overlap the action buttons
+        // below. A typical dialog has plenty of vertical room; the inline
+        // list also makes it obvious the suggestions and the Submit button
+        // are separate affordances.
+        <div className="max-h-60 overflow-auto rounded-md border border-border bg-popover text-popover-foreground shadow-sm">
+          <div className="sticky top-0 border-b border-border/60 bg-popover/95 px-2.5 py-1 text-[10px] text-muted-foreground">
+            ↑/↓ to navigate · Tab to drill in · Enter to pick the current path
           </div>
-        )}
-      </div>
+          {visibleSuggestions.map((s, idx) => (
+            <button
+              type="button"
+              key={s}
+              className={`flex w-full items-center justify-between px-2.5 py-1.5 text-sm font-mono ${
+                idx === activeIdx ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
+              }`}
+              // Why: NO `onMouseEnter` here — hover styling stays purely
+              // visual via Tailwind's `:hover` rule. Setting activeIdx on
+              // hover was the bug that made Enter "pick whatever the mouse
+              // happens to be near" instead of the typed value.
+              onClick={() => drillInto(s)}
+            >
+              <span>{s}</span>
+              <span className="text-muted-foreground text-xs">↹</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {result?.parent && (
+        <div className="text-xs text-muted-foreground font-mono truncate">
+          {inputExists ? (
+            <>
+              Folder: <span className="text-foreground">{result.inputAbsolute}</span>
+            </>
+          ) : (
+            <>
+              Looking in <span className="text-foreground">{result.parent}</span>
+            </>
+          )}
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         {onCancel && (
           <button
@@ -184,17 +226,18 @@ export function RemoteFolderPicker({
         )}
         <button
           type="button"
-          className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground hover:bg-primary/90"
-          onClick={() => accept(value)}
+          className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          onClick={acceptTyped}
+          // Why: disable the submit affordance when the path doesn't exist
+          // so the user gets immediate feedback instead of a backend "not
+          // a valid git repository" error a beat later. They can still hit
+          // Enter to force-submit if they intend to create.
+          disabled={result !== null && !inputExists}
+          title={inputExists ? acceptLabel : 'That path does not exist'}
         >
-          Use this folder
+          {acceptLabel}
         </button>
       </div>
-      {result?.parent && (
-        <div className="text-xs text-muted-foreground font-mono truncate">
-          Looking in <span className="text-foreground">{result.parent}</span>
-        </div>
-      )}
     </div>
   )
 }
