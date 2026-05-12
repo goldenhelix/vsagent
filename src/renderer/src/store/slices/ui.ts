@@ -270,6 +270,7 @@ export type UISlice = {
     | 'worktree-palette'
     | 'new-workspace-composer'
     | 'confirm-orca-yaml-hooks'
+    | 'remote-folder-picker'
   modalData: Record<string, unknown>
   openModal: (modal: UISlice['activeModal'], data?: Record<string, unknown>) => void
   closeModal: () => void

@@ -10,6 +10,7 @@ import {
   patchWebContentsSend,
   setEventBroadcaster
 } from './ipc-intercept'
+import { setHeadlessBroadcaster } from './headless-window'
 
 // Why: we treat the gateway as proof-of-concept; in production this token
 // should be exchanged through an auth flow (the same kind of pairing the
@@ -73,7 +74,11 @@ export class WebGateway {
   async start(): Promise<void> {
     installIpcIntercept()
     patchWebContentsSend()
-    setEventBroadcaster((channel, args) => this.broadcastEvent(channel, args))
+    const broadcast = (channel: string, args: unknown[]): void => {
+      this.broadcastEvent(channel, args)
+    }
+    setEventBroadcaster(broadcast)
+    setHeadlessBroadcaster(broadcast)
 
     this.httpServer = createServer((req, res) => this.handleHttp(req, res))
     this.wss = new WebSocketServer({ noServer: true })
@@ -101,6 +106,7 @@ export class WebGateway {
 
   async stop(): Promise<void> {
     setEventBroadcaster(null)
+    setHeadlessBroadcaster(null)
     if (this.wss) {
       for (const client of this.wss.clients) client.terminate()
       await new Promise<void>((r) => this.wss!.close(() => r()))

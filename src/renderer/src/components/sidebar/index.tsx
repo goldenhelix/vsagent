@@ -12,6 +12,7 @@ import NonGitFolderDialog from './NonGitFolderDialog'
 import RemoveFolderDialog from './RemoveFolderDialog'
 import AddRepoDialog from './AddRepoDialog'
 import OrcaYamlTrustDialog from './OrcaYamlTrustDialog'
+import RemoteFolderPickerDialog from './RemoteFolderPickerDialog'
 
 const MIN_WIDTH = 220
 const MAX_WIDTH = 500
@@ -69,6 +70,7 @@ function Sidebar(): React.JSX.Element {
       <RemoveFolderDialog />
       <AddRepoDialog />
       <OrcaYamlTrustDialog />
+      <RemoteFolderPickerDialog />
     </TooltipProvider>
   )
 }

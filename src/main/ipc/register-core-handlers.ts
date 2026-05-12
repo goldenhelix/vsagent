@@ -1,4 +1,5 @@
 import { registerAppHandlers } from './app'
+import { registerFolderPickerHandlers } from './folder-picker'
 import { registerCliHandlers } from './cli'
 import { registerPreflightHandlers } from './preflight'
 import type { Store } from '../persistence'
@@ -69,6 +70,7 @@ export function registerCoreHandlers(
   registered = true
 
   registerAppHandlers()
+  registerFolderPickerHandlers()
   registerCliHandlers()
   registerPreflightHandlers()
   registerClaudeUsageHandlers(claudeUsage)

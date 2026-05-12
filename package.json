@@ -42,6 +42,8 @@
     "build:linux": "pnpm run build && electron-builder --config config/electron-builder.config.cjs --linux",
     "web:build": "vite build --config config/vite.web.config.ts",
     "web:dev": "vite --config config/vite.web.config.ts",
+    "web:serve": "node config/scripts/web-serve.mjs",
+    "web:all": "pnpm run build:electron-vite && pnpm run web:build && pnpm run web:serve",
     "test:e2e": "npx playwright test --config tests/playwright.config.ts --project electron-headless",
     "test:e2e:headful": "npx playwright test --config tests/playwright.config.ts --project electron-headful",
     "test:e2e:computer": "vitest run --config tests/e2e/vitest.config.ts"

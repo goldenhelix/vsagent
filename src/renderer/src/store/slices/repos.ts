@@ -55,7 +55,25 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
   addRepo: async () => {
     try {
-      const path = await window.api.repos.pickFolder()
+      // Why: in web mode the Electron open-dialog isn't available. Defer to
+      // the remote folder picker modal — it sets store.modalData.folderPath
+      // and re-invokes this action when the user accepts.
+      const { isWebMode } = await import('@/lib/runtime-flavor')
+      let path: string | null = null
+      if (isWebMode()) {
+        const { openModal, modalData } = get()
+        const queued = (modalData as { remotePickedPath?: string })?.remotePickedPath ?? null
+        if (queued) {
+          path = queued
+          // Clear the queued path so a future addRepo invocation re-prompts.
+          set((s) => ({ modalData: { ...s.modalData, remotePickedPath: undefined } }))
+        } else {
+          openModal('remote-folder-picker', { mode: 'add-repo' })
+          return null
+        }
+      } else {
+        path = await window.api.repos.pickFolder()
+      }
       if (!path) {
         return null
       }

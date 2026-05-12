@@ -56,6 +56,8 @@ import {
   canGoForwardWorktreeHistory
 } from '@/store/slices/worktree-nav-history'
 import type { OnboardingState } from '../../shared/types'
+import { isWebMode } from './lib/runtime-flavor'
+import { WebConnectionBanner } from './components/WebConnectionBanner'
 
 const isMac = navigator.userAgent.includes('Mac')
 const isWindows = !isMac && navigator.userAgent.includes('Windows')
@@ -1107,8 +1109,9 @@ function App(): React.JSX.Element {
           <PetOverlay />
         </Suspense>
       ) : null}
-      <UpdateCard />
-      <StarNagCard />
+      {!isWebMode() && <UpdateCard />}
+      {!isWebMode() && <StarNagCard />}
+      <WebConnectionBanner />
       {/* Why: the existing-user opt-in banner mounts at App root so it
           renders once per renderer session, not per view. It gates
           internally on the cohort markers populated by the migration,
@@ -1129,7 +1132,7 @@ function App(): React.JSX.Element {
           in DOM order. Electron's hit-test for drag regions is DOM-order-based and
           ignores z-index — placing WindowControls earlier caused the drag region to
           win, making the buttons unclickable. */}
-      {isWindows && <WindowControls />}
+      {isWindows && !isWebMode() && <WindowControls />}
     </div>
   )
 }

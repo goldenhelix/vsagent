@@ -71,4 +71,15 @@ export function registerAppHandlers(): void {
   ipcMain.handle('app:setUnreadDockBadgeCount', (_event, count: number) => {
     setUnreadDockBadgeCount(Number.isFinite(count) ? count : 0)
   })
+
+  // Why: the renderer needs to know whether it's running inside Electron
+  // (desktop) or inside a regular browser tab against the web gateway, so
+  // it can hide native-only affordances (window controls, auto-updater,
+  // file pickers backed by Electron dialogs, …). The flag is set in the
+  // backend env, not detected by the renderer, so a misconfigured deploy
+  // can't be tricked by user-agent spoofing.
+  ipcMain.handle('app:getRuntimeFlavor', (): { web: boolean; platform: string } => ({
+    web: process.env.ORCA_WEB_HEADLESS === '1',
+    platform: process.platform
+  }))
 }

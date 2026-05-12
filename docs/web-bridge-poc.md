@@ -57,26 +57,34 @@ display — running full Electron headless on a host without xvfb hits a Gtk
 init wall plus a daemon-startup failure. The mock is the smallest thing that
 proves the renderer side of the bridge.
 
-## Running the PoC
+## Running
+
+The shippable path serves the renderer through the real Electron backend
+running in headless mode — no display, no Xvfb needed on the server:
 
 ```bash
-# 1. Build the web bundle (one-time after renderer changes).
-pnpm web:build
+# One command — build both bundles, start the server.
+pnpm web:all
 
-# 2. Start the mock backend.
-pnpm exec tsx src/web-bridge/mock-server.ts
-
-# 3. Open the URL in any browser.
-open http://localhost:8080/
+# Or split steps for an iterative dev loop:
+pnpm web:build                # rebuild renderer
+pnpm build:electron-vite      # rebuild main
+pnpm web:serve                # start the backend
 ```
 
-To run against a real Electron backend on a machine with a display:
+Then open `http://<server-host>:8080/` in any browser.
 
-```bash
-ORCA_WEB_GATEWAY=1 ORCA_WEB_PORT=8080 pnpm dev
-```
+Configuration env vars consumed by `web:serve`:
 
-Then point a browser at `http://<server-host>:8080/`.
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ORCA_WEB_PORT` | `8080` | HTTP/WS port |
+| `ORCA_WEB_TOKEN` | (none) | Optional shared bearer token |
+| `ORCA_WEB_PICKER_ROOTS` | `$HOME` | Roots the folder picker may traverse |
+| `ORCA_USER_DATA_PATH` | `~/.orca-web` | Backend data dir |
+
+The mock backend (`pnpm exec tsx src/web-bridge/mock-server.ts`) is still
+available for renderer-only development against stub data.
 
 ## What works in the PoC
 

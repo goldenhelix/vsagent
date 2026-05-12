@@ -55,6 +55,7 @@ import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { installIpcIntercept } from './web-gateway/ipc-intercept'
 import { WebGateway } from './web-gateway/server'
+import { createHeadlessBrowserWindow, setHeadlessBroadcaster } from './web-gateway/headless-window'
 import { existsSync } from 'fs'
 import { join } from 'path'
 
@@ -142,7 +143,13 @@ function focusExistingWindow(): void {
 // agent work, so that routing ambiguity is acceptable. Packaged Orca keeps
 // the lock to protect against the corruption documented in PR #1326 /
 // issue #1312.
-const hasSingleInstanceLock = is.dev ? true : acquireSingleInstanceLock(app, focusExistingWindow)
+// Why: headless web-mode boots without a window and may be launched alongside
+// a normal Orca desktop on the same machine for testing. Skip the single-
+// instance lock there — the desktop-mode lock would otherwise SIGTERM the web
+// backend on its first launch.
+const isWebHeadless = process.env.ORCA_WEB_HEADLESS === '1'
+const hasSingleInstanceLock =
+  is.dev || isWebHeadless ? true : acquireSingleInstanceLock(app, focusExistingWindow)
 if (!hasSingleInstanceLock) {
   if (is.dev) {
     // Why: packaged runs have no attached console, but dev runs do. Emit a
@@ -222,12 +229,20 @@ function openMainWindow(): BrowserWindow {
     }
   }
 
-  const window = createMainWindow(store, {
-    getIsQuitting: () => isQuitting,
-    onQuitAborted: () => {
-      isQuitting = false
-    }
-  })
+  // Why: in web-headless mode we can't create a real BrowserWindow — Linux
+  // servers without an X server crash inside Gtk during construction even
+  // with `--ozone-platform=headless`. The fake satisfies the small surface
+  // IPC handlers use (`.isDestroyed`, `.on`, `.webContents.{send,id,...}`),
+  // and the gateway-side webContents.send patch broadcasts events to
+  // connected browser clients.
+  const window = isWebHeadless
+    ? createHeadlessBrowserWindow()
+    : createMainWindow(store, {
+        getIsQuitting: () => isQuitting,
+        onQuitAborted: () => {
+          isQuitting = false
+        }
+      })
 
   // Why: telemetry-plan.md§First-launch experience anchors default-on
   // `app_opened` to the first main-window load. Existing users in the
@@ -512,14 +527,21 @@ app.whenReady().then(async () => {
   // (e.g. corrupted ~/.claude/settings.json) cannot brick Orca startup.
   // The agent label travels with each installer so the catch can attribute
   // the failure in the `agent_hook_install_failed` telemetry event.
-  runManagedHookInstallers([
-    ['claude', () => claudeHookService.install()],
-    ['codex', () => codexHookService.install()],
-    ['gemini', () => geminiHookService.install()],
-    ['cursor', () => cursorHookService.install()]
-  ])
+  // Why: managed agent-hook installation modifies user-global config in the
+  // operator's home dir. In a shared/server deployment that's the wrong
+  // surface to mutate, so skip it in headless mode.
+  if (!isWebHeadless) {
+    runManagedHookInstallers([
+      ['claude', () => claudeHookService.install()],
+      ['codex', () => codexHookService.install()],
+      ['gemini', () => geminiHookService.install()],
+      ['cursor', () => cursorHookService.install()]
+    ])
+  }
 
-  registerAppMenu({
+  // Why: there's no OS menu bar in headless mode. The renderer's keyboard
+  // shortcut layer still handles zoom / sidebar toggles inside the browser.
+  if (!isWebHeadless) registerAppMenu({
     onCheckForUpdates: (options) => checkForUpdatesFromMenu(options),
     onOpenSettings: () => {
       mainWindow?.webContents.send('ui:openSettings')
@@ -593,23 +615,36 @@ app.whenReady().then(async () => {
   // Why: the persistent-terminal daemon is always started. If it fails, the
   // LocalPtyProvider (initialized at module load in ipc/pty.ts) remains as the
   // implicit fallback — terminals work, just without cross-restart persistence.
-  try {
-    await initDaemonPtyProvider()
-  } catch (error) {
-    console.error('[daemon] Failed to start daemon PTY provider, falling back to local:', error)
+  // In web-headless mode we skip the daemon entirely: the daemon expects to
+  // outlive the parent and there's no benefit in a server deployment, where
+  // restart-survival is handled by the process supervisor (systemd etc.).
+  if (!isWebHeadless) {
+    try {
+      await initDaemonPtyProvider()
+    } catch (error) {
+      console.error(
+        '[daemon] Failed to start daemon PTY provider, falling back to local:',
+        error
+      )
+    }
   }
   // Why: PTY spawn env reads ORCA_AGENT_HOOK_* from the live server state,
   // so the hook server must start before the window opens — otherwise
-  // restored terminals race ahead without the env on first launch.
+  // restored terminals race ahead without the env on first launch. In web-
+  // headless mode the hook server still useful for agent telemetry, but the
+  // loopback bind contends with whatever is already running on the host;
+  // for the v1 PoC we skip it.
   try {
-    await agentHookServer.start({
-      env: app.isPackaged ? 'production' : 'development',
-      // Why: passing the userData path lets the server write its endpoint
-      // file (PORT/TOKEN/ENV/VERSION) to a stable location. Hook scripts
-      // source that file at invocation time so they reach the current Orca
-      // even when the PTY's env was frozen under a prior instance.
-      userDataPath: app.getPath('userData')
-    })
+    if (!isWebHeadless) {
+      await agentHookServer.start({
+        env: app.isPackaged ? 'production' : 'development',
+        // Why: passing the userData path lets the server write its endpoint
+        // file (PORT/TOKEN/ENV/VERSION) to a stable location. Hook scripts
+        // source that file at invocation time so they reach the current Orca
+        // even when the PTY's env was frozen under a prior instance.
+        userDataPath: app.getPath('userData')
+      })
+    }
   } catch (error) {
     // Why: Claude/Codex/Gemini/OpenCode/Cursor hook callbacks are sidebar
     // enrichment only. Orca must still boot even if the local loopback

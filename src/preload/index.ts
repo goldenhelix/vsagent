@@ -255,7 +255,12 @@ const api = {
     getKeyboardInputSourceId: (): Promise<string | null> =>
       ipcRenderer.invoke('app:getKeyboardInputSourceId'),
     setUnreadDockBadgeCount: (count: number): Promise<void> =>
-      ipcRenderer.invoke('app:setUnreadDockBadgeCount', count)
+      ipcRenderer.invoke('app:setUnreadDockBadgeCount', count),
+    /** Returns whether the backend is serving us into a remote browser via
+     *  the web gateway (`web: true`) or as the local Electron renderer
+     *  (`web: false`). Renderer code checks this to hide native-only UI. */
+    getRuntimeFlavor: (): Promise<{ web: boolean; platform: string }> =>
+      ipcRenderer.invoke('app:getRuntimeFlavor')
   },
 
   wsl: {
@@ -1486,6 +1491,13 @@ const api = {
   },
 
   fs: {
+    /** Web-mode folder picker autocomplete: returns subdirectory names that
+     *  start with the typed prefix under the allowlisted roots (HOME by
+     *  default, plus ORCA_WEB_PICKER_ROOTS). Never returns files. */
+    autocompleteDir: (
+      input: string
+    ): Promise<{ parent: string; suggestions: string[]; inputIsExistingDir: boolean }> =>
+      ipcRenderer.invoke('fs:autocompleteDir', { input }),
     readDir: (args: {
       dirPath: string
       connectionId?: string

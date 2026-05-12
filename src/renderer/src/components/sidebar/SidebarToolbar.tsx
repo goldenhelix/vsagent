@@ -14,6 +14,7 @@ import {
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { GitHubViewer } from '../../../../shared/types'
+import { isWebMode } from '@/lib/runtime-flavor'
 
 const GITHUB_ISSUES_URL = 'https://github.com/stablyai/orca/issues/'
 const DISCORD_URL = 'https://discord.gg/fzjDKHxv8Q'
@@ -255,21 +256,23 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
           </TooltipContent>
         </Tooltip>
         <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setFeedbackOpen(true)}
-                className="text-muted-foreground"
-              >
-                <MessageSquareText className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>
-              Send feedback
-            </TooltipContent>
-          </Tooltip>
+          {!isWebMode() && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setFeedbackOpen(true)}
+                  className="text-muted-foreground"
+                >
+                  <MessageSquareText className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>
+                Send feedback
+              </TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

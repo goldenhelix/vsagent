@@ -5,6 +5,8 @@
 // browser and talks to the Orca backend (running on a remote Linux server)
 // over a single multiplexed WebSocket.
 
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected'
+
 type AnyArgs = unknown[]
 type Listener = (event: { sender: unknown }, ...args: AnyArgs) => void
 
@@ -33,15 +35,50 @@ class IpcRendererShim {
   private wsReady: Promise<WebSocket>
   private outbox: WireMessage[] = []
 
+  // Why: surface connection state to the renderer so it can render a banner
+  // when the WS drops. Listeners are invoked with the new state immediately
+  // (synchronously) on subscribe so React state seeds correctly.
+  private connectionListeners = new Set<(state: ConnectionState) => void>()
+  private currentState: ConnectionState = 'connecting'
+  private reconnectAttempt = 0
+  private url = ''
+
   constructor(url: string) {
-    this.wsReady = this.connect(url)
+    this.url = url
+    this.wsReady = this.connect()
   }
 
-  private connect(url: string): Promise<WebSocket> {
+  private setState(s: ConnectionState): void {
+    if (this.currentState === s) return
+    this.currentState = s
+    for (const fn of this.connectionListeners) {
+      try {
+        fn(s)
+      } catch (e) {
+        console.error('[web-bridge] connection listener threw', e)
+      }
+    }
+  }
+
+  onConnectionChange(fn: (state: ConnectionState) => void): () => void {
+    this.connectionListeners.add(fn)
+    fn(this.currentState)
+    return () => {
+      this.connectionListeners.delete(fn)
+    }
+  }
+
+  get connectionState(): ConnectionState {
+    return this.currentState
+  }
+
+  private connect(): Promise<WebSocket> {
+    this.setState('connecting')
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url)
+      const ws = new WebSocket(this.url)
       ws.addEventListener('open', () => {
         this.ws = ws
+        this.reconnectAttempt = 0
         for (const queued of this.outbox.splice(0)) {
           ws.send(JSON.stringify(queued))
         }
@@ -51,17 +88,40 @@ class IpcRendererShim {
         for (const channel of this.listenersByChannel.keys()) {
           ws.send(JSON.stringify({ kind: 'subscribe', channel } satisfies WireMessage))
         }
+        this.setState('connected')
         resolve(ws)
       })
       ws.addEventListener('message', (evt) => this.handleMessage(evt.data))
       ws.addEventListener('close', () => {
         this.ws = null
+        // Why: fail every in-flight invoke so awaiting callers see a real
+        // error instead of hanging forever. Reject before scheduling a
+        // reconnect so retries can be triggered by the catch handler.
+        for (const [id, p] of this.pending) {
+          p.reject(new Error('WebSocket connection lost'))
+          this.pending.delete(id)
+        }
+        this.setState('disconnected')
+        this.scheduleReconnect()
       })
       ws.addEventListener('error', (err) => {
         console.error('[web-bridge] WebSocket error', err)
         reject(new Error('WebSocket connection failed'))
       })
     })
+  }
+
+  // Why: exponential backoff with a cap of 5s. The cap keeps the UX
+  // responsive — once the server is back up, the next reconnect lands
+  // within a few seconds at worst.
+  private scheduleReconnect(): void {
+    this.reconnectAttempt++
+    const delay = Math.min(5000, 250 * 2 ** Math.min(5, this.reconnectAttempt - 1))
+    setTimeout(() => {
+      if (this.currentState === 'disconnected') {
+        this.wsReady = this.connect()
+      }
+    }, delay)
   }
 
   private send(msg: WireMessage): void {
@@ -155,3 +215,12 @@ const bridgeUrl = (() => {
 })()
 
 export const bridge = new IpcRendererShim(bridgeUrl)
+
+// Why: surface the bridge connection state to the renderer through a small
+// global. The renderer is built independently of the web-bridge sources, so
+// importing them from renderer code would couple the two trees. A read-only
+// global keeps the renderer dependency on the bridge minimal.
+;(window as unknown as { orcaWeb?: unknown }).orcaWeb = {
+  onConnectionChange: (fn: (state: ConnectionState) => void) => bridge.onConnectionChange(fn),
+  getConnectionState: (): ConnectionState => bridge.connectionState
+}

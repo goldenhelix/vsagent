@@ -42,8 +42,7 @@ export default defineConfig({
   build: {
     outDir: resolve(repoRoot, 'out/web'),
     emptyOutDir: true,
-    sourcemap: true,
-    minify: false
+    sourcemap: true
   },
   server: {
     host: '0.0.0.0',

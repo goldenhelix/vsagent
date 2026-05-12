@@ -69,7 +69,12 @@ export function attachMainWindowServices(
   void hydrateLocalPtyRegistryAtBoot(store)
   registerSshHandlers(store, () => mainWindow, runtime)
   registerFileDropRelay(mainWindow)
-  setupAutoUpdater(mainWindow, {
+  // Why: web-headless deployments have no native app bundle to update — the
+  // server is updated by the operator out-of-band. setupAutoUpdater also
+  // initialises electron-updater, which fails fast on a "0.0" dev version,
+  // so we skip it cleanly rather than rely on the unhandled-rejection path.
+  if (process.env.ORCA_WEB_HEADLESS !== '1') {
+    setupAutoUpdater(mainWindow, {
     getLastUpdateCheckAt: () => store.getUI().lastUpdateCheckAt,
     onBeforeQuit: () => store.flush(),
     setLastUpdateCheckAt: (timestamp) => {
@@ -94,8 +99,15 @@ export function attachMainWindowServices(
       store.updateUI({ dismissedUpdateNudgeId: id })
     }
   })
+  }
   registerRuntimeWindowLifecycle(mainWindow, runtime)
 
+  // Why: headless mode has no Chromium session to gate — no browser-tab
+  // webviews, no media-access prompts, no Chromium-level permission UI.
+  // Skip the entire session-permissions block.
+  if (process.env.ORCA_WEB_HEADLESS === '1') {
+    return
+  }
   const allowedPermissions = new Set(['media', 'fullscreen', 'pointerLock'])
   mainWindow.webContents.session.setPermissionRequestHandler(
     (_webContents, permission, callback, details) => {
