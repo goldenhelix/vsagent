@@ -207,6 +207,13 @@ function App(): React.JSX.Element {
   const canGoBackWorktree = useAppStore(canGoBackWorktreeHistory)
   const canGoForwardWorktree = useAppStore(canGoForwardWorktreeHistory)
   const titlebarLeftControlsRef = useRef<HTMLDivElement | null>(null)
+  // Why: dedupes our own session:set broadcasts. When a remote browser
+  // sends session:changed, we stamp this ref with the incoming payload
+  // BEFORE hydrating. The subsequent Zustand subscriber fire from the
+  // hydration mutation builds the same payload and matches the stamp →
+  // skips re-broadcasting, breaking the ping-pong loop that would
+  // otherwise have two browsers hydrate each other every 150ms.
+  const lastBroadcastPayloadRef = useRef<string | null>(null)
   const [collapsedSidebarHeaderWidth, setCollapsedSidebarHeaderWidth] = useState(0)
   const [mountedLazyModalIds, setMountedLazyModalIds] = useState(() => new Set<string>())
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null)
@@ -429,8 +436,21 @@ function App(): React.JSX.Element {
       }
       timer = window.setTimeout(() => {
         timer = null
+        const payload = buildWorkspaceSessionPayload(state)
+        const serialized = JSON.stringify(payload)
+        // Why: when a remote browser broadcasts session:changed and we
+        // hydrate, our Zustand subscriber fires from the resulting state
+        // mutation. Without this guard we'd re-broadcast the same state
+        // back, the other side would hydrate AGAIN, and we'd ping-pong
+        // every 150ms — clobbering any user edits in flight. Skip the
+        // round-trip if our about-to-broadcast payload matches what we
+        // most recently received OR sent.
+        if (serialized === lastBroadcastPayloadRef.current) {
+          return
+        }
+        lastBroadcastPayloadRef.current = serialized
         void window.api.session.set({
-          state: buildWorkspaceSessionPayload(state),
+          state: payload,
           originId: getClientId()
         })
       }, 150)
@@ -454,6 +474,13 @@ function App(): React.JSX.Element {
       if (!data || data.originId === getClientId()) return
       const session = data.state
       if (!session || typeof session !== 'object') return
+      // Why: stamp the broadcast payload BEFORE applying it. The hydrate*
+      // actions below will trigger our Zustand subscriber a few render
+      // ticks later. When that subscriber computes its payload it'll
+      // match this stamp and short-circuit, instead of re-broadcasting
+      // and bouncing the state back to the originator (which would loop
+      // every 150ms).
+      lastBroadcastPayloadRef.current = JSON.stringify(session)
       const sessionState = session as Parameters<typeof actions.hydrateWorkspaceSession>[0]
       actions.hydrateWorkspaceSession(sessionState)
       actions.hydrateTabsSession(sessionState)
