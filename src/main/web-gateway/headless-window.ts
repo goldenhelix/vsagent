@@ -15,6 +15,7 @@ import { EventEmitter } from 'events'
 
 let nextFakeId = 1
 let activeBroadcaster: ((channel: string, args: unknown[]) => void) | null = null
+const fakeWindowsByWcId = new Map<number, BrowserWindow>()
 
 export function setHeadlessBroadcaster(
   fn: ((channel: string, args: unknown[]) => void) | null
@@ -22,7 +23,34 @@ export function setHeadlessBroadcaster(
   activeBroadcaster = fn
 }
 
-function makeFakeWebContents(id: number): WebContents {
+// Why: patch Electron's `BrowserWindow.fromWebContents` so it resolves our
+// fake webContents back to its fake owner. Several handlers (runtime sync,
+// dialog parent, browser-view embed) rely on this lookup; without the patch
+// they throw and the renderer's view never mounts, producing a blank page
+// after the first navigation.
+export function patchBrowserWindowLookup(): void {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const electron = require('electron') as { BrowserWindow?: typeof BrowserWindow }
+  const BW = electron.BrowserWindow
+  if (!BW || (BW as unknown as { __orca_fromWcPatched?: boolean }).__orca_fromWcPatched) {
+    return
+  }
+  const orig = BW.fromWebContents.bind(BW)
+  BW.fromWebContents = ((wc: { id?: number } | null): BrowserWindow | null => {
+    if (!wc) return null
+    if (typeof wc.id === 'number' && fakeWindowsByWcId.has(wc.id)) {
+      return fakeWindowsByWcId.get(wc.id) ?? null
+    }
+    try {
+      return orig(wc as WebContents)
+    } catch {
+      return null
+    }
+  }) as typeof BW.fromWebContents
+  ;(BW as unknown as { __orca_fromWcPatched?: boolean }).__orca_fromWcPatched = true
+}
+
+function makeFakeWebContents(id: number, ownerRef: { window: BrowserWindow | null }): WebContents {
   const emitter = new EventEmitter()
   // Why: Electron's stream uses arbitrarily many listeners (every PTY
   // attaches one or two for repaint/zoom). Suppress MaxListenersExceeded
@@ -36,6 +64,13 @@ function makeFakeWebContents(id: number): WebContents {
     isCrashed: () => false,
     getURL: () => '',
     getProcessId: () => process.pid,
+    // Why: Electron's `BrowserWindow.fromWebContents(wc)` internally calls
+    // `wc.getOwnerBrowserWindow()`. Several IPC handlers use that to find
+    // the source window. Returning our fake window keeps those paths
+    // working — without this, `runtime:syncWindowGraph` throws and the
+    // entire renderer-graph sync (which drives navigation into a worktree
+    // and editor mounts) silently fails, producing a blank page.
+    getOwnerBrowserWindow: (): BrowserWindow | null => ownerRef.window,
     on: emitter.on.bind(emitter),
     once: emitter.once.bind(emitter),
     off: emitter.off.bind(emitter),
@@ -101,7 +136,12 @@ export function createHeadlessBrowserWindow(): BrowserWindow {
   const emitter = new EventEmitter()
   emitter.setMaxListeners(0)
   const id = nextFakeId++
-  const webContents = makeFakeWebContents(id)
+  // Why: forward-reference the window from the webContents so
+  // `wc.getOwnerBrowserWindow()` can return its owner. We use an indirection
+  // object because the BrowserWindow can't reference itself during its own
+  // construction without a temporal cycle.
+  const ownerRef: { window: BrowserWindow | null } = { window: null }
+  const webContents = makeFakeWebContents(id, ownerRef)
   const win = {
     id,
     webContents,
@@ -151,5 +191,7 @@ export function createHeadlessBrowserWindow(): BrowserWindow {
     listeners: emitter.listeners.bind(emitter),
     eventNames: emitter.eventNames.bind(emitter)
   } as unknown as BrowserWindow
+  ownerRef.window = win
+  fakeWindowsByWcId.set(id, win)
   return win
 }

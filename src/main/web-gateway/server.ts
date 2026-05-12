@@ -10,7 +10,7 @@ import {
   patchWebContentsSend,
   setEventBroadcaster
 } from './ipc-intercept'
-import { setHeadlessBroadcaster } from './headless-window'
+import { setHeadlessBroadcaster, patchBrowserWindowLookup } from './headless-window'
 
 // Why: we treat the gateway as proof-of-concept; in production this token
 // should be exchanged through an auth flow (the same kind of pairing the
@@ -74,6 +74,7 @@ export class WebGateway {
   async start(): Promise<void> {
     installIpcIntercept()
     patchWebContentsSend()
+    patchBrowserWindowLookup()
     const broadcast = (channel: string, args: unknown[]): void => {
       this.broadcastEvent(channel, args)
     }
