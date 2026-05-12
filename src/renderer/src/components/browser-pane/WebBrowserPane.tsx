@@ -369,6 +369,22 @@ export function WebBrowserPane({
           value={urlInput}
           onChange={(e) => setUrlInput(e.target.value)}
           onFocus={(e) => e.currentTarget.select()}
+          // Why: handle Enter directly on the input rather than relying on
+          // <form onSubmit>. The form's submit event was being swallowed
+          // somewhere up the React tree (a parent onKeyDown / stopPropagation
+          // in the workspace surface intercepts Enter before the form sees
+          // it), so users had to click Reload to re-trigger the load. A
+          // direct keydown handler bypasses that path. `stopPropagation`
+          // also prevents the typed URL from being interpreted as a tab-
+          // bar Enter (which would refocus the active terminal).
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+              e.preventDefault()
+              e.stopPropagation()
+              void navigate(urlInput)
+              addressInputRef.current?.blur()
+            }
+          }}
           placeholder={placeholder}
           spellCheck={false}
           autoCorrect="off"
