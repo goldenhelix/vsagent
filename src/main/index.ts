@@ -53,8 +53,17 @@ import { getPtyIdForPaneKey, registerPaneKeyTeardownListener, getLocalPtyProvide
 import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
+import { installIpcIntercept } from './web-gateway/ipc-intercept'
+import { WebGateway } from './web-gateway/server'
+import { existsSync } from 'fs'
+import { join } from 'path'
+
+// Why: the ipc-intercept installer is called below from inside whenReady,
+// not at module load — Electron 41's CJS-from-ESM loader throws a misleading
+// error if ipcMain methods are wrapped before app initialization.
 
 let mainWindow: BrowserWindow | null = null
+let webGateway: WebGateway | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
  *  window close handler so it can tell the renderer to skip the running-process
  *  confirmation dialog and proceed directly to buffer capture + close. */
@@ -235,6 +244,13 @@ function openMainWindow(): BrowserWindow {
     trackAppOpenedOnce()
   }
   window.webContents.on('did-finish-load', onFirstWindowLoad)
+
+  // Why: install the web-gateway intercept BEFORE any handler registers so
+  // every ipcMain.handle / ipcMain.on call from this point forward ends up
+  // in the parallel registry the gateway exposes to browser clients.
+  if (process.env.ORCA_WEB_GATEWAY === '1') {
+    installIpcIntercept()
+  }
 
   registerCoreHandlers(
     store,
@@ -610,6 +626,28 @@ app.whenReady().then(async () => {
     })
   ])
 
+  // Why: the web gateway serves the renderer over HTTP+WS so browser clients
+  // can drive the same Electron backend the desktop app uses. Off by default;
+  // enable with ORCA_WEB_GATEWAY=1 and (optionally) ORCA_WEB_TOKEN=<shared>.
+  if (process.env.ORCA_WEB_GATEWAY === '1') {
+    const explicitRoot = process.env.ORCA_WEB_ROOT
+    const webRoot = explicitRoot && existsSync(explicitRoot)
+      ? explicitRoot
+      : join(app.getAppPath(), 'out', 'web')
+    const port = Number(process.env.ORCA_WEB_PORT || 8080)
+    webGateway = new WebGateway({
+      port,
+      webRoot,
+      getHostWebContents: () => mainWindow?.webContents ?? null
+    })
+    try {
+      await webGateway.start()
+    } catch (error) {
+      console.error('[web-gateway] failed to start:', error)
+      webGateway = null
+    }
+  }
+
   // Why: the macOS notification permission dialog must fire after the window
   // is visible and focused. If it fires before the window exists, the system
   // dialog either doesn't appear or gets immediately covered by the maximized
@@ -660,6 +698,7 @@ app.on('will-quit', (e) => {
   starNag?.stop()
   setUnreadDockBadgeCount(0)
   agentHookServer.stop()
+  void webGateway?.stop().catch((err) => console.error('[web-gateway] stop failed', err))
   stats?.flush()
   // Why: agent-browser daemon processes would otherwise linger after Orca quits,
   // holding ports and leaving stale session state on disk.

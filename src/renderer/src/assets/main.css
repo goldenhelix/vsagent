@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@source "../../**/*.{ts,tsx,html}";
 @import 'tw-animate-css';
 @import '@xterm/xterm/css/xterm.css';
 @import 'katex/dist/katex.min.css';
