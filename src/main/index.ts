@@ -615,18 +615,21 @@ app.whenReady().then(async () => {
   // Why: the persistent-terminal daemon is always started. If it fails, the
   // LocalPtyProvider (initialized at module load in ipc/pty.ts) remains as the
   // implicit fallback — terminals work, just without cross-restart persistence.
-  // In web-headless mode we skip the daemon entirely: the daemon expects to
-  // outlive the parent and there's no benefit in a server deployment, where
-  // restart-survival is handled by the process supervisor (systemd etc.).
-  if (!isWebHeadless) {
-    try {
-      await initDaemonPtyProvider()
-    } catch (error) {
-      console.error(
-        '[daemon] Failed to start daemon PTY provider, falling back to local:',
-        error
-      )
-    }
+  //
+  // In web-headless mode we DO want the daemon — that's how a browser tab
+  // can close and the PTY keeps running on the server, so a long-running
+  // claude/codex session isn't lost on a tab close. The daemon was
+  // previously skipped under the assumption that a server deployment
+  // handles restart-survival via systemd; in practice the daemon ALSO
+  // covers the gateway-restart case (it outlives the main process), which
+  // is exactly the semantic we want.
+  try {
+    await initDaemonPtyProvider()
+  } catch (error) {
+    console.error(
+      '[daemon] Failed to start daemon PTY provider, falling back to local:',
+      error
+    )
   }
   // Why: PTY spawn env reads ORCA_AGENT_HOOK_* from the live server state,
   // so the hook server must start before the window opens — otherwise

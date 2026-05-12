@@ -60,6 +60,15 @@ function getHistoryDir(): string {
 }
 
 function getDaemonEntryPath(): string {
+  // Why: in web-headless mode the operator launches us via a tiny CJS
+  // wrapper (see config/scripts/web-cjs-wrapper.cjs), so app.getAppPath()
+  // points at the wrapper's directory — not the repo root — and the
+  // computed daemon-entry path is wrong. Honour ORCA_DAEMON_ENTRY as an
+  // override; the web-serve script sets it.
+  const override = process.env.ORCA_DAEMON_ENTRY
+  if (override && override.length > 0) {
+    return override
+  }
   const appPath = app.getAppPath()
   // Why: electron-builder unpacks daemon-entry.js so child_process.fork() can
   // execute it from disk. In packaged apps app.getAppPath() points at
@@ -128,9 +137,14 @@ function createOutOfProcessLauncher(runtimeDir: string): DaemonLauncher {
     const child = fork(entryPath, ['--socket', socketPath, '--token', tokenPath], {
       // Why: detached + unref lets the daemon outlive the Electron process.
       // stdio 'ignore' prevents the child from holding the parent's stdout
-      // open, which would prevent Electron from exiting cleanly.
+      // open, which would prevent Electron from exiting cleanly. In
+      // web-headless mode we DO want to see the daemon's stderr for
+      // debugability, so forward when ORCA_DAEMON_LOG_STDERR=1.
       detached: true,
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      stdio:
+        process.env.ORCA_DAEMON_LOG_STDERR === '1'
+          ? ['ignore', 'inherit', 'inherit', 'ipc']
+          : ['ignore', 'ignore', 'ignore', 'ipc'],
       // Why: ELECTRON_RUN_AS_NODE makes the forked process run as a plain
       // Node.js process instead of an Electron renderer/main process. Without
       // it, Electron's GPU/display initialization can interfere with native

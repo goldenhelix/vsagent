@@ -85,7 +85,13 @@ const env = {
   ORCA_WEB_ROOT: webRoot,
   ORCA_WEB_PORT: process.env.ORCA_WEB_PORT || '8080',
   ORCA_USER_DATA_PATH: userDataPath,
-  ORCA_DEV_USER_DATA_PATH: userDataPath
+  ORCA_DEV_USER_DATA_PATH: userDataPath,
+  // Why: in headless mode the operator launches us via the CJS wrapper
+  // (web-cjs-wrapper.cjs), so app.getAppPath() resolves to the wrapper's
+  // directory rather than the repo root and the PTY-daemon entry resolves
+  // to a non-existent path. Pin the entry explicitly so the daemon
+  // forks correctly.
+  ORCA_DAEMON_ENTRY: path.join(repoRoot, 'out/main/daemon-entry.js')
 }
 
 const args = [
