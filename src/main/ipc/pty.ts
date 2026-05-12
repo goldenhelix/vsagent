@@ -228,6 +228,18 @@ export function buildPtyHostEnv(
     baseEnv.CODEX_HOME = opts.selectedCodexHomePath
   }
 
+  // Why: when this runs for the daemon path, baseEnv is just `args.env` from
+  // the renderer — which is often empty. If we don't merge the main
+  // process's PATH here, the eventual `{...daemon_process.env, ...opts.env}`
+  // merge in pty-subprocess.ts lets an empty opts.env.PATH from buildPty
+  // HostEnv override the daemon's good PATH. The shell then comes up with a
+  // PATH that's just the Orca CLI shim — /etc/profile fails to find `id`,
+  // /usr/bin is missing, etc. Backfill from process.env.PATH if the caller
+  // didn't supply one.
+  if (!baseEnv.PATH) {
+    baseEnv.PATH = process.env.PATH ?? ''
+  }
+
   // Why: in dev mode the `orca` CLI defaults to the production userData
   // path, which routes status updates to the packaged Orca instead of this
   // dev instance. Injecting ORCA_USER_DATA_PATH ensures CLI calls from

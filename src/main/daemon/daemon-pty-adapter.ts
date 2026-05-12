@@ -160,9 +160,21 @@ export class DaemonPtyAdapter implements IPtyProvider {
       // scrollback before the alt-screen app launched. In that case, skip
       // cold restore entirely rather than showing a blank terminal — no
       // content is better than confusing the user with an empty restore.
+      //
+      // Why we tack rehydrateSequences + ESC[2J ESC[H onto the alt-screen
+      // branch: without those, xterm never re-enters the alt buffer after
+      // the scrollback replay, so when live TUI output (e.g. `watch date`'s
+      // next tick) arrives it lands on the main screen on top of the
+      // restored scrollback instead of in a clean alt screen. Emit the
+      // alt-screen enter (rehydrateSequences contains \x1b[?1049h when
+      // modes.alternateScreen is true) and a screen-clear + cursor-home
+      // so the next live update paints from a known empty canvas.
       const isAltScreen = restoreInfo.modes.alternateScreen
+      const altScreenReset = '\x1b[2J\x1b[H'
       const scrollback = isAltScreen
-        ? restoreInfo.scrollbackAnsi || null
+        ? restoreInfo.scrollbackAnsi
+          ? restoreInfo.scrollbackAnsi + restoreInfo.rehydrateSequences + altScreenReset
+          : restoreInfo.rehydrateSequences + altScreenReset
         : restoreInfo.rehydrateSequences + restoreInfo.snapshotAnsi
       // Why: use registerWriter (not openSession) to avoid deleting the
       // existing checkpoint.json. If the revived daemon crashes again before
