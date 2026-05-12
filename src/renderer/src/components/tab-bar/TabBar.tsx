@@ -26,6 +26,7 @@ import { getEditorDisplayLabel } from '@/components/editor/editor-labels'
 import { ShellIcon } from './shell-icons'
 import { resolveWindowsShellLaunchTarget } from './windows-shell-launch'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
+import { shellHostIsWindows } from '@/lib/runtime-flavor'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,8 +36,13 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 
+// Why: keyboard shortcut LABELS use navigator UA — the user presses keys in
+// their local browser regardless of where the backend runs. The shell host
+// (Windows/CMD/PowerShell affordances) uses `shellHostIsWindows()` which
+// reads the BACKEND platform in web mode. Otherwise a Windows user
+// browsing into a Linux backend sees PowerShell/CMD options that try to
+// spawn nonexistent binaries.
 const isMac = navigator.userAgent.includes('Mac')
-const isWindows = navigator.userAgent.includes('Windows')
 const NEW_TERMINAL_SHORTCUT = isMac ? '⌘T' : 'Ctrl+T'
 const NEW_BROWSER_SHORTCUT = isMac ? '⌘⇧B' : 'Ctrl+Shift+B'
 const NEW_FILE_SHORTCUT = isMac ? '⌘⇧M' : 'Ctrl+Shift+M'
@@ -142,6 +148,10 @@ function TabBarInner({
   wslAvailable
 }: TabBarProps): React.JSX.Element {
   const gitStatusByWorktree = useAppStore((s) => s.gitStatusByWorktree)
+  // Why: read this inside the component so it picks up the backend platform
+  // populated by `loadRuntimeFlavor()` at boot. A module-level const would
+  // evaluate before the flavor IPC has resolved.
+  const isWindows = shellHostIsWindows()
   const defaultWindowsShell = useAppStore(
     (s) => s.settings?.terminalWindowsShell ?? 'powershell.exe'
   )
@@ -156,7 +166,7 @@ function TabBarInner({
     }
 
     void window.api.pwsh.isAvailable().then(setPwshAvailable)
-  }, [])
+  }, [isWindows])
   const resolvedGroupId = groupId ?? worktreeId
   const statusByRelativePath = useMemo(
     () => buildStatusMap(gitStatusByWorktree[worktreeId] ?? []),

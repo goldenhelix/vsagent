@@ -40,3 +40,19 @@ export function isWebMode(): boolean {
 export function getRuntimeFlavor(): { web: boolean; platform: string } | null {
   return cached
 }
+
+// Why: terminal/shell affordances care about the OS where the shell actually
+// runs. In desktop Electron that's the same machine as the browser, so the
+// navigator UA is fine. In web mode the shell runs on the remote backend
+// and the navigator UA is irrelevant — a Windows browser hitting a Linux
+// backend should NOT see PowerShell / CMD shell options. These helpers
+// route to whichever side is authoritative for the current runtime.
+export function shellHostIsWindows(): boolean {
+  if (cached?.web) return cached.platform === 'win32'
+  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+}
+
+export function shellHostIsMac(): boolean {
+  if (cached?.web) return cached.platform === 'darwin'
+  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+}
