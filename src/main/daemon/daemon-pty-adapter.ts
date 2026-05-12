@@ -212,7 +212,19 @@ export class DaemonPtyAdapter implements IPtyProvider {
     }
 
     const isAltScreen = result.snapshot.modes.alternateScreen
-    const snapshotPayload = result.snapshot.rehydrateSequences + result.snapshot.snapshotAnsi
+    // Why: xterm/addon-serialize's output for a session that's currently in
+    // alt-screen already emits its own `\x1b[?1049h` before the alt-buffer
+    // content. If we ALSO prepend `\x1b[?1049h` via rehydrateSequences, xterm
+    // switches to alt-screen too early — and the serializer's main-buffer
+    // content (the `ls` output, shell history) lands in the alt buffer
+    // instead of the main buffer. The result is exactly what users see:
+    // the watch UI overlaid on the ls history because both are in the alt
+    // buffer at once. Strip the alt-screen-on bit here; the serializer's
+    // snapshotAnsi handles the buffer switch at the right point.
+    const cleanRehydrate = isAltScreen
+      ? result.snapshot.rehydrateSequences.replace('\x1b[?1049h', '')
+      : result.snapshot.rehydrateSequences
+    const snapshotPayload = cleanRehydrate + result.snapshot.snapshotAnsi
     return {
       id: sessionId,
       pid,
