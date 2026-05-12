@@ -327,6 +327,28 @@ export function useOnboardingFlow(
     ]
   )
 
+  const addPickedFolder = useCallback(
+    async (path: string) => {
+      setBusyLabel('Opening project…')
+      try {
+        let result = await window.api.repos.add({ path })
+        if ('error' in result && result.error.includes('Not a valid git repository')) {
+          result = await window.api.repos.add({ path, kind: 'folder' })
+        }
+        if ('error' in result) {
+          throw new Error(result.error)
+        }
+        await completeRepo(result.repo.id, isGitRepoKind(result.repo), 'open_folder')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        track('onboarding_step4_path_failed', { path: 'open_folder', reason: 'invalid_path' })
+      } finally {
+        setBusyLabel(null)
+      }
+    },
+    [completeRepo]
+  )
+
   const openFolder = useCallback(async () => {
     // Why: re-entry guard — rapid Cmd+Enter must not launch duplicate pickers.
     if (busyLabel !== null) {
@@ -334,28 +356,29 @@ export function useOnboardingFlow(
     }
     setError(null)
     track('onboarding_step4_path_clicked', { path: 'open_folder' })
+    // Why: web mode has no native file dialog. Route through the same
+    // RemoteFolderPicker modal that "Add project" uses — keeps the UX
+    // consistent and lets the user type/browse a path on the server.
+    const { isWebMode } = await import('@/lib/runtime-flavor')
+    if (isWebMode()) {
+      openModal('remote-folder-picker', {
+        mode: 'onboarding-open-folder',
+        title: 'Open a folder',
+        initialValue: settings?.workspaceDir ?? '~',
+        placeholder: '~/path/to/repo',
+        onPick: (path: string) => {
+          void addPickedFolder(path)
+        }
+      })
+      return
+    }
     const path = await window.api.repos.pickFolder()
     if (!path) {
       track('onboarding_step4_path_failed', { path: 'open_folder', reason: 'cancelled' })
       return
     }
-    setBusyLabel('Opening project…')
-    try {
-      let result = await window.api.repos.add({ path })
-      if ('error' in result && result.error.includes('Not a valid git repository')) {
-        result = await window.api.repos.add({ path, kind: 'folder' })
-      }
-      if ('error' in result) {
-        throw new Error(result.error)
-      }
-      await completeRepo(result.repo.id, isGitRepoKind(result.repo), 'open_folder')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      track('onboarding_step4_path_failed', { path: 'open_folder', reason: 'invalid_path' })
-    } finally {
-      setBusyLabel(null)
-    }
-  }, [busyLabel, completeRepo])
+    await addPickedFolder(path)
+  }, [addPickedFolder, busyLabel, openModal, settings?.workspaceDir])
 
   const clone = useCallback(async () => {
     // Why: re-entry guard — prevents Enter spamming from triggering duplicate clones.

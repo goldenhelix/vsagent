@@ -1,6 +1,8 @@
 // Renders the RemoteFolderPicker inside a dialog when modal state is
 // 'remote-folder-picker'. The picker's onPick stashes the chosen path back
-// onto modalData and re-invokes the originating flow (`addRepo` for now).
+// onto modalData and re-invokes the originating flow (`addRepo` by default,
+// or an arbitrary `modalData.onPick` callback for flows like onboarding
+// and the workspaceDir Browse button in Settings).
 import React, { useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAppStore } from '@/store'
@@ -14,17 +16,32 @@ const RemoteFolderPickerDialog = React.memo(function RemoteFolderPickerDialog() 
 
   const isOpen = activeModal === 'remote-folder-picker'
   const mode = typeof modalData.mode === 'string' ? modalData.mode : 'add-repo'
+  // Why: callers that need custom completion (onboarding, settings, etc.)
+  // pass a function via modalData.onPick. zustand state holds the function
+  // in-memory (no serialization round-trip), so this is safe.
+  const onPick = typeof modalData.onPick === 'function'
+    ? (modalData.onPick as (path: string) => void)
+    : null
+  const title = typeof modalData.title === 'string' ? modalData.title : 'Pick a folder'
+  const initialValue = typeof modalData.initialValue === 'string' ? modalData.initialValue : '~'
+  const placeholder = typeof modalData.placeholder === 'string'
+    ? modalData.placeholder
+    : '~/path/to/repo'
 
   const handlePick = useCallback(
     (path: string) => {
       closeModal()
-      // Why: pass the picked path directly into addRepo. modalData is
-      // cleared by closeModal so we can't round-trip it through there.
+      if (onPick) {
+        onPick(path)
+        return
+      }
+      // Why: legacy default path — preserves the original add-repo flow when
+      // callers don't supply onPick.
       if (mode === 'add-repo') {
         void addRepo(path)
       }
     },
-    [addRepo, closeModal, mode]
+    [addRepo, closeModal, mode, onPick]
   )
 
   return (
@@ -36,11 +53,11 @@ const RemoteFolderPickerDialog = React.memo(function RemoteFolderPickerDialog() 
     >
       <DialogContent className="max-w-lg" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-sm">Pick a folder</DialogTitle>
+          <DialogTitle className="text-sm">{title}</DialogTitle>
         </DialogHeader>
         <RemoteFolderPicker
-          initialValue="~"
-          placeholder="~/path/to/repo"
+          initialValue={initialValue}
+          placeholder={placeholder}
           onPick={handlePick}
           onCancel={closeModal}
         />
