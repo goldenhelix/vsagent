@@ -31,6 +31,17 @@ import {
 } from '../shared/constants'
 import { parseWorkspaceSession } from '../shared/workspace-session-schema'
 
+// Why: applied to defaults at both load paths (fresh boot + corrupt-file fallback)
+// so installs that pin `VSAGENT_WORKSPACE_DIR` start with the correct workspace
+// root without users having to visit Settings → General first.
+function applyWorkspaceDirEnv(state: PersistedState): PersistedState {
+  const override = process.env.VSAGENT_WORKSPACE_DIR
+  if (override && override.length > 0) {
+    state.settings.workspaceDir = override
+  }
+  return state
+}
+
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
     return plaintext
@@ -228,7 +239,7 @@ export class Store {
         }
 
         // Merge with defaults in case new fields were added
-        const defaults = getDefaultPersistedState(homedir())
+        const defaults = applyWorkspaceDirEnv(getDefaultPersistedState(homedir()))
         // Why: before the layout-aware 'auto' mode shipped (issue #903),
         // terminalMacOptionAsAlt defaulted to 'true' globally. That silently
         // broke Option-layer characters (@ on Turkish via Option+Q, @ on
@@ -398,7 +409,7 @@ export class Store {
     // install of the telemetry release — they still count as existing and
     // must see the opt-in banner, not the default-on toast.
     if (result === null) {
-      result = getDefaultPersistedState(homedir())
+      result = applyWorkspaceDirEnv(getDefaultPersistedState(homedir()))
     }
 
     return this.migrateTelemetry(result, fileExistedOnLoad)

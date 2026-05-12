@@ -141,7 +141,11 @@ export function getDefaultOnboardingState(): OnboardingState {
 
 export function getDefaultSettings(homedir: string): GlobalSettings {
   return {
-    workspaceDir: `${homedir}/orca/workspaces`,
+    // Why: VSAgent defaults the workspace root to $HOME (where most users
+    // clone their projects). The legacy Orca default was `${homedir}/orca/workspaces`
+    // which forced an opinion on the user. Main can still override per
+    // installation via the `VSAGENT_WORKSPACE_DIR` env var (see persistence.ts).
+    workspaceDir: homedir,
     nestWorkspaces: true,
     refreshLocalBaseRefOnWorktreeCreate: false,
     branchPrefix: 'git-username',
