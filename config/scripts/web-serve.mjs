@@ -17,7 +17,7 @@
 
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -45,6 +45,38 @@ const userDataPath =
   process.env.ORCA_USER_DATA_PATH ||
   path.join(process.env.HOME ?? process.env.USERPROFILE ?? '/tmp', '.orca-web')
 mkdirSync(userDataPath, { recursive: true })
+
+// Why: a crashed previous run leaves stale singleton-lock and Unix-socket
+// files that make Electron fail-and-shutdown immediately on the next boot
+// (FATAL: Failed to shutdown / SIGTRAP). Sweep them before launch so the
+// operator doesn't have to reach into the data dir after a crash.
+const staleFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'orca-runtime.json']
+for (const name of staleFiles) {
+  const p = path.join(userDataPath, name)
+  if (existsSync(p)) {
+    try {
+      unlinkSync(p)
+      console.log(`[web-serve] cleaned stale ${name}`)
+    } catch (err) {
+      console.warn(`[web-serve] could not remove stale ${name}:`, err?.message ?? err)
+    }
+  }
+}
+try {
+  for (const entry of readdirSync(userDataPath)) {
+    if (entry.endsWith('.sock')) {
+      try {
+        unlinkSync(path.join(userDataPath, entry))
+        console.log(`[web-serve] cleaned stale socket ${entry}`)
+      } catch {
+        // Why: harmless — daemon-init can usually re-bind even with a
+        // stale socket file present.
+      }
+    }
+  }
+} catch {
+  // userDataPath was just created; no entries to walk.
+}
 
 const env = {
   ...process.env,
