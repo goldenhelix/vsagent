@@ -58,6 +58,7 @@ import {
 import type { OnboardingState } from '../../shared/types'
 import { isWebMode } from './lib/runtime-flavor'
 import { WebConnectionBanner } from './components/WebConnectionBanner'
+import { getClientId } from './lib/client-id'
 
 const isMac = navigator.userAgent.includes('Mac')
 const isWindows = !isMac && navigator.userAgent.includes('Windows')
@@ -428,7 +429,10 @@ function App(): React.JSX.Element {
       }
       timer = window.setTimeout(() => {
         timer = null
-        void window.api.session.set(buildWorkspaceSessionPayload(state))
+        void window.api.session.set({
+          state: buildWorkspaceSessionPayload(state),
+          originId: getClientId()
+        })
       }, 150)
     })
     return () => {
@@ -438,6 +442,28 @@ function App(): React.JSX.Element {
       }
     }
   }, [])
+
+  // Why: when another browser tab (or the desktop renderer) mutates the
+  // session and the backend broadcasts session:changed, re-hydrate the
+  // local store so this tab sees the new state. Skip when the broadcast
+  // is from THIS renderer — otherwise a debounced save bounces back as a
+  // re-hydrate of state we just wrote, which is wasted work at best and
+  // a race against in-progress edits at worst.
+  useEffect(() => {
+    const unsub = window.api.session.onChanged((data) => {
+      if (!data || data.originId === getClientId()) return
+      const session = data.state
+      if (!session || typeof session !== 'object') return
+      const sessionState = session as Parameters<typeof actions.hydrateWorkspaceSession>[0]
+      actions.hydrateWorkspaceSession(sessionState)
+      actions.hydrateTabsSession(sessionState)
+      actions.hydrateEditorSession(sessionState)
+      actions.hydrateBrowserSession(sessionState)
+    })
+    return () => {
+      unsub()
+    }
+  }, [actions])
 
   // On shutdown, capture terminal scrollback buffers and flush to disk.
   // Runs synchronously in beforeunload: capture → Zustand set → sendSync → flush.
@@ -465,7 +491,10 @@ function App(): React.JSX.Element {
         }
       }
       const state = useAppStore.getState()
-      window.api.session.setSync(buildWorkspaceSessionPayload(state))
+      window.api.session.setSync({
+        state: buildWorkspaceSessionPayload(state),
+        originId: getClientId()
+      })
       shutdownBuffersCaptured = true
     }
     window.addEventListener('beforeunload', captureAndFlush)

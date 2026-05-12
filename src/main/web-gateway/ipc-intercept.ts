@@ -108,6 +108,24 @@ export function setEventBroadcaster(fn: EventBroadcaster | null): void {
   eventBroadcaster = fn
 }
 
+// Why: a direct broadcast path for code that needs to fan an event out to
+// all connected WS clients without going through a BrowserWindow.
+// `webContents.send` is the normal path, and the gateway patches that to
+// also broadcast — but in headless mode there's no real BrowserWindow
+// (we use a fake stand-in that doesn't appear in
+// `BrowserWindow.getAllWindows()`), so calling `webContents.send` from a
+// `for (const win of BrowserWindow.getAllWindows())` loop reaches nothing.
+// This helper sidesteps that by invoking the broadcaster directly.
+export function broadcastToWebClients(channel: string, args: unknown[]): void {
+  if (eventBroadcaster) {
+    try {
+      eventBroadcaster(channel, args)
+    } catch (err) {
+      console.error('[web-gateway] broadcastToWebClients threw', err)
+    }
+  }
+}
+
 export async function dispatchInvoke(
   channel: string,
   sender: WebContents | null,

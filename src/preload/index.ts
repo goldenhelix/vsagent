@@ -1413,6 +1413,20 @@ const api = {
     /** Synchronous session save for beforeunload — blocks until flushed to disk. */
     setSync: (args: unknown): void => {
       ipcRenderer.sendSync('session:set-sync', args)
+    },
+    /** Subscribe to session-state changes coming from OTHER clients (other
+     *  browser tabs in web mode, or the desktop renderer in mixed setups).
+     *  The handler receives `{ state, originId }`. The renderer compares
+     *  originId to its own clientId and skips its own broadcasts. */
+    onChanged: (
+      listener: (data: { state: unknown; originId: string | null }) => void
+    ): (() => void) => {
+      const ipcListener = (
+        _event: Electron.IpcRendererEvent,
+        data: { state: unknown; originId: string | null }
+      ): void => listener(data)
+      ipcRenderer.on('session:changed', ipcListener)
+      return () => ipcRenderer.removeListener('session:changed', ipcListener)
     }
   },
 
