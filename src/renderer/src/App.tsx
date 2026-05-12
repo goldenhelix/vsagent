@@ -777,11 +777,11 @@ function App(): React.JSX.Element {
       <div className="flex h-full items-center">
         {isMac && !isFullScreen ? (
           <div className="titlebar-traffic-light-pad" />
-        ) : isWindows ? (
-          /* Why: on Windows the native title bar is hidden, so we render the
-             Orca logo as a non-interactive identity anchor and a ··· button
-             that pops up the application menu (the same menu revealed by Alt
-             on the default autoHideMenuBar). */
+        ) : isWindows && !isWebMode() ? (
+          /* Why: on Windows desktop the native title bar is hidden, so we
+             render the Orca logo as a non-interactive identity anchor and
+             a ··· button for the application menu. In web mode there is
+             no native menu and no window controls; show neither. */
           <>
             <img src={logo} alt="" aria-hidden className="titlebar-logo" />
             <Tooltip>
@@ -802,7 +802,10 @@ function App(): React.JSX.Element {
         ) : (
           <div className="pl-2" />
         )}
-        {showSidebar && (
+        {/* Why: the "Orca" wordmark and the Windows-style file menu only make
+           sense in the desktop Electron build. Web mode runs inside a
+           browser tab — the browser's own UI is the app's chrome. */}
+        {showSidebar && !isWebMode() && (
           <>
             {settings?.showTitlebarAppName !== false && (
               <ContextMenu>
@@ -921,10 +924,13 @@ function App(): React.JSX.Element {
           // Why: consumed by anything that needs to avoid the fixed-position
           // window-controls overlay on Windows (floating sidebar toggle, right
           // sidebar header, etc.) without hardcoding 138px in multiple places.
-          '--window-controls-width': isWindows ? '138px' : '0px',
+          // In web mode there is no Orca-rendered window-controls overlay —
+          // the browser provides its own chrome — so reserving 138px would
+          // leave a blank gap on the right.
+          '--window-controls-width': isWindows && !isWebMode() ? '138px' : '0px',
           // Why: consumed by the side-position activity bar to push icons below
           // the fixed-position window-controls overlay on Windows.
-          '--window-controls-height': isWindows ? '36px' : '0px'
+          '--window-controls-height': isWindows && !isWebMode() ? '36px' : '0px'
         } as React.CSSProperties
       }
     >

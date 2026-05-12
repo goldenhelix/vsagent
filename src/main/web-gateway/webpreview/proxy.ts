@@ -233,24 +233,39 @@ function forwardRequest(args: ForwardArgs): Promise<void> {
       const contentType = String(upstreamRes.headers['content-type'] || '')
       const isHtml = args.injectHtml && args.targetOrigin && contentType.includes('text/html')
 
-      if (!isHtml) {
+      // Determine whether we should rewrite the body. HTML and JS are the
+      // two types that contain URLs the browser will resolve relative to
+      // its document origin — and for an iframe-hosted page that's the
+      // gateway, not the upstream. Without rewriting, absolute paths like
+      // `<script src="/docs/@vite/client">` skip the proxy entirely.
+      const isJs = args.injectHtml && (
+        contentType.includes('javascript') ||
+        contentType.includes('application/x-javascript') ||
+        contentType.includes('text/jsx')
+      )
+
+      if (!isHtml && !isJs) {
         upstreamRes.pipe(res)
         upstreamRes.on('end', () => resolve())
         return
       }
 
-      // Buffer the HTML body so we can inject the rewriter script.
-      // SPA initial-pages are typically <100KB; if a response is huge we
-      // still buffer but it's worth a TODO to stream-rewrite later.
+      // Buffer the body so we can rewrite it.
       const chunks: Buffer[] = []
       upstreamRes.on('data', (chunk: Buffer) => chunks.push(chunk))
       upstreamRes.on('end', () => {
         const body = Buffer.concat(chunks).toString('utf-8')
-        const injected = injectRewriteScript(body, {
-          prefix: proxyPathPrefix,
-          targetOrigin: args.targetOrigin!
-        })
-        const out = Buffer.from(injected, 'utf-8')
+        let rewritten = body
+        if (isHtml) {
+          rewritten = rewriteHtmlAttributes(rewritten, proxyPathPrefix)
+          rewritten = injectRewriteScript(rewritten, {
+            prefix: proxyPathPrefix,
+            targetOrigin: args.targetOrigin!
+          })
+        } else if (isJs) {
+          rewritten = rewriteJsImports(rewritten, proxyPathPrefix)
+        }
+        const out = Buffer.from(rewritten, 'utf-8')
         res.setHeader('Content-Length', String(out.length))
         res.end(out)
         resolve()
@@ -301,4 +316,61 @@ function injectRewriteScript(
     return html.slice(0, bodyIdx) + script + html.slice(bodyIdx)
   }
   return script + html
+}
+
+// Why: static `<script src="/...">` etc. in the served HTML are URL-resolved
+// by the browser parser at load time — they don't go through any JS we
+// override at runtime. So absolute paths in initial HTML never reach the
+// proxy and 404 against the gateway's static-files handler. Rewrite them
+// server-side: every `<attr="/path">` where attr is src/href/action/etc.
+// gets `/path` swapped to `<proxyPrefix>/path`.
+function rewriteHtmlAttributes(html: string, proxyPathPrefix: string): string {
+  const urlAttrRe = /(\s(?:src|href|action|formaction|poster|data)\s*=\s*)(["'])(\/(?!\/))/gi
+  let out = html.replace(urlAttrRe, (_m, lead, quote, slash) => {
+    return `${lead}${quote}${proxyPathPrefix}${slash}`
+  })
+  // srcset is comma-separated url[+descriptor] pairs.
+  const srcsetRe = /(\ssrcset\s*=\s*)(["'])([^"']+)\2/gi
+  out = out.replace(srcsetRe, (_m, lead, quote, value) => {
+    const rewritten = value.replace(
+      /(^|,\s*)(\/(?!\/)[^\s,]*)/g,
+      (_n: string, pre: string, url: string) => pre + proxyPathPrefix + url
+    )
+    return `${lead}${quote}${rewritten}${quote}`
+  })
+  return out
+}
+
+// Why: ES module imports use raw URL strings inside JS files. Vite serves
+// modules whose body looks like `import "/docs/@vite/client"`. Those URLs
+// are resolved against the document origin (the gateway), bypassing the
+// proxy. Rewrite the textual import specifiers so they get the proxy
+// prefix. We only rewrite ABSOLUTE-path specifiers (`/...`) — relative
+// (`./...`, `../...`) resolve against the importing module's URL which
+// is already under the proxy, so those work without changes.
+//
+// Patterns matched:
+//   import "/x"               — bare
+//   import x from "/y"        — default
+//   import { … } from "/z"    — named
+//   export … from "/q"
+//   import("/dyn")            — dynamic import (string literal arg)
+function rewriteJsImports(js: string, proxyPathPrefix: string): string {
+  // Static imports / re-exports: `from "/..."` or `from '/...'`
+  const fromRe = /(from\s*)(["'])(\/(?!\/))([^"']*?)\2/g
+  let out = js.replace(fromRe, (_m, lead, quote, slash, rest) => {
+    return `${lead}${quote}${proxyPathPrefix}${slash}${rest}${quote}`
+  })
+  // Bare `import "/..."` (side-effect import)
+  const bareImportRe = /(\bimport\s*)(["'])(\/(?!\/))([^"']*?)\2/g
+  out = out.replace(bareImportRe, (_m, lead, quote, slash, rest) => {
+    return `${lead}${quote}${proxyPathPrefix}${slash}${rest}${quote}`
+  })
+  // Dynamic `import("/...")` — only when arg is a STRING LITERAL.
+  // Templated/concatenated args fall through to the runtime r() helper.
+  const dynImportRe = /(\bimport\s*\(\s*)(["'])(\/(?!\/))([^"']*?)\2(\s*\))/g
+  out = out.replace(dynImportRe, (_m, lead, quote, slash, rest, close) => {
+    return `${lead}${quote}${proxyPathPrefix}${slash}${rest}${quote}${close}`
+  })
+  return out
 }

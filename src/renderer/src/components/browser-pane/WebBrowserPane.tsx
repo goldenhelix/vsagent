@@ -1,31 +1,37 @@
 // Iframe-backed in-app browser pane for web mode. Replaces the Electron
-// <webview> path entirely — that element is renderer-process-only and has
-// no analogue in a regular browser tab.
+// <webview> path entirely.
 //
-// Architecture:
-//   1. Address bar input → `window.api.webPreview.create({ targetOrigin })`
-//      returns `{ id, proxyPath }`.
-//   2. Iframe `src` is set to that proxyPath. The gateway proxy serves
-//      the target origin and injects a URL-rewriting script so subsequent
-//      in-page navigation stays in the proxy.
-//   3. The injected script `postMessage`s the parent on every navigation
-//      with the upstream URL — we keep the address bar in sync from those.
+// What this provides:
+//   - Back / Forward buttons driven by iframe.contentWindow.history.
+//   - Reload.
+//   - Address bar with selectable text, paste-and-go, Enter to navigate.
+//   - Open-externally button (opens the upstream URL in a real new tab so
+//     downloads / extension UIs / DevTools all work like a normal browser).
+//   - "Copy URL" item in a kebab menu.
+//   - Navigation sync from the injected proxy script's postMessage.
 //
-// What this does NOT do (yet):
-//   - Back/forward across iframe.history (cross-origin iframe.history is
-//     blocked by the browser; we'd need to track an in-pane history stack
-//     and reload the iframe at the right step on Back).
-//   - DevTools / view-source / find-in-page.
-//   - Profile management (no Electron session partitions to share).
+// Not yet:
+//   - DevTools (no analogue without Electron WebContents).
+//   - In-page find (could ship Ctrl+F → iframe.focus + browser's native
+//     find, but it's blocked by sandbox attributes in some configs).
 //   - Cookie inspection.
-//
-// What it DOES:
-//   - Address bar: type a URL, hit Enter → loads.
-//   - Reload button.
-//   - URL syncs as the page navigates internally.
-//   - Sensible defaults: missing `http://` is filled in.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { RotateCcw } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Copy,
+  ExternalLink,
+  MoreHorizontal,
+  RotateCcw,
+  X
+} from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 
 export type WebBrowserPaneProps = {
   initialUrl?: string
@@ -37,7 +43,6 @@ type Session = { id: string; targetOrigin: string; proxyPath: string }
 function deriveOriginFromInput(input: string): string {
   const trimmed = input.trim()
   if (!trimmed) return ''
-  // Bare host[:port] → assume http
   if (/^https?:\/\//i.test(trimmed)) {
     try {
       return new URL(trimmed).origin
@@ -52,8 +57,7 @@ function deriveOriginFromInput(input: string): string {
   }
 }
 
-function derivePathFromInput(input: string, origin: string): string {
-  if (!origin) return '/'
+function derivePathFromInput(input: string): string {
   try {
     const withScheme = /^https?:\/\//i.test(input) ? input : `http://${input}`
     const url = new URL(withScheme)
@@ -73,55 +77,97 @@ export function WebBrowserPane({
   const [iframeSrc, setIframeSrc] = useState<string>('about:blank')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
+  // Why: track an in-pane navigation history independent of iframe.history.
+  // Cross-origin iframe.history is opaque to us — but same-origin (proxy
+  // path) navigations DO update iframe.contentWindow.history, so for the
+  // common case (SPA in-iframe routing) the iframe API also works. We
+  // mirror them here so the Back/Forward buttons can fall back to
+  // setting the iframe src directly when history APIs aren't available.
+  const [historyStack, setHistoryStack] = useState<string[]>([])
+  const [historyIdx, setHistoryIdx] = useState(-1)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const addressInputRef = useRef<HTMLInputElement | null>(null)
+  // Why: monotonic request seq so a stale autocomplete-like async response
+  // can't clobber a newer navigation.
+  const navSeq = useRef(0)
 
-  const navigate = useCallback(async (input: string) => {
-    const origin = deriveOriginFromInput(input)
-    if (!origin) {
-      setStatus('error')
-      setError('Invalid URL')
-      return
-    }
-    const path = derivePathFromInput(input, origin)
-    setStatus('loading')
-    setError(null)
-    try {
-      const s = session
-        ? await window.api.webPreview.setOrigin({ id: session.id, targetOrigin: origin })
-        : await window.api.webPreview.create({ targetOrigin: origin })
-      if (!s) {
-        // Session was deleted out from under us; recreate.
-        const fresh = await window.api.webPreview.create({ targetOrigin: origin })
-        setSession(fresh)
-        setIframeSrc(fresh.proxyPath + path)
-      } else {
+  const pushHistory = useCallback(
+    (upstreamUrl: string) => {
+      setHistoryStack((prev) => {
+        // Why: replace the entry rather than push when the new URL equals
+        // the current one — happens when the proxy posts a nav event with
+        // the same path the user just typed.
+        if (historyIdx >= 0 && prev[historyIdx] === upstreamUrl) return prev
+        const truncated = historyIdx + 1 >= prev.length ? prev : prev.slice(0, historyIdx + 1)
+        const next = [...truncated, upstreamUrl]
+        // Trim to a max — unbounded would leak memory on chatty sites.
+        const MAX = 100
+        return next.length > MAX ? next.slice(next.length - MAX) : next
+      })
+      setHistoryIdx((idx) => Math.min(idx + 1, 99))
+    },
+    [historyIdx]
+  )
+
+  const navigate = useCallback(
+    async (input: string, opts?: { fromHistory?: boolean }) => {
+      const origin = deriveOriginFromInput(input)
+      if (!origin) {
+        setStatus('error')
+        setError('Invalid URL')
+        return
+      }
+      const path = derivePathFromInput(input)
+      const seq = ++navSeq.current
+      setStatus('loading')
+      setError(null)
+      try {
+        let s: Session | null
+        if (session) {
+          s = await window.api.webPreview.setOrigin({
+            id: session.id,
+            targetOrigin: origin
+          })
+          if (!s) {
+            s = await window.api.webPreview.create({ targetOrigin: origin })
+          }
+        } else {
+          s = await window.api.webPreview.create({ targetOrigin: origin })
+        }
+        if (seq !== navSeq.current) return
         setSession(s)
         setIframeSrc(s.proxyPath + path)
+        const display = origin + path
+        setDisplayedUrl(display)
+        setUrlInput(display)
+        if (!opts?.fromHistory) pushHistory(display)
+      } catch (err) {
+        if (seq !== navSeq.current) return
+        setStatus('error')
+        setError(err instanceof Error ? err.message : String(err))
       }
-      const display = origin + path
-      setDisplayedUrl(display)
-      setUrlInput(display)
-    } catch (err) {
-      setStatus('error')
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }, [session])
+    },
+    [session, pushHistory]
+  )
 
-  // Receive navigation pings from the injected script so the address bar
-  // updates when the page does its own client-side routing.
+  // Navigation pings from the injected script keep the address bar in sync
+  // when the page client-routes internally.
   useEffect(() => {
     const handler = (e: MessageEvent): void => {
       const data = e.data
       if (!data || typeof data !== 'object') return
       if (data.type !== 'orca-webpreview-nav') return
-      if (typeof data.upstreamUrl === 'string') {
-        setDisplayedUrl(data.upstreamUrl)
+      if (typeof data.upstreamUrl !== 'string') return
+      setDisplayedUrl(data.upstreamUrl)
+      // Don't overwrite the user's typing if the address bar is focused.
+      if (document.activeElement !== addressInputRef.current) {
         setUrlInput(data.upstreamUrl)
       }
+      pushHistory(data.upstreamUrl)
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [])
+  }, [pushHistory])
 
   // First-mount: load the initial URL.
   useEffect(() => {
@@ -131,27 +177,65 @@ export function WebBrowserPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Tear down the proxy session when the pane unmounts.
+  // Why: tear down the proxy session ONLY when the pane truly unmounts.
+  // The earlier version watched [session] as a dependency, which fired
+  // its cleanup every time `session` re-identified (e.g. setOrigin
+  // returning the same id but a new object). That deleted the live
+  // session moments before the iframe loaded it, producing
+  // "webpreview: unknown session …". Tracking the id in a ref keeps the
+  // cleanup tied to the component lifecycle, not to React's object
+  // identity changes.
+  const activeSessionIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    activeSessionIdRef.current = session?.id ?? null
+  }, [session])
   useEffect(() => {
     return () => {
-      if (session) {
-        void window.api.webPreview.delete({ id: session.id }).catch(() => {})
+      const id = activeSessionIdRef.current
+      if (id) {
+        void window.api.webPreview.delete({ id }).catch(() => {})
       }
     }
-  }, [session])
+  }, [])
 
   const onLoad = useCallback(() => setStatus('idle'), [])
 
   const reload = useCallback(() => {
     const ifr = iframeRef.current
     if (!ifr) return
-    // Why: reset src to force a reload that re-runs the injected script.
+    // Why: try iframe-history reload first (preserves scroll on same-origin
+    // proxy responses). Fall back to forcing the src round-trip.
+    try {
+      ifr.contentWindow?.location?.reload()
+      return
+    } catch {
+      // cross-origin: fall through
+    }
     const current = ifr.src
     ifr.src = 'about:blank'
     requestAnimationFrame(() => {
       ifr.src = current
     })
   }, [])
+
+  const canGoBack = historyIdx > 0
+  const canGoForward = historyIdx >= 0 && historyIdx < historyStack.length - 1
+
+  const goBack = useCallback(() => {
+    if (!canGoBack) return
+    const nextIdx = historyIdx - 1
+    setHistoryIdx(nextIdx)
+    const target = historyStack[nextIdx]
+    if (target) void navigate(target, { fromHistory: true })
+  }, [canGoBack, historyIdx, historyStack, navigate])
+
+  const goForward = useCallback(() => {
+    if (!canGoForward) return
+    const nextIdx = historyIdx + 1
+    setHistoryIdx(nextIdx)
+    const target = historyStack[nextIdx]
+    if (target) void navigate(target, { fromHistory: true })
+  }, [canGoForward, historyIdx, historyStack, navigate])
 
   const onSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -161,14 +245,46 @@ export function WebBrowserPane({
     [navigate, urlInput]
   )
 
+  const copyUrl = useCallback(() => {
+    void navigator.clipboard.writeText(displayedUrl).catch(() => {})
+  }, [displayedUrl])
+
+  const openExternal = useCallback(() => {
+    // Why: opens the *upstream* URL in a real new tab — that bypasses the
+    // proxy entirely. Useful when the user needs DevTools, extensions, or
+    // direct access. Browsers may pop this as a new tab in the user's
+    // default browser when window.open is allowed.
+    window.open(displayedUrl, '_blank', 'noopener,noreferrer')
+  }, [displayedUrl])
+
   const placeholder = useMemo(() => 'http://localhost:3000 — or paste a URL', [])
 
   return (
-    <div className={`flex flex-col h-full min-h-0 ${className ?? ''}`}>
+    <div className={`flex flex-col h-full w-full min-h-0 min-w-0 bg-background ${className ?? ''}`}>
       <form
-        className="flex items-center gap-1.5 border-b border-border bg-background px-2 py-1.5"
+        className="flex items-center gap-1 border-b border-border bg-card px-1.5 py-1"
         onSubmit={onSubmit}
       >
+        <button
+          type="button"
+          onClick={goBack}
+          disabled={!canGoBack}
+          aria-label="Go back"
+          title="Back"
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <ArrowLeft className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={goForward}
+          disabled={!canGoForward}
+          aria-label="Go forward"
+          title="Forward"
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <ArrowRight className="size-3.5" />
+        </button>
         <button
           type="button"
           onClick={reload}
@@ -179,33 +295,82 @@ export function WebBrowserPane({
           <RotateCcw className="size-3.5" />
         </button>
         <input
-          className="flex-1 min-w-0 rounded-md border border-border bg-background px-2 py-1 text-sm font-mono outline-none focus:ring-2 focus:ring-ring"
+          ref={addressInputRef}
+          className="flex-1 min-w-0 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-mono outline-none focus:ring-2 focus:ring-ring selection:bg-primary/40"
           value={urlInput}
           onChange={(e) => setUrlInput(e.target.value)}
+          onFocus={(e) => e.currentTarget.select()}
           placeholder={placeholder}
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="none"
+          aria-label="Address bar"
         />
-        {status === 'loading' && (
-          <span className="text-xs text-muted-foreground">Loading…</span>
-        )}
+        {status === 'loading' && <span className="text-xs text-muted-foreground px-1">…</span>}
         {status === 'error' && error && (
-          <span className="text-xs text-destructive truncate max-w-[200px]">{error}</span>
+          <span
+            className="text-xs text-destructive truncate max-w-[200px]"
+            title={error}
+          >
+            {error}
+          </span>
         )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="More"
+              title="More"
+              className="rounded-md p-1 text-muted-foreground hover:bg-muted"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[180px]">
+            <DropdownMenuItem onSelect={copyUrl}>
+              <Copy className="size-3.5 mr-2" />
+              Copy URL
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={openExternal}>
+              <ExternalLink className="size-3.5 mr-2" />
+              Open in browser tab
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => void navigate('http://localhost:3000')}
+            >
+              Go to <span className="font-mono ml-2">localhost:3000</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void navigate('http://localhost:5173')}
+            >
+              Go to <span className="font-mono ml-2">localhost:5173</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => void navigate('http://localhost:8080')}
+            >
+              Go to <span className="font-mono ml-2">localhost:8080</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </form>
-      <div className="relative flex-1 min-h-0 bg-background">
+      <div className="relative flex-1 min-h-0 min-w-0 bg-background">
         <iframe
           ref={iframeRef}
           src={iframeSrc}
           onLoad={onLoad}
-          // Why: a webpreview-proxied page is "trusted" in the sense that
-          // the operator pointed us at it, but it may still be a third-
-          // party site reached through _ext. We allow scripts + same-
-          // origin + forms + popups so most apps work, but no top-
-          // navigation (which would escape the iframe).
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+          // Why: sandbox is permissive — allow-same-origin so the proxy
+          // path appears same-origin to the iframe (it actually IS same-
+          // origin from the browser's perspective, because everything is
+          // served by the gateway), and allow-scripts so SPAs run. We omit
+          // allow-top-navigation so a malicious page can't navigate the
+          // outer Orca renderer. allow-popups + allow-downloads cover the
+          // common "click a link to open in new tab" flows.
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"
           referrerPolicy="no-referrer"
+          // Why: allow common embedded media APIs that SPAs use. The
+          // browser still gates these on user permission per origin.
+          allow="clipboard-write; fullscreen; autoplay; geolocation; microphone; camera"
           className="absolute inset-0 w-full h-full border-0"
           title={displayedUrl}
         />
