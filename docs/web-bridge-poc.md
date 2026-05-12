@@ -101,10 +101,7 @@ available for renderer-only development against stub data.
 
 ## What still needs work
 
-1. **PTY streams.** `pty:spawn` and the on-data/event stream need bridging.
-   The protocol is right shape but the gateway's stub doesn't pump bytes.
-   Likely solution: keep the existing daemon-PTY architecture, just stream
-   PTY chunks through the WS bridge.
+1. ~~PTY streams~~ — working as of the headless-backend rollout.
 2. **File drag-and-drop.** Browser File objects have no `.path`, and
    `webUtils.getPathForFile` returns `''`. A real fix needs a file upload
    IPC (drag → upload bytes → main writes to a temp dir → use that path).
@@ -127,6 +124,19 @@ available for renderer-only development against stub data.
    in-flight invokes during a disconnect are silently dropped.
 8. **CSP.** The Electron renderer ships with a strict CSP injected by
    electron-vite at build time; the web bundle doesn't set one yet.
+
+9. **In-app browser pane.** Orca's "New Browser Tab" feature uses
+   Electron's `<webview>` element — no analogue in a regular browser.
+   Currently the affordance is hidden in web mode and the keyboard
+   shortcut no-ops. The right long-term implementation is a server-side
+   HTTP proxy at `/webpreview/*` that forwards requests to the target
+   origin and injects a URL-rewriting script into proxied HTML
+   (rewriting `fetch` / `XHR` / `element.src/.href` / `setAttribute` /
+   `window.open`). The browser pane then becomes a regular `<iframe>`
+   pointed at `/webpreview/<sessionId>/...` instead of a `<webview>`.
+   Reference implementation: `~/dev/MidTerm/src/Ai.Tlbx.MidTerm/
+   Services/WebPreview/WebPreviewProxyMiddleware.cs` (≈3,000 lines).
+   This is a substantial chunk of work and not in PoC scope.
 
 ## Files added / changed
 

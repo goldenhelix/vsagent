@@ -71,6 +71,11 @@ function makeFakeWebContents(id: number, ownerRef: { window: BrowserWindow | nul
     // entire renderer-graph sync (which drives navigation into a worktree
     // and editor mounts) silently fails, producing a blank page.
     getOwnerBrowserWindow: (): BrowserWindow | null => ownerRef.window,
+    // Why: trusted-renderer guards (e.g. browser-session handlers) call
+    // `sender.getType()` to verify the IPC came from the main BrowserWindow
+    // and not a webview / browserview / offscreen renderer. Reporting
+    // 'window' means "this is the main renderer".
+    getType: (): string => 'window',
     on: emitter.on.bind(emitter),
     once: emitter.once.bind(emitter),
     off: emitter.off.bind(emitter),

@@ -1,5 +1,6 @@
 import { registerAppHandlers } from './app'
 import { registerFolderPickerHandlers } from './folder-picker'
+import { registerWebPreviewHandlers } from './webpreview'
 import { registerCliHandlers } from './cli'
 import { registerPreflightHandlers } from './preflight'
 import type { Store } from '../persistence'
@@ -71,6 +72,7 @@ export function registerCoreHandlers(
 
   registerAppHandlers()
   registerFolderPickerHandlers()
+  registerWebPreviewHandlers()
   registerCliHandlers()
   registerPreflightHandlers()
   registerClaudeUsageHandlers(claudeUsage)

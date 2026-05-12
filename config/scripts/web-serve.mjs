@@ -17,7 +17,7 @@
 
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -100,14 +100,46 @@ const args = [
   wrapperPath
 ]
 
+// Why: log to BOTH stdout (operator's terminal) AND a rotating file under
+// the data dir. After a crash you can inspect the file to see the trail of
+// IPC calls that led up to it. Keep the most recent prior log as `.prev`.
+const logDir = path.join(userDataPath, 'logs')
+mkdirSync(logDir, { recursive: true })
+const logPath = path.join(logDir, 'web-serve.log')
+const prevLogPath = path.join(logDir, 'web-serve.prev.log')
+try {
+  if (existsSync(logPath)) {
+    const size = statSync(logPath).size
+    if (size > 0) renameSync(logPath, prevLogPath)
+  }
+} catch {
+  // Why: a rotate failure should not block startup; the log just appends.
+}
+const logStream = createWriteStream(logPath, { flags: 'a' })
+
+const teeStdout = (chunk) => {
+  process.stdout.write(chunk)
+  logStream.write(chunk)
+}
+const teeStderr = (chunk) => {
+  process.stderr.write(chunk)
+  logStream.write(chunk)
+}
+
 console.log(`[web-serve] starting on http://0.0.0.0:${env.ORCA_WEB_PORT}`)
 console.log(`[web-serve] data dir: ${userDataPath}`)
 console.log(`[web-serve] web root: ${webRoot}`)
+console.log(`[web-serve] log file: ${logPath}`)
+logStream.write(`\n=== [web-serve] launching at ${new Date().toISOString()} ===\n`)
 
-const child = spawn(electronPath, args, { env, stdio: 'inherit' })
+const child = spawn(electronPath, args, { env, stdio: ['inherit', 'pipe', 'pipe'] })
+child.stdout?.on('data', teeStdout)
+child.stderr?.on('data', teeStderr)
 child.on('exit', (code, signal) => {
-  console.log(`[web-serve] backend exited code=${code} signal=${signal}`)
-  process.exit(code ?? 0)
+  const msg = `[web-serve] backend exited code=${code} signal=${signal}`
+  console.log(msg)
+  logStream.write(msg + '\n')
+  logStream.end(() => process.exit(code ?? 0))
 })
 
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {

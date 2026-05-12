@@ -19,6 +19,7 @@ import { extractIpcErrorMessage } from '../../lib/ipc-error'
 import { destroyWorkspaceWebviews } from '../../store/slices/browser-webview-cleanup'
 import { requestEditorFileClose } from '../editor/editor-autosave'
 import { focusTerminalTabSurface } from '../../lib/focus-terminal-tab-surface'
+import { isWebMode } from '../../lib/runtime-flavor'
 
 export type GroupEditorItem = OpenFile & { tabId: string }
 export type GroupBrowserItem = BrowserTabState & { tabId: string }
@@ -455,7 +456,14 @@ export function useTabGroupWorkspaceModel({
       consumeSuppressedPtyExit,
       createSplitGroup,
       newBrowserTab: () => {
-        const defaultUrl = useAppStore.getState().browserDefaultUrl ?? 'about:blank'
+        // Why: in web mode the WebBrowserPane (an iframe pointed at the
+        // /__orca/webpreview/* proxy) replaces the Electron <webview>.
+        // It still hangs off the same browser-tab state, so create the tab
+        // normally — the renderer's overlay layer picks the right pane
+        // variant based on isWebMode().
+        const defaultUrl = isWebMode()
+          ? 'http://localhost:3000'
+          : useAppStore.getState().browserDefaultUrl ?? 'about:blank'
         createBrowserTab(worktreeId, defaultUrl, {
           title: 'New Browser Tab',
           focusAddressBar: true

@@ -3,6 +3,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../store'
 import type { BrowserTab as BrowserTabState, Tab, TabGroup } from '../../../../shared/types'
 import BrowserPane from './BrowserPane'
+import { WebBrowserPane } from './WebBrowserPane'
+import { isWebMode } from '@/lib/runtime-flavor'
 import { browserSlotAnchorName } from './browser-pane-slots'
 
 // Why: Electron `<webview>` destroys its guest contents whenever its DOM
@@ -101,7 +103,11 @@ const BrowserOverlaySlot = memo(function BrowserOverlaySlot({
       onPointerDown={handleFocus}
       onFocusCapture={handleFocus}
     >
-      <BrowserPane browserTab={browserTab} isActive={isActive} />
+      {isWebMode() ? (
+        <WebBrowserPane initialUrl={browserTab.url || 'http://localhost:3000'} />
+      ) : (
+        <BrowserPane browserTab={browserTab} isActive={isActive} />
+      )}
     </div>
   )
 })

@@ -1490,6 +1490,23 @@ const api = {
     }
   },
 
+  webPreview: {
+    /** Create a proxy session for an iframe-backed in-app browser tab. */
+    create: (args: { targetOrigin: string }): Promise<{
+      id: string
+      targetOrigin: string
+      proxyPath: string
+    }> => ipcRenderer.invoke('webpreview:create', args),
+    /** Re-point an existing session at a new origin (address-bar navigation). */
+    setOrigin: (args: {
+      id: string
+      targetOrigin: string
+    }): Promise<{ id: string; targetOrigin: string; proxyPath: string } | null> =>
+      ipcRenderer.invoke('webpreview:setOrigin', args),
+    delete: (args: { id: string }): Promise<void> =>
+      ipcRenderer.invoke('webpreview:delete', args)
+  },
+
   fs: {
     /** Web-mode folder picker autocomplete: returns subdirectory names that
      *  start with the typed prefix under the allowlisted roots (HOME by

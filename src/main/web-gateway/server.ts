@@ -11,6 +11,7 @@ import {
   setEventBroadcaster
 } from './ipc-intercept'
 import { setHeadlessBroadcaster, patchBrowserWindowLookup } from './headless-window'
+import { handleWebPreview, isWebPreviewPath } from './webpreview/proxy'
 
 // Why: we treat the gateway as proof-of-concept; in production this token
 // should be exchanged through an auth flow (the same kind of pairing the
@@ -137,6 +138,12 @@ export class WebGateway {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       return res.end(JSON.stringify({ ok: true, ts: Date.now() }))
     }
+    // Why: the webpreview HTTP proxy serves an iframe-backed in-app browser.
+    // Routed BEFORE the SPA static-file lookup so /__orca/webpreview/...
+    // never gets caught by the SPA fallback.
+    if (isWebPreviewPath(req.url)) {
+      return handleWebPreview(req, res)
+    }
     if (SHARED_TOKEN && req.url !== '/__orca/health') {
       // Why: gate the SPA shell behind the same token. The browser sets a
       // cookie after a one-shot ?token= grant so subsequent requests don't
@@ -196,15 +203,24 @@ export class WebGateway {
 
   private handleConnection(ws: WebSocket): void {
     this.subscriptionsByClient.set(ws, new Set())
+    console.log('[web-gateway] client connected; total =', this.wss?.clients.size ?? 1)
     ws.on('message', async (data) => {
       let msg: WireIn
       try {
         msg = JSON.parse(String(data))
       } catch {
+        console.warn('[web-gateway] received non-JSON message; dropping')
         return
       }
       switch (msg.kind) {
         case 'invoke': {
+          const startedAt = Date.now()
+          // Why: ORCA_WEB_TRACE=1 logs EVERY invoke pre/post — useful when
+          // debugging a crash, since the crash log will name the channel
+          // that was in flight (or the immediately prior one). Default mode
+          // only logs slow (>200ms) and failed invokes to keep noise down.
+          const trace = process.env.ORCA_WEB_TRACE === '1'
+          if (trace) console.log(`[web-gateway] → invoke "${msg.channel}"`)
           try {
             const value = await dispatchInvoke(
               msg.channel,
@@ -212,7 +228,14 @@ export class WebGateway {
               msg.args
             )
             this.sendMessage(ws, { kind: 'invoke-ok', id: msg.id, value })
+            const dur = Date.now() - startedAt
+            if (trace) console.log(`[web-gateway] ← invoke "${msg.channel}" ok ${dur}ms`)
+            else if (dur > 200) {
+              console.log(`[web-gateway] invoke "${msg.channel}" ok in ${dur}ms`)
+            }
           } catch (err) {
+            const stack = err instanceof Error && err.stack ? err.stack : String(err)
+            console.warn(`[web-gateway] invoke "${msg.channel}" failed: ${stack}`)
             this.sendMessage(ws, {
               kind: 'invoke-err',
               id: msg.id,
