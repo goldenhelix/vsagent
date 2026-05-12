@@ -1520,6 +1520,15 @@ const api = {
       inputAbsolute: string
       inputExists: boolean
     }> => ipcRenderer.invoke('fs:autocompleteDir', { input }),
+    /** List subdirectories of an allowed local path for the interactive
+     *  Browse dialog. Mirrors the shape of `ssh.browseDir` so the same
+     *  React component can drive either side. */
+    browseDir: (args: {
+      dirPath: string
+    }): Promise<{
+      resolvedPath: string
+      entries: { name: string; isDirectory: boolean; isSymlink: boolean }[]
+    }> => ipcRenderer.invoke('fs:browseDir', args),
     readDir: (args: {
       dirPath: string
       connectionId?: string

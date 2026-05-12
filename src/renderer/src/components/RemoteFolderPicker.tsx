@@ -14,6 +14,8 @@
 //   like Tab) rather than submitting — submitting takes a deliberate Enter.
 // - Escape cancels the picker.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FolderOpen } from 'lucide-react'
+import { RemoteFileBrowser } from '@/components/sidebar/RemoteFileBrowser'
 
 type Result = {
   parent: string
@@ -48,6 +50,15 @@ export function RemoteFolderPicker({
 }: RemoteFolderPickerProps): React.JSX.Element {
   const [value, setValue] = useState(initialValue)
   const [result, setResult] = useState<Result | null>(null)
+  // Why: clicking Browse swaps the inline autocomplete view for an
+  // interactive file-browser (the same one the SSH "Remote project" flow
+  // uses, parameterised with a local browseDir). Selecting a folder there
+  // returns to inline mode with the path pre-filled.
+  const [browsing, setBrowsing] = useState(false)
+  const localBrowseDir = useCallback(
+    (dirPath: string) => window.api.fs.browseDir({ dirPath }),
+    []
+  )
   // Why: -1 means "no keyboard selection". Only ArrowKeys promote this above
   // -1. Mouse hover styles `.hover:bg-muted` on the suggestion row but does
   // NOT change activeIdx — that way Enter on the input never accidentally
@@ -158,20 +169,58 @@ export function RemoteFolderPicker({
   const inputExists = result?.inputExists ?? false
   const acceptLabel = inputExists ? 'Use this folder' : 'Use this path'
 
+  if (browsing) {
+    // Why: hand off to the same RemoteFileBrowser the SSH flow uses,
+    // parameterised with a local browseDir. On select, drop back into
+    // inline mode with the path the user picked pre-filled — they can
+    // then commit it with "Use this folder" or keep editing.
+    return (
+      <RemoteFileBrowser
+        browseDir={localBrowseDir}
+        initialPath={value && value.trim().length > 0 ? value : '~'}
+        onSelect={(path) => {
+          setValue(path)
+          setBrowsing(false)
+          // Defer focus to after the input re-mounts.
+          requestAnimationFrame(() => {
+            const len = path.length
+            inputRef.current?.focus()
+            inputRef.current?.setSelectionRange(len, len)
+          })
+        }}
+        onCancel={() => {
+          setBrowsing(false)
+          requestAnimationFrame(() => inputRef.current?.focus())
+        }}
+      />
+    )
+  }
+
   return (
     <div className="flex flex-col gap-2 w-full">
       {label && <label className="text-xs text-muted-foreground">{label}</label>}
-      <input
-        ref={inputRef}
-        className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-mono outline-none focus:ring-2 focus:ring-ring"
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={onKeyDown}
-        spellCheck={false}
-        autoCapitalize="none"
-        autoCorrect="off"
-      />
+      <div className="flex gap-2">
+        <input
+          ref={inputRef}
+          className="flex-1 min-w-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-mono outline-none focus:ring-2 focus:ring-ring"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={onKeyDown}
+          spellCheck={false}
+          autoCapitalize="none"
+          autoCorrect="off"
+        />
+        <button
+          type="button"
+          onClick={() => setBrowsing(true)}
+          aria-label="Browse"
+          title="Browse"
+          className="shrink-0 rounded-md border border-border bg-background px-2 py-1.5 text-sm hover:bg-muted"
+        >
+          <FolderOpen className="size-3.5" />
+        </button>
+      </div>
       {visibleSuggestions.length > 0 && (
         // Why: this is rendered as part of the flex column rather than
         // absolutely-positioned so it doesn't overlap the action buttons

@@ -137,4 +137,45 @@ export function registerFolderPickerHandlers(): void {
       return { ...baseResult, suggestions }
     }
   )
+
+  // Why: `fs:browseDir` powers the interactive file-browser dialog in the
+  // remote folder picker (the Browse button next to the inline
+  // autocomplete). The renderer-side <FileBrowser> wants the same shape
+  // the SSH `ssh.browseDir` IPC returns — a resolved absolute path plus a
+  // list of `{name, isDirectory, isSymlink}` entries — so we can share the
+  // browser component between local and SSH picker flows. The allowlist
+  // is shared with the autocomplete IPC: $HOME plus ORCA_WEB_PICKER_ROOTS.
+  ipcMain.handle(
+    'fs:browseDir',
+    async (
+      _event,
+      args: { dirPath: string }
+    ): Promise<{
+      resolvedPath: string
+      entries: { name: string; isDirectory: boolean; isSymlink: boolean }[]
+    }> => {
+      const raw = (args?.dirPath ?? '').trim() || '~'
+      const expanded = expandTilde(raw)
+      const resolved = resolve(expanded)
+      if (!isPathAllowed(resolved)) {
+        // Why: throw rather than return empty so the renderer surfaces an
+        // error to the user instead of pretending the directory is empty.
+        throw new Error(`Path not allowed: ${resolved}`)
+      }
+      const raws = await readdir(resolved, { withFileTypes: true })
+      const entries = raws
+        .map((e) => ({
+          name: e.name,
+          isDirectory: e.isDirectory(),
+          isSymlink: e.isSymbolicLink()
+        }))
+        // Why: same alphabetical-with-dirs-first ordering as fs:readDir so
+        // the picker matches the rest of the app's filesystem UX.
+        .sort((a, b) => {
+          if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+      return { resolvedPath: resolved, entries }
+    }
+  )
 }

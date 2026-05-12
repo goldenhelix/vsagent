@@ -15,8 +15,17 @@ import {
   type DirEntry
 } from './remote-file-browser-helpers'
 
+// Why: the browser is shape-agnostic — it just needs a function that
+// returns a directory listing for an arbitrary path. SSH callers wrap
+// `window.api.ssh.browseDir({ targetId, dirPath })`; local callers wrap
+// `window.api.fs.browseDir({ dirPath })`. Same component, both flows.
+export type BrowseDirFn = (dirPath: string) => Promise<BrowseResult>
+
 type RemoteFileBrowserProps = {
-  targetId: string
+  /** Optional — used only to derive an inferred browseDir for SSH. */
+  targetId?: string
+  /** Direct injection — preferred. When provided, `targetId` is ignored. */
+  browseDir?: BrowseDirFn
   initialPath?: string
   onSelect: (path: string) => void
   onCancel: () => void
@@ -38,10 +47,21 @@ type PreviewState = {
 
 export function RemoteFileBrowser({
   targetId,
+  browseDir,
   initialPath = '~',
   onSelect,
   onCancel
 }: RemoteFileBrowserProps): React.JSX.Element {
+  // Why: resolve the browseDir function once per (targetId, browseDir)
+  // change. The default falls back to the SSH browseDir for backwards
+  // compatibility with the existing remote-project flow.
+  const browseDirFn = useMemo<BrowseDirFn>(() => {
+    if (browseDir) return browseDir
+    if (targetId) {
+      return (dirPath: string) => window.api.ssh.browseDir({ targetId, dirPath })
+    }
+    throw new Error('FileBrowser requires either `browseDir` or `targetId`')
+  }, [browseDir, targetId])
   const [resolvedPath, setResolvedPath] = useState('')
   const [entries, setEntries] = useState<DirEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -94,18 +114,18 @@ export function RemoteFileBrowser({
       if (cached) {
         return cached
       }
-      const result = await window.api.ssh.browseDir({ targetId, dirPath })
+      const result = await browseDirFn(dirPath)
       listingCacheRef.current.set(result.resolvedPath, result)
       // Also cache under the requested dirPath when it differs from the
       // server-resolved canonical path (e.g. `~`, `~/foo`, or a relative
       // input). Without this, the next identical request would miss the
-      // cache and re-hit the SSH backend.
+      // cache and re-hit the backend.
       if (dirPath !== result.resolvedPath) {
         listingCacheRef.current.set(dirPath, result)
       }
       return result
     },
-    [targetId]
+    [browseDirFn]
   )
 
   const loadDir = useCallback(
