@@ -34,6 +34,12 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
   var E = P + '/_ext?u=';
   window.__orcaTargetOrigin = TO;
 
+  // Why: capture the real parent BEFORE cloaking. The cloak below overrides
+  // window.parent so SPAs that gate on "window.top === window" don't bail out
+  // inside the iframe, but we still need a working reference to the renderer
+  // so postNav() can deliver nav events to the address bar.
+  var realParent = window.parent;
+
   // Cloak iframe presence so SPAs that check window.top === window pass.
   try { Object.defineProperty(window, 'top', { get: function () { return window }, configurable: true }) } catch (e) {}
   try { Object.defineProperty(window, 'parent', { get: function () { return window }, configurable: true }) } catch (e) {}
@@ -225,7 +231,9 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
   }
   function postNav() {
     try {
-      window.parent.postMessage({
+      // Why: use realParent (captured pre-cloak). window.parent is now a
+      // self-reference, so posting there would never reach the renderer.
+      realParent.postMessage({
         type: 'orca-webpreview-nav',
         href: location.href,
         upstreamUrl: getUpstreamUrl()
