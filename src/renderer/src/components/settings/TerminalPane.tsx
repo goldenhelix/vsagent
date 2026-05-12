@@ -31,6 +31,7 @@ import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch } from './settings-search'
 import { useAppStore } from '../../store'
 import { isMacUserAgent, isWindowsUserAgent } from '@/components/terminal-pane/pane-helpers'
+import { shellHostIsMac, shellHostIsWindows } from '@/lib/runtime-flavor'
 import {
   MANAGE_SESSIONS_SEARCH_ENTRIES,
   TERMINAL_ADVANCED_SEARCH_ENTRIES,
@@ -86,8 +87,14 @@ export function TerminalPane({
   pwshAvailable
 }: TerminalPaneProps): React.JSX.Element {
   const searchQuery = useAppStore((state) => state.settingsSearchQuery)
-  const isWindows = isWindowsUserAgent()
-  const isMac = isMacUserAgent()
+  // Why: shell-related settings (default shell, PowerShell impl, etc.)
+  // describe the OS where the shell *actually runs*. In desktop Electron
+  // that's the navigator UA's OS; in web mode it's the BACKEND. A Windows
+  // browser hitting a Linux backend must see Linux-shell options (or
+  // nothing), not PowerShell/CMD/WSL. The helpers route to the right side
+  // automatically.
+  const isWindows = shellHostIsWindows()
+  const isMac = shellHostIsMac()
   const [themeSearchDark, setThemeSearchDark] = useState('')
   const [themeSearchLight, setThemeSearchLight] = useState('')
 
