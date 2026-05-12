@@ -274,7 +274,7 @@ export function CreateStep({
       <DialogHeader>
         <DialogTitle>Start a new project</DialogTitle>
         <DialogDescription>
-          Create a Git repository or a plain folder and open it in Orca.
+          Create a Git repository or a plain folder and open it in VSAgent.
         </DialogDescription>
       </DialogHeader>
 

@@ -29,7 +29,7 @@ export function WebConnectionBanner(): React.JSX.Element | null {
   return (
     <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[200] rounded-md border border-border bg-popover px-3 py-1.5 text-xs shadow-md">
       <span className="text-muted-foreground">
-        {state === 'connecting' ? 'Connecting to Orca server…' : 'Reconnecting to Orca server…'}
+        {state === 'connecting' ? 'Connecting to VSAgent server…' : 'Reconnecting to VSAgent server…'}
       </span>
     </div>
   )

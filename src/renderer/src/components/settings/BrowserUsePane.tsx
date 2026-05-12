@@ -222,7 +222,7 @@ export function BrowserUseSetup({
 
       {showStep1 ? (
         <SearchableSetting
-          title="Enable Orca CLI"
+          title="Enable VSAgent CLI"
           description="Register the orca shell command so agents can drive the browser."
           keywords={BROWSER_USE_PANE_SEARCH_ENTRIES[0].keywords}
           className="rounded-xl border border-border/60 bg-card/50 p-4"
@@ -233,7 +233,7 @@ export function BrowserUseSetup({
               state={cliEnabled ? 'done' : cliBusy ? 'in-progress' : 'pending'}
             />
             <div className="min-w-0 flex-1 space-y-1">
-              <p className="text-sm font-medium">Enable Orca CLI</p>
+              <p className="text-sm font-medium">Enable VSAgent CLI</p>
               <p className="text-xs text-muted-foreground">
                 Registers the <code className="rounded bg-muted px-1 py-0.5 text-[11px]">orca</code>{' '}
                 command so agents can orchestrate the browser from their shell.
@@ -306,7 +306,7 @@ export function BrowserUseSetup({
             <div className="min-w-0 flex-1 space-y-1">
               <p className="text-sm font-medium">Import Browser Cookies</p>
               <p className="text-xs text-muted-foreground">
-                Bring your existing logins into Orca so agents can reach authenticated pages.
+                Bring your existing logins into VSAgent so agents can reach authenticated pages.
                 Imports into the default profile.
               </p>
               {sourceLabel ? (

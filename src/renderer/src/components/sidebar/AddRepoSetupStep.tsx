@@ -39,7 +39,7 @@ export function SetupStep({
         <DialogDescription>
           {hasWorktrees
             ? `${repoName} has ${worktreeCount} worktree${worktreeCount !== 1 ? 's' : ''}. Open one to pick up where you left off, or create a new one.`
-            : `Orca uses git worktrees as isolated task environments. Create one for ${repoName} to get started.`}
+            : `VSAgent uses git worktrees as isolated task environments. Create one for ${repoName} to get started.`}
         </DialogDescription>
       </DialogHeader>
 

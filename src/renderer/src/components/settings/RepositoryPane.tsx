@@ -63,7 +63,7 @@ export function getRepositoryPaneSearchEntries(repo: Repo): SettingsSearchEntry[
         ]),
     {
       title: 'Remove Repo',
-      description: 'Remove this repository from Orca.',
+      description: 'Remove this repository from VSAgent.',
       keywords: [repo.displayName, 'delete', 'repository']
     },
     ...(isFolder
@@ -228,7 +228,7 @@ export function RepositoryPane({
           </div>
           <SearchableSetting
             title="Remove Repo"
-            description="Remove this repository from Orca."
+            description="Remove this repository from VSAgent."
             keywords={[repo.displayName, 'delete', 'repository']}
           >
             <Button

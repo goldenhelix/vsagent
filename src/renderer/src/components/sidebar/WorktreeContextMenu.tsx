@@ -208,7 +208,7 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
             }
           >
             <Trash2 className="size-3.5" />
-            {isDeleting ? 'Deleting…' : isFolder ? 'Remove Folder from Orca' : 'Delete'}
+            {isDeleting ? 'Deleting…' : isFolder ? 'Remove Folder from VSAgent' : 'Delete'}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -84,7 +84,7 @@ export function DarkTerminalThemeSection({
         description={
           settings.theme === 'system'
             ? `System mode is currently ${systemPrefersDark ? 'Dark' : 'Light'}.`
-            : `Orca is currently in ${settings.theme} mode.`
+            : `VSAgent is currently in ${settings.theme} mode.`
         }
         appearance={darkPreviewAppearance}
         dividerThicknessPx={previewProps.dividerThicknessPx}
@@ -156,12 +156,12 @@ export function LightTerminalThemeSection({
 
               <SearchableSetting
                 title="Light Theme"
-                description="Choose the theme used when Orca is in light mode."
+                description="Choose the theme used when VSAgent is in light mode."
                 keywords={['terminal', 'theme', 'light', 'preview']}
               >
                 <ThemePicker
                   label="Light Theme"
-                  description="Choose the theme used when Orca is in light mode."
+                  description="Choose the theme used when VSAgent is in light mode."
                   selectedTheme={settings.terminalThemeLight}
                   query={themeSearchLight}
                   onQueryChange={setThemeSearchLight}

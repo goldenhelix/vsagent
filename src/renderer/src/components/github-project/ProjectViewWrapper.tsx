@@ -723,10 +723,10 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Repository not in Orca</DialogTitle>
+            <DialogTitle>Repository not in VSAgent</DialogTitle>
             <DialogDescription>
               {repoNotInOrca
-                ? `${repoNotInOrca.owner}/${repoNotInOrca.repo} isn't added to Orca. Add it to start work, or open in GitHub.`
+                ? `${repoNotInOrca.owner}/${repoNotInOrca.repo} isn't added to VSAgent. Add it to start work, or open in GitHub.`
                 : null}
             </DialogDescription>
           </DialogHeader>
@@ -871,7 +871,7 @@ function ViewTabStrip({
                 ? v.name
                 : `${v.name} — ${
                     v.layout === 'BOARD_LAYOUT' ? 'Board' : 'Roadmap'
-                  } layouts aren't supported in Orca yet. Open this view on GitHub to see it, or switch to a Table view to work with it here.`
+                  } layouts aren't supported in VSAgent yet. Open this view on GitHub to see it, or switch to a Table view to work with it here.`
             }
             className={cn(
               'inline-flex shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-3 py-1.5 text-xs',
@@ -917,9 +917,9 @@ function ErrorState({
   }
   const copy =
     error.type === 'too_large'
-      ? `This view has ${totalCount ?? 'many'} items — too large to render in Orca. Narrow the view's filter on GitHub.`
+      ? `This view has ${totalCount ?? 'many'} items — too large to render in VSAgent. Narrow the view's filter on GitHub.`
       : error.type === 'unsupported_layout'
-        ? 'Orca only renders table views yet. This is a Board or Roadmap view.'
+        ? 'VSAgent only renders table views yet. This is a Board or Roadmap view.'
         : error.type === 'not_found'
           ? 'Could not find this project or view.'
           : error.type === 'schema_drift'

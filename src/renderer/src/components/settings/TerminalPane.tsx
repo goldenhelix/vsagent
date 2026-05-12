@@ -398,14 +398,14 @@ export function TerminalPane({
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">Cursor</h3>
           <p className="text-xs text-muted-foreground">
-            Default cursor appearance for Orca terminal panes.
+            Default cursor appearance for VSAgent terminal panes.
           </p>
         </div>
 
         <div className="space-y-4">
           <SearchableSetting
             title="Cursor Shape"
-            description="Default cursor appearance for Orca terminal panes."
+            description="Default cursor appearance for VSAgent terminal panes."
             keywords={['terminal', 'cursor', 'bar', 'block', 'underline']}
             className="space-y-2"
           >

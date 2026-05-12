@@ -131,7 +131,7 @@ function FeedbackDialog({
         <DialogHeader>
           <DialogTitle className="text-sm">Send Feedback</DialogTitle>
           <DialogDescription className="text-xs">
-            Share what&apos;s working, what&apos;s broken, or what Orca should do next.
+            Share what&apos;s working, what&apos;s broken, or what VSAgent should do next.
           </DialogDescription>
         </DialogHeader>
 

@@ -41,7 +41,7 @@ function getPreflightIssues(status: {
     issues.push({
       id: 'gh',
       title: 'GitHub CLI is not installed',
-      description: 'Orca uses the GitHub CLI (gh) to show pull requests, issues, and checks.',
+      description: 'VSAgent uses the GitHub CLI (gh) to show pull requests, issues, and checks.',
       fixLabel: 'Install GitHub CLI',
       fixUrl: 'https://cli.github.com'
     })
@@ -265,9 +265,9 @@ export default function Landing(): React.JSX.Element {
             className="flex items-center justify-center size-20 rounded-2xl border border-border/80 shadow-lg shadow-black/40"
             style={{ backgroundColor: '#12181e' }}
           >
-            <img src={logo} alt="Orca logo" className="size-12" />
+            <img src={logo} alt="VSAgent logo" className="size-12" />
           </div>
-          <h1 className="text-4xl font-bold text-foreground tracking-tight">ORCA</h1>
+          <h1 className="text-4xl font-bold text-foreground tracking-tight">VSAgent</h1>
 
           {preflightIssues.length > 0 && <PreflightBanner issues={preflightIssues} />}
 

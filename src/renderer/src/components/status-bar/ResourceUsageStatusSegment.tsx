@@ -223,7 +223,7 @@ function AppSection({
           type="button"
           onClick={onToggle}
           className="pl-2 py-2 pr-0.5 transition-colors hover:bg-muted/50"
-          aria-label={isCollapsed ? 'Expand Orca' : 'Collapse Orca'}
+          aria-label={isCollapsed ? 'Expand VSAgent' : 'Collapse VSAgent'}
           aria-expanded={!isCollapsed}
         >
           {isCollapsed ? (
@@ -234,7 +234,7 @@ function AppSection({
         </button>
         <div className="flex-1 min-w-0 py-2 pr-3 flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-wide truncate text-muted-foreground">
-            Orca
+            VSAgent
           </span>
           <div className="flex items-center gap-2 shrink-0">
             <Sparkline samples={app.history} />
@@ -1119,7 +1119,7 @@ export function ResourceUsageStatusSegment({
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={6} className="z-[70] max-w-xs">
-                  Resident memory held by Orca plus the processes under each worktree&apos;s
+                  Resident memory held by VSAgent plus the processes under each worktree&apos;s
                   terminals.
                 </TooltipContent>
               </Tooltip>
@@ -1134,7 +1134,7 @@ export function ResourceUsageStatusSegment({
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={6} className="z-[70] max-w-xs">
-                  How much of this machine&apos;s physical RAM the Orca-tracked processes are
+                  How much of this machine&apos;s physical RAM the VSAgent-tracked processes are
                   sitting on.
                 </TooltipContent>
               </Tooltip>

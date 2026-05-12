@@ -43,7 +43,7 @@ const RemoveFolderDialog = React.memo(function RemoveFolderDialog() {
           <DialogTitle className="text-sm">Remove Folder</DialogTitle>
           <DialogDescription className="text-xs">
             Remove <span className="break-all font-medium text-foreground">{displayName}</span> from
-            Orca? The folder will not be deleted from disk.
+            VSAgent? The folder will not be deleted from disk.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

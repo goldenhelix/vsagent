@@ -316,8 +316,8 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
               <DialogTitle>Add a project</DialogTitle>
               <DialogDescription>
                 {repos.length === 0
-                  ? 'Add a project to get started with Orca.'
-                  : 'Add another project to manage with Orca.'}
+                  ? 'Add a project to get started with VSAgent.'
+                  : 'Add another project to manage with VSAgent.'}
               </DialogDescription>
             </DialogHeader>
 

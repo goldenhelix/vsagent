@@ -83,9 +83,9 @@ export function GitPane({
         <div className="space-y-0.5">
           <Label>Refresh Local Base Ref</Label>
           <p className="text-xs text-muted-foreground">
-            When enabled, Orca updates your local <code>main</code> or <code>master</code> before
+            When enabled, VSAgent updates your local <code>main</code> or <code>master</code> before
             creating a worktree. This helps AI tools and diffs compare your branch against the
-            latest base branch. Orca only does this when it is safe.
+            latest base branch. VSAgent only does this when it is safe.
           </p>
         </div>
         <button
@@ -111,21 +111,21 @@ export function GitPane({
       </SearchableSetting>
     ) : null,
     matchesSettingsSearch(searchQuery, {
-      title: 'Orca Attribution',
-      description: 'Add Orca attribution to commits, PRs, and issues.',
+      title: 'VSAgent Attribution',
+      description: 'Add VSAgent attribution to commits, PRs, and issues.',
       keywords: ['github', 'gh', 'pr', 'issue', 'co-author', 'coauthored', 'attribution', 'orca']
     }) ? (
       <SearchableSetting
         key="github-attribution"
-        title="Orca Attribution"
-        description="Add Orca attribution to commits, PRs, and issues."
+        title="VSAgent Attribution"
+        description="Add VSAgent attribution to commits, PRs, and issues."
         keywords={['github', 'gh', 'pr', 'issue', 'co-author', 'coauthored', 'attribution', 'orca']}
         className="flex items-center justify-between gap-4 px-1 py-2"
       >
         <div className="space-y-0.5">
-          <Label>Orca Attribution</Label>
+          <Label>VSAgent Attribution</Label>
           <p className="text-xs text-muted-foreground">
-            Add Orca attribution to commits, PRs, and issues.
+            Add VSAgent attribution to commits, PRs, and issues.
           </p>
         </div>
         <button

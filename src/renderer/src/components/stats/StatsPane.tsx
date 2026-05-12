@@ -11,7 +11,7 @@ export const STATS_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     title: 'Stats & Usage',
     description:
-      'Orca stats plus Claude and Codex usage analytics, tokens, cache, models, and sessions.',
+      'VSAgent stats plus Claude and Codex usage analytics, tokens, cache, models, and sessions.',
     keywords: [
       'stats',
       'usage',

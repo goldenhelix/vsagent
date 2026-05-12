@@ -18,7 +18,7 @@ const stepCopy = {
   agent: {
     title: 'Pick your default agent',
     subtitle:
-      "Orca works with every CLI agent. Choose the one you'll reach for most — switch any time."
+      "VSAgent works with every CLI agent. Choose the one you'll reach for most — switch any time."
   },
   theme: {
     title: 'Make it feel like home',
@@ -29,7 +29,7 @@ const stepCopy = {
     subtitle: 'Get a desktop notification when your agent finishes or asks a question.'
   },
   repo: {
-    title: 'Point Orca at some code',
+    title: 'Point VSAgent at some code',
     subtitle: 'Open a folder, clone a repo, or skip and add one later.'
   }
 } as const
@@ -93,9 +93,9 @@ export default function OnboardingFlow({
             className="flex size-7 items-center justify-center rounded-md"
             style={{ backgroundColor: '#12181e' }}
           >
-            <img src={logo} alt="Orca logo" className="size-5" />
+            <img src={logo} alt="VSAgent logo" className="size-5" />
           </div>
-          <span>Orca</span>
+          <span>VSAgent</span>
         </div>
 
         <div className="mt-12 flex items-center gap-2">
@@ -124,7 +124,7 @@ export default function OnboardingFlow({
         <div className="mt-8">
           {stepIndex === 0 && (
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-              Welcome to Orca
+              Welcome to VSAgent
             </div>
           )}
           <h1 className="text-[34px] font-semibold leading-[1.15] tracking-tight text-foreground">

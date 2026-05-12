@@ -785,7 +785,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     }
     return {
       title: 'No active worktrees or browser tabs',
-      subtitle: 'Create a worktree or open a page in Orca to get started.'
+      subtitle: 'Create a worktree or open a page in VSAgent to get started.'
     }
   })()
 

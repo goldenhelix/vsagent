@@ -27,7 +27,7 @@ export function NotificationStep({ value, onChange }: NotificationStepProps) {
     },
     {
       key: 'notifyWhenFocused',
-      title: 'Notify even when Orca is focused',
+      title: 'Notify even when VSAgent is focused',
       description: "Show notifications while you're already in the app."
     }
   ]

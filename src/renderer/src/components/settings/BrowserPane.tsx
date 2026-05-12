@@ -187,7 +187,7 @@ export function BrowserPane({ settings, updateSettings }: BrowserPaneProps): Rea
       {showLinkRouting ? (
         <SearchableSetting
           title="Link Routing"
-          description="Open http(s) links in Orca's built-in browser — from the terminal, markdown, and the editor. Shift+Cmd/Ctrl+click always uses your system browser."
+          description="Open http(s) links in VSAgent's built-in browser — from the terminal, markdown, and the editor. Shift+Cmd/Ctrl+click always uses your system browser."
           keywords={[
             'browser',
             'preview',
@@ -203,7 +203,7 @@ export function BrowserPane({ settings, updateSettings }: BrowserPaneProps): Rea
           <div className="space-y-0.5">
             <Label>Link Routing</Label>
             <p className="text-xs text-muted-foreground">
-              Open http(s) links in Orca&apos;s built-in browser — from the terminal, markdown, and
+              Open http(s) links in VSAgent&apos;s built-in browser — from the terminal, markdown, and
               the editor. Shift+Cmd/Ctrl+click always uses your system browser.
             </p>
           </div>

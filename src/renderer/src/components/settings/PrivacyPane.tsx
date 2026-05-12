@@ -179,7 +179,7 @@ export function PrivacyPane({ settings }: PrivacyPaneProps): React.JSX.Element {
             <Label>Share anonymous usage data</Label>
           </div>
           <p className="text-xs text-muted-foreground">
-            Help us figure out what to build next. Orca sends anonymous counts of which features you
+            Help us figure out what to build next. VSAgent sends anonymous counts of which features you
             use and where things break — no file contents, prompts, terminal output, branch names,
             or anything that identifies you.{' '}
             <button

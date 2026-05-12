@@ -73,7 +73,7 @@ export function ExperimentalPane({
       {showMobile ? (
         <SearchableSetting
           title="Mobile Pairing"
-          description="Pair a mobile device to control Orca remotely."
+          description="Pair a mobile device to control VSAgent remotely."
           keywords={EXPERIMENTAL_SEARCH_ENTRY.mobile.keywords}
           className="space-y-3 px-1 py-2"
         >
@@ -81,7 +81,7 @@ export function ExperimentalPane({
             <div className="min-w-0 shrink space-y-1.5">
               <Label>Mobile Pairing</Label>
               <p className="text-xs text-muted-foreground">
-                Control Orca from your phone by scanning a QR code. Beta / early preview &mdash;
+                Control VSAgent from your phone by scanning a QR code. Beta / early preview &mdash;
                 expect bugs and breaking changes. Get started from the{' '}
                 <button
                   type="button"
