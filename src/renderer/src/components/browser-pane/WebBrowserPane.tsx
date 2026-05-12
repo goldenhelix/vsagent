@@ -32,9 +32,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { useAppStore } from '@/store'
 
 export type WebBrowserPaneProps = {
-  initialUrl?: string
+  /** Browser-workspace (tab) id. The pane reads the current URL from the
+   *  store via this id and writes navigations back so cross-browser
+   *  session-sync can broadcast them to other tabs. */
+  workspaceId?: string
+  /** URL to navigate to when the store has no URL for this workspace yet
+   *  (fresh browser tabs default to localhost:3000). */
+  fallbackUrl?: string
   className?: string
 }
 
@@ -68,12 +75,41 @@ function derivePathFromInput(input: string): string {
 }
 
 export function WebBrowserPane({
-  initialUrl = 'http://localhost:3000',
+  workspaceId,
+  fallbackUrl = 'http://localhost:3000',
   className
 }: WebBrowserPaneProps): React.JSX.Element {
+  // Why: drive both the displayed URL and any cross-browser sync through
+  // the store's BrowserWorkspace.url. A remote browser navigating updates
+  // the store via session:set → broadcast → other browsers re-hydrate →
+  // this selector fires → local iframe navigates. Local nav also pushes
+  // back into the store so OTHER browsers see it.
+  const storeUrl = useAppStore((s) => {
+    if (!workspaceId) return undefined
+    for (const list of Object.values(s.browserTabsByWorktree)) {
+      for (const ws of list) if (ws.id === workspaceId) return ws.url
+    }
+    return undefined
+  })
+  const setBrowserPageUrl = useAppStore((s) => s.setBrowserPageUrl)
+  const activePageId = useAppStore((s) => {
+    if (!workspaceId) return null
+    for (const list of Object.values(s.browserTabsByWorktree)) {
+      for (const ws of list)
+        if (ws.id === workspaceId) return ws.activePageId ?? ws.pageIds?.[0] ?? null
+    }
+    return null
+  })
+  const initialUrl = storeUrl && storeUrl.length > 0 ? storeUrl : fallbackUrl
   const [urlInput, setUrlInput] = useState(initialUrl)
   const [displayedUrl, setDisplayedUrl] = useState(initialUrl)
   const [session, setSession] = useState<Session | null>(null)
+  // Why: dedupe the store→pane echo. When this pane navigates locally it
+  // writes to the store, the store broadcasts to other clients, those
+  // clients re-hydrate, and on THIS client the selector fires with the
+  // same URL we just set. Skip those self-echoes by recording the URL we
+  // most recently pushed.
+  const lastPushedUrlRef = useRef<string>('')
   const [iframeSrc, setIframeSrc] = useState<string>('about:blank')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -141,13 +177,21 @@ export function WebBrowserPane({
         setDisplayedUrl(display)
         setUrlInput(display)
         if (!opts?.fromHistory) pushHistory(display)
+        // Why: push the new URL into the workspace's store entry so the
+        // backend's session-set broadcaster carries it to other browsers.
+        // Record the URL in lastPushedUrlRef so the storeUrl→pane echo
+        // can recognise its own write and skip a no-op iframe nav.
+        if (workspaceId && activePageId && display !== lastPushedUrlRef.current) {
+          lastPushedUrlRef.current = display
+          setBrowserPageUrl(activePageId, display)
+        }
       } catch (err) {
         if (seq !== navSeq.current) return
         setStatus('error')
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [session, pushHistory]
+    [session, pushHistory, workspaceId, activePageId, setBrowserPageUrl]
   )
 
   // Navigation pings from the injected script keep the address bar in sync
@@ -158,16 +202,23 @@ export function WebBrowserPane({
       if (!data || typeof data !== 'object') return
       if (data.type !== 'orca-webpreview-nav') return
       if (typeof data.upstreamUrl !== 'string') return
-      setDisplayedUrl(data.upstreamUrl)
+      const next = data.upstreamUrl
+      setDisplayedUrl(next)
       // Don't overwrite the user's typing if the address bar is focused.
       if (document.activeElement !== addressInputRef.current) {
-        setUrlInput(data.upstreamUrl)
+        setUrlInput(next)
       }
-      pushHistory(data.upstreamUrl)
+      pushHistory(next)
+      // Why: also push client-side route changes (SPA navigation inside
+      // the proxied page) into the store so OTHER browsers see them.
+      if (workspaceId && activePageId && next !== lastPushedUrlRef.current) {
+        lastPushedUrlRef.current = next
+        setBrowserPageUrl(activePageId, next)
+      }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [pushHistory])
+  }, [pushHistory, workspaceId, activePageId, setBrowserPageUrl])
 
   // First-mount: load the initial URL.
   useEffect(() => {
@@ -176,6 +227,24 @@ export function WebBrowserPane({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Why: react to remote URL changes. When another browser navigates and
+  // the broadcast lands here, the store's BrowserWorkspace.url updates.
+  // Compare it to lastPushedUrlRef — if it's not what we just wrote
+  // ourselves, the change came from elsewhere and we should navigate.
+  // We also compare against displayedUrl to skip when the iframe is
+  // already pointing at the same URL (e.g. on initial hydrate).
+  useEffect(() => {
+    if (!storeUrl || !workspaceId) return
+    if (storeUrl === lastPushedUrlRef.current) return
+    if (storeUrl === displayedUrl) return
+    // Don't yank the user out of an in-progress edit — only navigate
+    // when the address bar isn't focused.
+    if (document.activeElement === addressInputRef.current) return
+    lastPushedUrlRef.current = storeUrl
+    void navigate(storeUrl, { fromHistory: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeUrl])
 
   // Why: tear down the proxy session ONLY when the pane truly unmounts.
   // The earlier version watched [session] as a dependency, which fired

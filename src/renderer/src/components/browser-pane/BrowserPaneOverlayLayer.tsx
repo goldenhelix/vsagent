@@ -104,7 +104,7 @@ const BrowserOverlaySlot = memo(function BrowserOverlaySlot({
       onFocusCapture={handleFocus}
     >
       {isWebMode() ? (
-        <WebBrowserPane initialUrl={browserTab.url || 'http://localhost:3000'} />
+        <WebBrowserPane workspaceId={browserTab.id} fallbackUrl="http://localhost:3000" />
       ) : (
         <BrowserPane browserTab={browserTab} isActive={isActive} />
       )}
