@@ -126,6 +126,15 @@ export function WebBrowserPane({
   // Why: monotonic request seq so a stale autocomplete-like async response
   // can't clobber a newer navigation.
   const navSeq = useRef(0)
+  // Why: a navigate() call sets a fresh iframe src and waits for the page
+  // to load. The injected script then posts back the real upstream URL
+  // (which may differ from what was typed because of a server-side 30x).
+  // We treat that first postNav as the load-completion echo: REPLACE the
+  // current history entry with the final URL rather than PUSH a new one,
+  // so Back doesn't take the user to the pre-redirect URL they never
+  // actually visited. Subsequent postNavs (link clicks, history.pushState)
+  // push normally.
+  const expectingLoadEchoRef = useRef(false)
 
   const pushHistory = useCallback(
     (upstreamUrl: string) => {
@@ -172,7 +181,27 @@ export function WebBrowserPane({
         }
         if (seq !== navSeq.current) return
         setSession(s)
-        setIframeSrc(s.proxyPath + path)
+        const nextIframeSrc = s.proxyPath + path
+        // Why: when nextIframeSrc equals the current iframe src, React
+        // won't touch the DOM attribute so the iframe never refetches.
+        // This bites two flows: (a) typing the SAME URL twice and hitting
+        // Enter; (b) navigating Back to a URL that resolves to the same
+        // proxy path (e.g. after a top-level cross-origin redirect-follow
+        // updated the session and both history entries map to the same
+        // proxy path). Force a reload via about:blank → src round-trip
+        // when the src is unchanged so the user always gets a fresh fetch.
+        if (iframeSrc === nextIframeSrc) {
+          const ifr = iframeRef.current
+          if (ifr) {
+            ifr.src = 'about:blank'
+            requestAnimationFrame(() => {
+              ifr.src = nextIframeSrc
+            })
+          }
+        } else {
+          setIframeSrc(nextIframeSrc)
+        }
+        expectingLoadEchoRef.current = true
         const display = origin + path
         setDisplayedUrl(display)
         setUrlInput(display)
@@ -208,7 +237,21 @@ export function WebBrowserPane({
       if (document.activeElement !== addressInputRef.current) {
         setUrlInput(next)
       }
-      pushHistory(next)
+      if (expectingLoadEchoRef.current) {
+        // First echo after navigate(): replace the current entry with the
+        // post-redirect URL rather than pushing a new one. See the ref
+        // declaration for the rationale.
+        expectingLoadEchoRef.current = false
+        setHistoryStack((prev) => {
+          if (prev.length === 0) return [next]
+          if (prev[historyIdx] === next) return prev
+          const copy = [...prev]
+          copy[historyIdx] = next
+          return copy
+        })
+      } else {
+        pushHistory(next)
+      }
       // Why: also push client-side route changes (SPA navigation inside
       // the proxied page) into the store so OTHER browsers see them.
       if (workspaceId && activePageId && next !== lastPushedUrlRef.current) {
@@ -218,7 +261,7 @@ export function WebBrowserPane({
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [pushHistory, workspaceId, activePageId, setBrowserPageUrl])
+  }, [pushHistory, workspaceId, activePageId, setBrowserPageUrl, historyIdx])
 
   // First-mount: load the initial URL.
   useEffect(() => {
