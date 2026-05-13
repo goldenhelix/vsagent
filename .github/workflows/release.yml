@@ -155,7 +155,7 @@ jobs:
               echo "### Install"
               echo
               echo '```bash'
-              echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash"
+              echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/vsagent/scripts/install.sh | bash"
               echo '```'
               echo
               echo "See \`docs/install-linux.md\` for manual install + systemd notes."
