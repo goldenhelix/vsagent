@@ -1490,8 +1490,8 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
     // opens from being wiped when a peer broadcasts an older view.
     set(
       buildHydratedTabState(session, validWorktreeIds, {
-        unifiedTabs: state.unifiedTabs,
-        tabGroups: state.tabGroups
+        unifiedTabs: state.unifiedTabsByWorktree,
+        tabGroups: state.groupsByWorktree
       })
     )
   }
