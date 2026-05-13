@@ -1,160 +1,172 @@
 <h1 align="center">
-  <a href="https://onOrca.dev"><img src="resources/build/icon.png" alt="Orca" width="64" valign="middle" /></a> Orca
+  <img src="resources/vsagent.svg" alt="VSAgent" width="64" valign="middle" /> VSAgent
 </h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=for-the-badge" alt="Supported Platforms" />
-  <a href="https://discord.gg/fzjDKHxv8Q"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" /></a>
-  <a href="https://x.com/orca_build"><img src="https://img.shields.io/badge/%E2%80%8E-Follow_@orca__build-000000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X" /></a>
+  <strong>An agentic-IDE you run on a Linux server and use from any browser.</strong><br/>
+  Fork of <a href="https://github.com/stablyai/orca">Orca</a> by <a href="https://www.goldenhelix.com">Golden Helix</a>.<br/>
+  Built to put VarSeq engineers and friends in front of Claude Code, Codex, and Gemini without giving up the multi-worktree, multi-agent workflow Orca pioneered.
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="docs/README.zh-CN.md">中文</a> · <a href="docs/README.ja.md">日本語</a> · <a href="docs/README.es.md">Español</a>
-</p>
-
-<p align="center">
-  <strong>The AI Orchestrator for 100x builders.</strong><br/>
-  Run Claude Code, Codex, or OpenCode side-by-side across repos — each in its own worktree, tracked in one place.<br/>
-  Available for <strong>macOS, Windows, and Linux</strong>.
-</p>
-
-<p align="center">
-  <a href="#install"><strong>Download 🐋</strong></a>
-</p>
-
-<p align="center">
-  <img src="docs/assets/file-drag.gif" alt="Orca Screenshot" width="800" />
-</p>
-
-## Supported Agents
-
-Orca supports any CLI agent (*not just this list*).
-
-<p>
-  <a href="https://docs.anthropic.com/claude/docs/claude-code"><kbd><img src="docs/assets/claude-logo.svg" width="16" valign="middle" /> Claude Code</kbd></a> &nbsp;
-  <a href="https://github.com/openai/codex"><kbd><img src="https://www.google.com/s2/favicons?domain=openai.com&sz=64" width="16" valign="middle" /> Codex</kbd></a> &nbsp;
-  <a href="https://github.com/google-gemini/gemini-cli"><kbd><img src="https://www.google.com/s2/favicons?domain=gemini.google.com&sz=64" width="16" valign="middle" /> Gemini</kbd></a> &nbsp;
-  <a href="https://pi.dev"><kbd><img src="https://pi.dev/favicon.svg" width="16" valign="middle" /> Pi</kbd></a> &nbsp;
-  <a href="https://hermes-agent.nousresearch.com/docs/"><kbd><img src="https://www.google.com/s2/favicons?domain=nousresearch.com&sz=64" width="16" valign="middle" /> Hermes Agent</kbd></a> &nbsp;
-  <a href="https://opencode.ai/docs/cli/"><kbd><img src="https://www.google.com/s2/favicons?domain=opencode.ai&sz=64" width="16" valign="middle" /> OpenCode</kbd></a> &nbsp;
-  <a href="https://block.github.io/goose/docs/quickstart/"><kbd><img src="https://www.google.com/s2/favicons?domain=goose-docs.ai&sz=64" width="16" valign="middle" /> Goose</kbd></a> &nbsp;
-  <a href="https://ampcode.com/manual#install"><kbd><img src="https://www.google.com/s2/favicons?domain=ampcode.com&sz=64" width="16" valign="middle" /> Amp</kbd></a> &nbsp;
-  <a href="https://docs.augmentcode.com/cli/overview"><kbd><img src="https://www.google.com/s2/favicons?domain=augmentcode.com&sz=64" width="16" valign="middle" /> Auggie</kbd></a> &nbsp;
-  <a href="https://github.com/autohandai/code-cli"><kbd><img src="https://www.google.com/s2/favicons?domain=autohand.ai&sz=64" width="16" valign="middle" /> Autohand Code</kbd></a> &nbsp;
-  <a href="https://github.com/charmbracelet/crush"><kbd><img src="https://www.google.com/s2/favicons?domain=charm.sh&sz=64" width="16" valign="middle" /> Charm</kbd></a> &nbsp;
-  <a href="https://docs.cline.bot/cline-cli/overview"><kbd><img src="https://www.google.com/s2/favicons?domain=cline.bot&sz=64" width="16" valign="middle" /> Cline</kbd></a> &nbsp;
-  <a href="https://www.codebuff.com/docs/help/quick-start"><kbd><img src="https://www.google.com/s2/favicons?domain=codebuff.com&sz=64" width="16" valign="middle" /> Codebuff</kbd></a> &nbsp;
-  <a href="https://docs.continue.dev/guides/cli"><kbd><img src="https://www.google.com/s2/favicons?domain=continue.dev&sz=64" width="16" valign="middle" /> Continue</kbd></a> &nbsp;
-  <a href="https://cursor.com/cli"><kbd><img src="https://www.google.com/s2/favicons?domain=cursor.com&sz=64" width="16" valign="middle" /> Cursor</kbd></a> &nbsp;
-  <a href="https://docs.factory.ai/cli/getting-started/quickstart"><kbd><img src="docs/assets/droid-logo.svg" width="16" valign="middle" /> Droid</kbd></a> &nbsp;
-  <a href="https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli"><kbd><img src="https://www.google.com/s2/favicons?domain=github.com&sz=64" width="16" valign="middle" /> GitHub Copilot</kbd></a> &nbsp;
-  <a href="https://kilo.ai/docs/cli"><kbd><img src="https://raw.githubusercontent.com/Kilo-Org/kilocode/main/packages/kilo-vscode/assets/icons/kilo-light.svg" width="16" valign="middle" /> Kilocode</kbd></a> &nbsp;
-  <a href="https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started.html"><kbd><img src="https://www.google.com/s2/favicons?domain=moonshot.cn&sz=64" width="16" valign="middle" /> Kimi</kbd></a> &nbsp;
-  <a href="https://kiro.dev/docs/cli/"><kbd><img src="https://www.google.com/s2/favicons?domain=kiro.dev&sz=64" width="16" valign="middle" /> Kiro</kbd></a> &nbsp;
-  <a href="https://github.com/mistralai/mistral-vibe"><kbd><img src="https://www.google.com/s2/favicons?domain=mistral.ai&sz=64" width="16" valign="middle" /> Mistral Vibe</kbd></a> &nbsp;
-  <a href="https://github.com/QwenLM/qwen-code"><kbd><img src="https://www.google.com/s2/favicons?domain=qwenlm.github.io&sz=64" width="16" valign="middle" /> Qwen Code</kbd></a> &nbsp;
-  <a href="https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli-on-your-device/"><kbd><img src="https://www.google.com/s2/favicons?domain=atlassian.com&sz=64" width="16" valign="middle" /> Rovo Dev</kbd></a>
+  <a href="#install"><strong>One-line install</strong></a> ·
+  <a href="#what-changed-from-orca"><strong>What changed</strong></a> ·
+  <a href="#why-the-fork"><strong>Why</strong></a> ·
+  <a href="#operating">Operating</a>
 </p>
 
 ---
 
-## Features
+## Why the fork
 
-- **No login required** — Bring your own Claude Code or Codex subscription.
-- **Worktree-native** — Every feature gets its own worktree. No stashing, no branch juggling. Spin up and switch instantly.
-- **Multi-agent terminals** — Run multiple AI agents side-by-side in tabs and panes. See which ones are active at a glance.
-- **Built-in source control** — Review AI-generated diffs, make quick edits, and commit without leaving Orca.
-- **GitHub integration** — PRs, issues, and Actions checks linked to each worktree automatically.
-- **SSH support** — Connect to remote machines and run agents on them directly from Orca.
-- **Notifications** — Know when an agent finishes or needs attention. Mark threads unread to come back later.
+The upstream Orca app is a desktop Electron client. Brilliant, but it runs on the box in front of you. We needed:
+
+- a way for many Golden Helix engineers to point Claude Code / Codex / Gemini at our VSWarehouse codebases without installing Electron everywhere;
+- the agents to run on a shared Linux server (`bastion01` and friends) close to the source and the build toolchain, not on individual laptops;
+- the heavy lifting — worktrees, PTYs, file watchers — to keep working across browser refreshes and reconnects;
+- one VarSeq engineer's browser tab and another's to see the same workspace state in real time.
+
+So we forked Orca and added a **web mode**: the same Electron renderer ships as a static bundle, the same main process runs headless on the server, and a WebSocket gateway bridges the two. State persists under `~/.vsagent/`. PTYs live in a long-running daemon that survives browser close. Browse to `http://your-server:8081`, do your work, walk away, come back hours later in a different tab — your tabs, terminals, and editor state are still there.
+
+We're shipping it as **VSAgent** for now. The internal `orca-*` URL paths and env vars are left alone for compatibility; user-visible branding is rebranded.
+
+---
+
+## What changed from Orca
+
+The core IDE is unchanged. What we added (most recent first):
+
+### Web mode
+
+- **Headless backend** (`pnpm web:serve`): Electron runs `--headless=new`, no display required. A WebSocket gateway at `/__orca/ws` brings the renderer surface to any browser.
+- **WS-bridged ipcRenderer**: `src/web-bridge/` polyfills Electron's `ipcRenderer` and `contextBridge` over WebSocket so the existing preload/renderer code runs unchanged inside a browser tab.
+- **Daemon-PTY**: terminals are owned by a separate Node process (`out/main/daemon-entry.js`) over a Unix socket. Browser disconnect doesn't kill them. xterm.js replays scrollback + alt-screen cleanly on reattach.
+- **Cross-browser session sync**: tabs, workspace state, editor drafts, and browser-pane URLs broadcast across every connected client via `session:set` → `session:changed`. Two engineers can see each other's UI live.
+- **Timestamp-aware merge on hydrate** (`src/renderer/src/lib/session-hydrate-clock.ts`): concurrent tab opens / file edits in multiple browsers no longer clobber each other.
+
+### In-app browser pane
+
+A full HTTP proxy at `/__orca/webpreview/<sid>/...`:
+
+- Server-side redirect following with cross-origin support (the address bar tracks the final URL after http→https or apex→www).
+- HTML attribute rewriting + JS import rewriting at request time, plus a runtime script that patches `fetch`, `XHR`, `location.href`, `Location.prototype.assign/replace`, element `src`/`href`, etc.
+- Self-origin URLs (page constructs URLs against `location.origin` which is the gateway) are re-routed back to the configured target so pages don't recursively load the VSAgent app inside the iframe.
+
+### Remote folder picker
+
+Onboarding's "Open a folder" Browse, the Add Project flow, and Settings → General → Workspace Directory all use a path-input picker (`RemoteFolderPicker`) with backend-driven autocomplete + interactive file-browser fallback. Replaces the no-op native Electron file dialog in web mode.
+
+### Branding & state
+
+- Default workspace dir: `$HOME` (was `~/orca/workspaces`). Override with `VSAGENT_WORKSPACE_DIR`.
+- Default user-data path: `~/.vsagent/` (was `~/.orca-web`). Override with `VSAGENT_USER_DATA_PATH` (legacy `ORCA_USER_DATA_PATH` still honoured).
+- Persistence files: `vsagent-data.json`, `vsagent-runtime.json`, `vsagent-e2ee-keypair.json`.
+- User-visible "Orca" strings swapped to "VSAgent" across onboarding, settings, dialogs, status bar, HTML titles.
+- Logo: `resources/vsagent.svg` (Golden Helix–branded).
+
+### Cross-platform polish for the web case
+
+- Shell-host detection: PowerShell / Command Prompt options are no longer offered when the backend is on Linux.
+- `crypto.randomUUID` polyfill for non-HTTPS contexts.
+- Workspace-dir migration: legacy `~/orca/workspaces` default flips to `$HOME` on first load.
+- Friendly upstream-error pages inside the iframe instead of a blank webpreview.
+
+For the full commit log: `git log 19d11db8..HEAD` (the fork point is upstream Orca v1.3.49-rc.2).
 
 ---
 
 ## Install
 
-### Mac, Linux, Windows
-
-- **[Download from onOrca.dev](https://onOrca.dev)**
-- Or via **[GitHub Releases page](https://github.com/stablyai/orca/releases/latest)**
-
-*Alternatively, install from a package manager:*
-
-### macOS (Homebrew)
+For a server (Linux x64) — one-liner:
 
 ```bash
-brew install --cask stablyai/orca/orca
+curl -fsSL https://raw.githubusercontent.com/goldenhelix/vsagent/vsagent/scripts/install.sh | bash
 ```
 
-### Arch Linux (AUR)
+That downloads the latest release tarball, installs to `~/.local/share/vsagent`, drops a `vsagent` CLI shim in `~/.local/bin`, writes a systemd `--user` unit, and starts it. Point a browser at `http://<your-server>:8081`.
+
+For manual install, upgrade, or systemd commands, see [`docs/install-linux.md`](docs/install-linux.md).
+
+---
+
+## Operating
+
+### Where state lives
+
+| Path | Contents |
+|------|----------|
+| `~/.vsagent/` | All persistent state (override with `VSAGENT_USER_DATA_PATH`) |
+| `~/.vsagent/vsagent-data.json` | Settings, repos, worktrees, onboarding, session |
+| `~/.vsagent/vsagent-runtime.json` | RPC endpoint + auth token for the CLI |
+| `~/.vsagent/daemon/` | PTY daemon Unix socket + token |
+| `~/.vsagent/terminal-history/` | Scrollback buffers (one file per terminal) |
+
+### Environment variables
+
+| Var | Purpose | Default |
+|-----|---------|---------|
+| `VSAGENT_USER_DATA_PATH` | Where state lives | `~/.vsagent` |
+| `VSAGENT_WORKSPACE_DIR` | Default worktree parent dir | `$HOME` |
+| `ORCA_WEB_PORT` | Gateway HTTP/WS port | `8080` (install.sh sets 8081) |
+| `ORCA_WEB_TOKEN` | Optional shared bearer token | unset |
+| `ORCA_WEB_PICKER_ROOTS` | Colon-separated roots the folder picker may traverse | `$HOME` |
+| `ORCA_WEBPREVIEW_DEBUG=1` | Log every upstream hop of the in-app browser proxy | off |
+
+The legacy `ORCA_*` names for user-data / workspace are still read as fallbacks.
+
+### Diagnostic flags (browser DevTools)
+
+```js
+localStorage.VSAGENT_AUTOSAVE_DEBUG = '1'      // editor auto-save flow
+localStorage.VSAGENT_EDITOR_SYNC_DEBUG = '1'   // fs:changed → editor reload
+location.reload()
+```
+
+### Logs
+
+- `~/.vsagent/logs/web-serve.log` — backend stdout/stderr
+- `journalctl --user -fu vsagent` — when running under systemd
+
+---
+
+## Building from source
 
 ```bash
-# Precompiled binary
-yay -S stably-orca-bin
-
-# Build from GitHub source
-yay -S stably-orca-git
+git clone https://github.com/goldenhelix/vsagent.git
+cd vsagent
+git checkout vsagent
+pnpm install
+pnpm run build:electron-vite   # main + renderer
+pnpm web:build                 # static web bundle into out/web
+pnpm run build:cli             # the orca/vsagent CLI
+ORCA_WEB_PORT=8081 pnpm web:serve
 ```
 
----
-
-## [New] Annotate AI Diff
-
-**Comment directly on AI-generated diffs.**
-
-Annotate any line in an AI-generated diff with your feedback, then send it back to the agent to revise. Keep the review loop tight — no copying line numbers, no context switching.
-
-<p align="center">
-  <img src="docs/assets/annotate-ai-diff.gif" alt="Orca Annotate AI Diff — comment on AI-generated diffs and send feedback to the agent" width="800" />
-</p>
-
----
-
-## [New] Hot Swap Codex Accounts
-
-**Multiple Codex accounts? Switch in one click.**
-
-If you run multiple Codex accounts to get the best token deal, Orca lets you hot-swap between them instantly — no re-login, no config files. Just pick an account and keep building.
-
-<p align="center">
-  <img src="docs/assets/codex-account-switcher.gif" alt="Orca Codex Account Switcher — hot swap between multiple Codex accounts" width="800" />
-</p>
-
----
-
-## [New] Per Worktree Browser &amp; Design Mode
-
-**See your app. Click any element. Drop it into the chat.**
-
-Orca ships with a built-in browser right inside your worktree. Preview your app as you build, then switch to Design Mode — click any UI element and it lands directly in your AI chat as context. No screenshots, no copy-pasting selectors. Just point at what you want to change and tell the agent what to do.
-
-<p align="center">
-  <img src="docs/assets/orca-design-mode.gif" alt="Orca Design Mode — click any UI element and drop it into the chat" width="800" />
-</p>
-
----
-
-## [New] Introducing the Orca CLI
-
-**Agent orchestration from your terminal.**
-
-Let your AI agent control your IDE. Use AI to add projects to your IDE, spin up worktrees, and update the current worktree's comment with meaningful progress checkpoints directly from the terminal. Ships with the Orca IDE (install under Settings).
+To package a release tarball (matches what GitHub Actions ships):
 
 ```bash
-npx skills add https://github.com/stablyai/orca --skill orca-cli
+node config/scripts/build-release-tarball.mjs
+# → dist/vsagent-linux-x64-<version>.tar.gz
 ```
 
 ---
 
-## Community &amp; Support
+## Upstream sync
 
-- **Discord:** Join the community on **[Discord](https://discord.gg/fzjDKHxv8Q)**.
-- **Twitter / X:** Follow **[@orca_build](https://x.com/orca_build)** for updates and announcements.
-- **Feedback &amp; Ideas:** We ship fast. Missing something? [Request a new feature](https://github.com/stablyai/orca/issues).
-- **Privacy:** See the [privacy & telemetry docs](https://www.onorca.dev/docs/telemetry) for what anonymous usage data Orca collects and how to opt out.
-- **Show Support:** Star this repo to follow along with our daily ships.
+The fork tracks `stablyai/orca` as the upstream. When upstream lands something worth pulling:
+
+```bash
+git remote add upstream https://github.com/stablyai/orca.git    # one-time
+git fetch upstream
+git checkout -b sync/upstream-<date>
+git merge upstream/main
+# resolve, build, smoke-test web mode, then PR back to vsagent
+```
 
 ---
 
-## Developing
+## Acknowledgements
 
-Want to contribute or run locally? See our [CONTRIBUTING.md](.github/CONTRIBUTING.md) guide.
+VSAgent is a thin layer on top of [Orca](https://github.com/stablyai/orca) by stably.ai. The hard parts — the multi-worktree workflow, the unified tab model, the agent-aware terminal layer, the editor + SCM panel — are theirs. We just taught it to run on a server.
+
+VSAgent is built and maintained by [Golden Helix](https://www.goldenhelix.com).
