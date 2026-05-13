@@ -16,9 +16,9 @@ import { handleWebPreview, isWebPreviewPath } from './webpreview/proxy'
 // Why: we treat the gateway as proof-of-concept; in production this token
 // should be exchanged through an auth flow (the same kind of pairing the
 // mobile RPC already does). For now any client that knows the shared token
-// can connect. Set ORCA_WEB_TOKEN to require a token; leave it unset to
-// allow local-only loopback connections.
-const SHARED_TOKEN = process.env.ORCA_WEB_TOKEN || null
+// can connect. Set VSAGENT_TOKEN (or the legacy ORCA_WEB_TOKEN) to require
+// one; leave it unset to allow local-only loopback connections.
+const SHARED_TOKEN = process.env.VSAGENT_TOKEN || process.env.ORCA_WEB_TOKEN || null
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -53,12 +53,17 @@ type WireOut =
 
 export type WebGatewayOptions = {
   port?: number
+  /** Bind address. Default `0.0.0.0` (reachable from the LAN). Set to
+   *  `127.0.0.1` when the gateway sits behind a reverse proxy (Caddy,
+   *  nginx) on the same host so the port isn't exposed outside loopback. */
+  host?: string
   webRoot: string
   getHostWebContents?: () => WebContents | null
 }
 
 export class WebGateway {
   private port: number
+  private host: string
   private webRoot: string
   private wss: WebSocketServer | null = null
   private httpServer: ReturnType<typeof createServer> | null = null
@@ -68,6 +73,7 @@ export class WebGateway {
 
   constructor(opts: WebGatewayOptions) {
     this.port = opts.port ?? 8765
+    this.host = opts.host ?? '0.0.0.0'
     this.webRoot = opts.webRoot
     this.getHostWebContents = opts.getHostWebContents ?? (() => null)
   }
@@ -101,9 +107,9 @@ export class WebGateway {
     this.wss.on('connection', (ws) => this.handleConnection(ws))
 
     await new Promise<void>((resolve) => {
-      this.httpServer!.listen(this.port, '0.0.0.0', () => resolve())
+      this.httpServer!.listen(this.port, this.host, () => resolve())
     })
-    console.log(`[web-gateway] listening on http://0.0.0.0:${this.port}`)
+    console.log(`[web-gateway] listening on http://${this.host}:${this.port}`)
   }
 
   async stop(): Promise<void> {

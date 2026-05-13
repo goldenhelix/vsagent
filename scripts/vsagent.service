@@ -10,7 +10,8 @@ Type=simple
 # ~/.config/systemd/user/vsagent.service. The defaults below are kept as
 # documentation of the contract; the installed copy will have concrete
 # values substituted via sed.
-Environment=ORCA_WEB_PORT=__PORT__
+Environment=VSAGENT_PORT=__PORT__
+Environment=VSAGENT_HOST=__HOST__
 Environment=VSAGENT_USER_DATA_PATH=__USER_DATA_PATH__
 Environment=NODE_ENV=production
 WorkingDirectory=__INSTALL_DIR__

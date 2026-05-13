@@ -22,6 +22,10 @@
 #   --version=<vX.Y.Z>          (VSAGENT_VERSION) pin a specific release tag
 #                               (default: latest published release)
 #   --port=<N>                  (VSAGENT_PORT)    HTTP port (default: 8081)
+#   --host=<addr>               (VSAGENT_HOST)    bind address. 0.0.0.0
+#                               (default) is LAN-reachable. Use 127.0.0.1
+#                               when fronting with Caddy/nginx on the
+#                               same host.
 #   --user-data-path=<dir>      (VSAGENT_USER_DATA_PATH) state dir
 #                               (default: ~/.vsagent)
 #   --install-dir=<dir>         (VSAGENT_HOME)    install root
@@ -39,6 +43,7 @@ set -euo pipefail
 # --------- defaults ---------
 VERSION="${VSAGENT_VERSION:-latest}"
 PORT="${VSAGENT_PORT:-8081}"
+HOST="${VSAGENT_HOST:-0.0.0.0}"
 USER_DATA_PATH="${VSAGENT_USER_DATA_PATH:-$HOME/.vsagent}"
 INSTALL_DIR="${VSAGENT_HOME:-$HOME/.local/share/vsagent}"
 BIN_DIR="$HOME/.local/bin"
@@ -55,6 +60,7 @@ for arg in "$@"; do
   case "$arg" in
     --version=*)        VERSION="${arg#*=}" ;;
     --port=*)           PORT="${arg#*=}" ;;
+    --host=*|--bind=*)  HOST="${arg#*=}" ;;
     --user-data-path=*) USER_DATA_PATH="${arg#*=}" ;;
     --install-dir=*)    INSTALL_DIR="${arg#*=}" ;;
     --repo=*)           REPO="${arg#*=}" ;;
@@ -194,7 +200,8 @@ cat > "$INSTALL_DIR/bin/vsagent" <<EOF
 # VSAgent launcher (managed by install.sh)
 set -euo pipefail
 export VSAGENT_USER_DATA_PATH="\${VSAGENT_USER_DATA_PATH:-$USER_DATA_PATH}"
-export ORCA_WEB_PORT="\${ORCA_WEB_PORT:-$PORT}"
+export VSAGENT_PORT="\${VSAGENT_PORT:-\${ORCA_WEB_PORT:-$PORT}}"
+export VSAGENT_HOST="\${VSAGENT_HOST:-\${ORCA_WEB_HOST:-$HOST}}"
 cd "$INSTALL_DIR"
 exec node "$INSTALL_DIR/config/scripts/web-serve.mjs" "\$@"
 EOF
@@ -237,7 +244,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=ORCA_WEB_PORT=$PORT
+Environment=VSAGENT_PORT=$PORT
+Environment=VSAGENT_HOST=$HOST
 Environment=VSAGENT_USER_DATA_PATH=$USER_DATA_PATH
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/bin/vsagent
@@ -251,6 +259,7 @@ EOF
   else
     sed \
       -e "s|__PORT__|$PORT|g" \
+      -e "s|__HOST__|$HOST|g" \
       -e "s|__USER_DATA_PATH__|$USER_DATA_PATH|g" \
       -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
       "$TEMPLATE_PATH" > "$UNIT_PATH"
@@ -270,6 +279,19 @@ fi
 HOSTNAME_FQDN="$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo localhost)"
 INSTALLED_VERSION="$(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo unknown)"
 
+# Why: when binding to loopback (typical reverse-proxy setup), the
+# hostname URL won't work. Suggest the right thing.
+case "$HOST" in
+  127.0.0.1|::1|localhost)
+    OPEN_URL="http://$HOST:$PORT"
+    OPEN_NOTE=" (loopback — reverse-proxy this through Caddy/nginx for external access)"
+    ;;
+  0.0.0.0|*)
+    OPEN_URL="http://$HOSTNAME_FQDN:$PORT"
+    OPEN_NOTE=""
+    ;;
+esac
+
 cat <<EOF
 
 === VSAgent installed ===
@@ -277,9 +299,9 @@ install dir:       $INSTALL_DIR
 state dir:         $USER_DATA_PATH
 launcher:          $BIN_DIR/vsagent  (and: $BIN_DIR/orca)
 version:           $INSTALLED_VERSION
-listen port:       $PORT
+bind:              $HOST:$PORT
 
-Open VSAgent at:   http://$HOSTNAME_FQDN:$PORT
+Open VSAgent at:   $OPEN_URL$OPEN_NOTE
 
 EOF
 

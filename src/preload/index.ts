@@ -1524,7 +1524,7 @@ const api = {
   fs: {
     /** Web-mode folder picker autocomplete: returns subdirectory names that
      *  start with the typed prefix under the allowlisted roots (HOME by
-     *  default, plus ORCA_WEB_PICKER_ROOTS). Never returns files. */
+     *  default, plus VSAGENT_PICKER_ROOTS). Never returns files. */
     autocompleteDir: (
       input: string
     ): Promise<{

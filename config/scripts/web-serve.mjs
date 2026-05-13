@@ -3,13 +3,14 @@
 // bundle through the gateway. Intended for shipping Orca as a hosted
 // service: a single command stands up everything a browser client needs.
 //
-// Environment variables:
-//   ORCA_WEB_PORT          HTTP port to serve the bundle + WS on (default 8080)
-//   ORCA_WEB_TOKEN         Optional shared bearer token (PoC auth)
-//   ORCA_WEB_PICKER_ROOTS  Colon-separated roots the folder picker is allowed
+// Environment variables (legacy ORCA_WEB_* names still accepted):
+//   VSAGENT_PORT           HTTP port to serve the bundle + WS on (default 8080)
+//   VSAGENT_HOST           Bind address (default 0.0.0.0). Set to 127.0.0.1
+//                          when running behind a reverse proxy on the same host.
+//   VSAGENT_TOKEN          Optional shared bearer token (PoC auth)
+//   VSAGENT_PICKER_ROOTS   Colon-separated roots the folder picker is allowed
 //                          to traverse (defaults to $HOME)
-//   VSAGENT_USER_DATA_PATH Backend data dir (default: ~/.vsagent).
-//                          ORCA_USER_DATA_PATH is honoured as a legacy alias.
+//   VSAGENT_USER_DATA_PATH Backend data dir (default: ~/.vsagent)
 //
 // Defines internally:
 //   ORCA_WEB_GATEWAY=1
@@ -80,12 +81,30 @@ try {
   // userDataPath was just created; no entries to walk.
 }
 
+// Why: resolve canonical VSAGENT_* names first, fall back to legacy ORCA_WEB_*,
+// then set BOTH on the spawned env so older code paths (and the main process's
+// own legacy fallback) see the same value. Keeps the gateway-side rename safe
+// without forcing operators to flip their env at the same time.
+const PORT = process.env.VSAGENT_PORT || process.env.ORCA_WEB_PORT || '8080'
+const HOST = process.env.VSAGENT_HOST || process.env.ORCA_WEB_HOST || '0.0.0.0'
+const TOKEN = process.env.VSAGENT_TOKEN || process.env.ORCA_WEB_TOKEN || ''
+const PICKER_ROOTS =
+  process.env.VSAGENT_PICKER_ROOTS || process.env.ORCA_WEB_PICKER_ROOTS || ''
+
 const env = {
   ...process.env,
   ORCA_WEB_GATEWAY: '1',
   ORCA_WEB_HEADLESS: '1',
   ORCA_WEB_ROOT: webRoot,
-  ORCA_WEB_PORT: process.env.ORCA_WEB_PORT || '8080',
+  VSAGENT_WEB_ROOT: webRoot,
+  VSAGENT_PORT: PORT,
+  ORCA_WEB_PORT: PORT,
+  VSAGENT_HOST: HOST,
+  ORCA_WEB_HOST: HOST,
+  ...(TOKEN ? { VSAGENT_TOKEN: TOKEN, ORCA_WEB_TOKEN: TOKEN } : {}),
+  ...(PICKER_ROOTS
+    ? { VSAGENT_PICKER_ROOTS: PICKER_ROOTS, ORCA_WEB_PICKER_ROOTS: PICKER_ROOTS }
+    : {}),
   VSAGENT_USER_DATA_PATH: userDataPath,
   ORCA_USER_DATA_PATH: userDataPath,
   ORCA_DEV_USER_DATA_PATH: userDataPath,
@@ -135,7 +154,7 @@ const teeStderr = (chunk) => {
   logStream.write(chunk)
 }
 
-console.log(`[web-serve] starting on http://0.0.0.0:${env.ORCA_WEB_PORT}`)
+console.log(`[web-serve] starting on http://${HOST}:${PORT}`)
 console.log(`[web-serve] data dir: ${userDataPath}`)
 console.log(`[web-serve] web root: ${webRoot}`)
 console.log(`[web-serve] log file: ${logPath}`)

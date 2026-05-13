@@ -28,7 +28,7 @@ This page covers:
 ## One-liner install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/goldenhelix/vsagent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/goldenhelix/vsagent/vsagent/scripts/install.sh | bash
 ```
 
 The script:
@@ -57,12 +57,21 @@ curl -fsSL https://…/install.sh | bash -s -- --port=9000 --no-systemd
 | Flag | Default | Notes |
 | --- | --- | --- |
 | `--version=vX.Y.Z` | latest | Pin to a specific release tag. Accepts `v1.2.3` or `1.2.3`. |
-| `--port=N` | `8081` | HTTP port served by the gateway. Becomes `ORCA_WEB_PORT`. |
+| `--port=N` | `8081` | HTTP port served by the gateway. Becomes `VSAGENT_PORT`. |
+| `--host=ADDR` (alias `--bind=ADDR`) | `0.0.0.0` | Bind address. Default is LAN-reachable. Set to `127.0.0.1` when fronting with Caddy/nginx on the same host so the port isn't exposed outside loopback. Becomes `VSAGENT_HOST`. |
 | `--user-data-path=DIR` | `~/.vsagent` | State directory (sqlite DBs, logs, sockets). Becomes `VSAGENT_USER_DATA_PATH`. |
 | `--install-dir=DIR` | `~/.local/share/vsagent` | Where the unpacked tarball lives. Also `VSAGENT_HOME` env. |
 | `--repo=owner/repo` | `goldenhelix/vsagent` | Override the release source (forks / mirrors). |
 | `--no-systemd` | off | Skip writing/enabling the unit. Run under tmux, supervisord, etc. |
 | `--no-start` | off | Don't start the service at the end. Useful for cold-replicating an install. |
+
+For the reverse-proxy case:
+
+```bash
+# Install bound to loopback only; Caddy/nginx in front terminates TLS.
+curl -fsSL https://raw.githubusercontent.com/goldenhelix/vsagent/vsagent/scripts/install.sh \
+  | bash -s -- --host=127.0.0.1 --port=8081
+```
 
 ### Running long after logout
 
@@ -96,14 +105,15 @@ cd ~/.local/share/vsagent
 pnpm install --prod --no-frozen-lockfile
 
 # 5. Run
-ORCA_WEB_PORT=8081 \
+VSAGENT_PORT=8081 \
+VSAGENT_HOST=0.0.0.0 \
 VSAGENT_USER_DATA_PATH=$HOME/.vsagent \
   node config/scripts/web-serve.mjs
 ```
 
 To turn that into a permanent launcher, copy
-`scripts/vsagent.service`, substitute `__PORT__`, `__USER_DATA_PATH__`,
-and `__INSTALL_DIR__`, and drop it at
+`scripts/vsagent.service`, substitute `__PORT__`, `__HOST__`,
+`__USER_DATA_PATH__`, and `__INSTALL_DIR__`, and drop it at
 `~/.config/systemd/user/vsagent.service`.
 
 ## Upgrades
@@ -111,7 +121,7 @@ and `__INSTALL_DIR__`, and drop it at
 Re-run the installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/goldenhelix/vsagent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/goldenhelix/vsagent/vsagent/scripts/install.sh | bash
 ```
 
 Idempotency notes:
@@ -157,9 +167,16 @@ sudo firewall-cmd --reload
 ```
 
 For internet-facing deployments put VSAgent behind a TLS-terminating
-reverse proxy (snippet below) and bind to localhost via `--port=8081
---no-systemd` + a wrapper, or just keep the default and lock down port
-8081 with the firewall.
+reverse proxy (snippet below) and bind to loopback so the gateway port
+isn't reachable from outside:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/goldenhelix/vsagent/vsagent/scripts/install.sh \
+  | bash -s -- --host=127.0.0.1
+```
+
+Or keep the default `0.0.0.0` bind and lock down the port with the
+firewall above.
 
 ## Reverse proxy (nginx)
 

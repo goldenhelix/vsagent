@@ -107,12 +107,13 @@ For manual install, upgrade, or systemd commands, see [`docs/install-linux.md`](
 |-----|---------|---------|
 | `VSAGENT_USER_DATA_PATH` | Where state lives | `~/.vsagent` |
 | `VSAGENT_WORKSPACE_DIR` | Default worktree parent dir | `$HOME` |
-| `ORCA_WEB_PORT` | Gateway HTTP/WS port | `8080` (install.sh sets 8081) |
-| `ORCA_WEB_TOKEN` | Optional shared bearer token | unset |
-| `ORCA_WEB_PICKER_ROOTS` | Colon-separated roots the folder picker may traverse | `$HOME` |
-| `ORCA_WEBPREVIEW_DEBUG=1` | Log every upstream hop of the in-app browser proxy | off |
+| `VSAGENT_PORT` | Gateway HTTP/WS port | `8080` (install.sh sets 8081) |
+| `VSAGENT_HOST` | Bind address. Use `127.0.0.1` behind a reverse proxy. | `0.0.0.0` |
+| `VSAGENT_TOKEN` | Optional shared bearer token | unset |
+| `VSAGENT_PICKER_ROOTS` | Colon-separated roots the folder picker may traverse | `$HOME` |
+| `VSAGENT_PROXY_DEBUG=1` | Log every upstream hop of the in-app browser proxy | off |
 
-The legacy `ORCA_*` names for user-data / workspace are still read as fallbacks.
+Legacy `ORCA_WEB_*` / `ORCA_USER_DATA_PATH` / `ORCA_WEBPREVIEW_DEBUG` names are still honoured as fallbacks so existing systemd units / shell configs don't break on upgrade.
 
 ### Diagnostic flags (browser DevTools)
 
@@ -134,12 +135,11 @@ location.reload()
 ```bash
 git clone https://github.com/goldenhelix/vsagent.git
 cd vsagent
-git checkout vsagent
 pnpm install
 pnpm run build:electron-vite   # main + renderer
 pnpm web:build                 # static web bundle into out/web
 pnpm run build:cli             # the orca/vsagent CLI
-ORCA_WEB_PORT=8081 pnpm web:serve
+VSAGENT_PORT=8081 pnpm web:serve
 ```
 
 To package a release tarball (matches what GitHub Actions ships):

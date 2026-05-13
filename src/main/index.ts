@@ -666,15 +666,21 @@ app.whenReady().then(async () => {
 
   // Why: the web gateway serves the renderer over HTTP+WS so browser clients
   // can drive the same Electron backend the desktop app uses. Off by default;
-  // enable with ORCA_WEB_GATEWAY=1 and (optionally) ORCA_WEB_TOKEN=<shared>.
+  // enable with ORCA_WEB_GATEWAY=1 and (optionally) VSAGENT_TOKEN=<shared>.
   if (process.env.ORCA_WEB_GATEWAY === '1') {
-    const explicitRoot = process.env.ORCA_WEB_ROOT
+    const explicitRoot = process.env.VSAGENT_WEB_ROOT || process.env.ORCA_WEB_ROOT
     const webRoot = explicitRoot && existsSync(explicitRoot)
       ? explicitRoot
       : join(app.getAppPath(), 'out', 'web')
-    const port = Number(process.env.ORCA_WEB_PORT || 8080)
+    const port = Number(process.env.VSAGENT_PORT || process.env.ORCA_WEB_PORT || 8080)
+    // Why: VSAGENT_HOST controls the bind address. Default `0.0.0.0` keeps the
+    // LAN-reachable behaviour intact. Operators putting a reverse proxy
+    // (Caddy / nginx) in front should set it to 127.0.0.1 so the gateway port
+    // isn't exposed outside loopback.
+    const host = process.env.VSAGENT_HOST || process.env.ORCA_WEB_HOST || '0.0.0.0'
     webGateway = new WebGateway({
       port,
+      host,
       webRoot,
       getHostWebContents: () => mainWindow?.webContents ?? null
     })

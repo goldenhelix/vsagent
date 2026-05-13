@@ -12,8 +12,13 @@ import { ipcMain } from 'electron'
 const HOME = homedir()
 // Why: allow exploring under the user's home directory. Operators that need
 // to browse outside (e.g. /var/lib/repos on a shared host) can extend this
-// list via ORCA_WEB_PICKER_ROOTS=<colon-separated absolute paths>.
-const allowlistFromEnv = (process.env.ORCA_WEB_PICKER_ROOTS || '')
+// list via VSAGENT_PICKER_ROOTS=<colon-separated absolute paths>. The legacy
+// ORCA_WEB_PICKER_ROOTS name is still honoured for backward compat.
+const allowlistFromEnv = (
+  process.env.VSAGENT_PICKER_ROOTS ||
+  process.env.ORCA_WEB_PICKER_ROOTS ||
+  ''
+)
   .split(/[:,]+/)
   .filter((p) => p.length > 0)
   .map((p) => resolve(p))

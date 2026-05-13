@@ -225,7 +225,9 @@ function doUpstreamRequest(
 
 async function forwardRequest(args: ForwardArgs): Promise<void> {
   const { req, res, sessionId } = args
-  const dbg = process.env.ORCA_WEBPREVIEW_DEBUG === '1'
+  const dbg =
+    process.env.VSAGENT_PROXY_DEBUG === '1' ||
+    process.env.ORCA_WEBPREVIEW_DEBUG === '1'
   const isTopLevelNav =
     req.headers['sec-fetch-dest'] === 'document' ||
     String(req.headers['accept'] || '').includes('text/html')
