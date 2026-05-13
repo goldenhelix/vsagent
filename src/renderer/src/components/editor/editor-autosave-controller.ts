@@ -36,11 +36,27 @@ function getDuplicateDirtySavePaths(files: OpenFile[]): string[] {
     .map(([filePath]) => filePath)
 }
 
+// Why: localStorage VSAGENT_AUTOSAVE_DEBUG=1 prints every state transition of
+// the autosave controller — when it schedules a timer, when the timer fires,
+// when queueSave starts/finishes, and any early returns. Used to find why an
+// edit hasn't reached disk despite the dirty indicator clearing.
+function autosaveDebug(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.localStorage?.getItem('VSAGENT_AUTOSAVE_DEBUG') === '1'
+  } catch {
+    return false
+  }
+}
+function autosaveLog(...args: unknown[]): void {
+  if (autosaveDebug()) console.log('[autosave]', ...args)
+}
+
 export function attachEditorAutosaveController(store: AppStoreApi): () => void {
   const autoSaveTimers = new Map<string, number>()
   const autoSaveScheduledContent = new Map<string, string>()
   const saveQueue = new Map<string, Promise<void>>()
   const saveGeneration = new Map<string, number>()
+  autosaveLog('attach')
 
   const clearAutoSaveTimer = (fileId: string): void => {
     const timerId = autoSaveTimers.get(fileId)
@@ -58,23 +74,36 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
   const queueSave = (file: OpenFile, fallbackContent: string): Promise<void> => {
     clearAutoSaveTimer(file.id)
     const queuedGeneration = saveGeneration.get(file.id) ?? 0
+    autosaveLog('queueSave start', { fileId: file.id, gen: queuedGeneration })
 
     const previousSave = saveQueue.get(file.id) ?? Promise.resolve()
     const queuedSave = previousSave
       .catch(() => undefined)
       .then(async () => {
         if ((saveGeneration.get(file.id) ?? 0) !== queuedGeneration) {
+          autosaveLog('queueSave bail: generation bumped before run', {
+            fileId: file.id,
+            queued: queuedGeneration,
+            current: saveGeneration.get(file.id) ?? 0
+          })
           return
         }
 
         const state = store.getState()
         const liveFile = state.openFiles.find((openFile) => openFile.id === file.id) ?? null
         if (!liveFile) {
+          autosaveLog('queueSave bail: no live file', { fileId: file.id })
           return
         }
 
         const contentToSave = state.editorDrafts[file.id] ?? fallbackContent
         const connectionId = getConnectionId(liveFile.worktreeId) ?? undefined
+        autosaveLog('queueSave writeFile', {
+          fileId: file.id,
+          filePath: liveFile.filePath,
+          contentLen: contentToSave.length,
+          connectionId
+        })
         // Why: stamp before the write so the fs:changed event that our own
         // write produces is ignored by useEditorExternalWatch instead of
         // round-tripping back into a setContent that jumps the cursor to the
@@ -87,11 +116,16 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
             content: contentToSave,
             connectionId
           })
+          autosaveLog('queueSave writeFile ok', { fileId: file.id })
         } catch (error) {
           // Why: the self-write stamp is only valid if a disk write actually
           // happened. Clearing it on failure keeps the external watcher from
           // suppressing a real third-party update that lands during the TTL.
           clearSelfWrite(liveFile.filePath)
+          autosaveLog('queueSave writeFile error', {
+            fileId: file.id,
+            error: error instanceof Error ? error.message : String(error)
+          })
           throw error
         }
 
@@ -162,6 +196,7 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
     }
 
     if (!state.settings?.editorAutoSave) {
+      if (autosaveDebug()) autosaveLog('sync: autoSave setting off, hasSettings=' + Boolean(state.settings))
       return
     }
 
@@ -169,6 +204,15 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
     for (const file of state.openFiles) {
       const draft = state.editorDrafts[file.id]
       if (!file.isDirty || draft === undefined || !canAutoSaveOpenFile(file)) {
+        if (autosaveDebug() && file.isDirty) {
+          autosaveLog('sync: skip', {
+            fileId: file.id,
+            isDirty: file.isDirty,
+            hasDraft: draft !== undefined,
+            mode: file.mode,
+            canSave: canAutoSaveOpenFile(file)
+          })
+        }
         clearAutoSaveTimer(file.id)
         continue
       }
@@ -179,9 +223,11 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
 
       clearAutoSaveTimer(file.id)
       autoSaveScheduledContent.set(file.id, draft)
+      autosaveLog('schedule timer', { fileId: file.id, delayMs: autoSaveDelayMs, draftLen: draft.length })
       const timerId = window.setTimeout(() => {
         autoSaveTimers.delete(file.id)
         autoSaveScheduledContent.delete(file.id)
+        autosaveLog('timer fired -> queueSave', { fileId: file.id })
         void queueSave(file, draft)
       }, autoSaveDelayMs)
       autoSaveTimers.set(file.id, timerId)

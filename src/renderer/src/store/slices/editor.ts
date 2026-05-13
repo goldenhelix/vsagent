@@ -2211,12 +2211,36 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           .map((w) => w.id)
       )
 
+      // Why: cross-browser session:changed echoes hit this hydrator
+      // continuously (any UI mutation in another tab — terminal output,
+      // focus shifts, browser-pane URL changes — re-broadcasts the
+      // session). The previous implementation replaced openFiles with
+      // freshly-built entries that hardcoded isDirty:false, which wiped
+      // the local user's pending edits and made the autosave subscriber
+      // cancel its timer before the write fired. Index existing files by
+      // id and merge so a local entry that's actively being edited keeps
+      // its dirty flag and mode — the session-derived payload doesn't
+      // carry those fields anyway, so it can't authoritatively set them.
+      const existingById = new Map(s.openFiles.map((f) => [f.id, f]))
       const openFiles: OpenFile[] = []
       for (const [worktreeId, files] of Object.entries(openFilesByWorktree)) {
         if (!validWorktreeIds.has(worktreeId)) {
           continue
         }
         for (const pf of files) {
+          const existing = existingById.get(pf.filePath)
+          if (existing && existing.worktreeId === worktreeId) {
+            // Why: this browser already has the file open. Preserve its
+            // local isDirty / mode / externalMutation / etc. and only
+            // refresh fields the session payload authoritatively owns
+            // (language, isPreview).
+            openFiles.push({
+              ...existing,
+              language: pf.language,
+              isPreview: pf.isPreview
+            })
+            continue
+          }
           openFiles.push({
             id: pf.filePath,
             filePath: pf.filePath,
