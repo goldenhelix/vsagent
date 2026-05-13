@@ -18,7 +18,7 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import { request as httpRequest } from 'http'
 import { request as httpsRequest } from 'https'
 import { URL } from 'url'
-import { getSession } from './registry'
+import { getSession, updateSessionOrigin } from './registry'
 import { buildRewriteScript } from './rewrite-script'
 
 const PROXY_PREFIX = '/__orca/webpreview'
@@ -117,7 +117,8 @@ export async function handleWebPreview(
         res,
         target: ext,
         sessionId,
-        injectHtml: false
+        injectHtml: false,
+        followCrossOriginRedirect: false
       })
     } catch {
       res.statusCode = 400
@@ -146,7 +147,8 @@ export async function handleWebPreview(
     target: upstreamUrl,
     sessionId,
     targetOrigin: session.targetOrigin,
-    injectHtml: true
+    injectHtml: true,
+    followCrossOriginRedirect: true
   })
 }
 
@@ -160,6 +162,12 @@ type ForwardArgs = {
   // those responses), so passing undefined disables injection.
   targetOrigin?: string
   injectHtml: boolean
+  // Why: on the top-level (session-rooted) proxy path, a cross-origin
+  // redirect should mutate the session's target so the address bar tracks
+  // the final URL — same semantics as a real browser tab following a 30x.
+  // For _ext (which is itself a cross-origin escape hatch), don't mutate;
+  // we let the redirect chain stay scoped to _ext.
+  followCrossOriginRedirect: boolean
 }
 
 function forwardRequest(args: ForwardArgs): Promise<void> {
@@ -249,12 +257,32 @@ function forwardRequest(args: ForwardArgs): Promise<void> {
       // Copy response headers, filter out hop-by-hop, rewrite Location +
       // Set-Cookie so they stay inside the proxy path.
       const proxyPathPrefix = `${PROXY_PREFIX}/${sessionId}`
+      const statusCode = upstreamRes.statusCode ?? 0
+      const isRedirect =
+        statusCode === 301 ||
+        statusCode === 302 ||
+        statusCode === 303 ||
+        statusCode === 307 ||
+        statusCode === 308
+      // Why: only follow on top-level navigations (the iframe load). Sub-resources
+      // (scripts, images, XHR) handle redirects in the browser; updating the
+      // session for those would break unrelated in-page fetches.
+      const isTopLevelNav =
+        (req.headers['sec-fetch-dest'] === 'document') ||
+        String(req.headers['accept'] || '').includes('text/html')
       for (const [name, value] of Object.entries(upstreamRes.headers)) {
         if (value === undefined) continue
         const lower = name.toLowerCase()
         if (HOP_BY_HOP_RESPONSE.has(lower)) continue
         if (lower === 'location' && typeof value === 'string') {
-          res.setHeader(name, rewriteLocation(value, target, proxyPathPrefix))
+          res.setHeader(
+            name,
+            rewriteLocation(value, target, proxyPathPrefix, {
+              sessionId,
+              followCrossOriginRedirect:
+                args.followCrossOriginRedirect && isRedirect && isTopLevelNav
+            })
+          )
           continue
         }
         if (lower === 'set-cookie') {
@@ -334,13 +362,33 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function rewriteLocation(location: string, base: URL, proxyPathPrefix: string): string {
+type RewriteLocationOpts = {
+  sessionId: string
+  // Why: true only on top-level navigations under the session-rooted proxy
+  // path. When the upstream 30x's to a different origin (e.g. http→https,
+  // apex→www), retarget the session at the new origin and keep the
+  // redirect same-origin. This is what a real browser tab does — the
+  // address bar tracks the final URL, and subsequent sub-resource fetches
+  // resolve against the new origin via the same session.
+  followCrossOriginRedirect: boolean
+}
+
+function rewriteLocation(
+  location: string,
+  base: URL,
+  proxyPathPrefix: string,
+  opts: RewriteLocationOpts
+): string {
   try {
     const u = new URL(location, base)
     if (u.origin === base.origin) {
       return proxyPathPrefix + u.pathname + u.search + u.hash
     }
-    // Cross-origin redirect — route through the _ext escape hatch.
+    if (opts.followCrossOriginRedirect) {
+      updateSessionOrigin(opts.sessionId, u.origin)
+      return proxyPathPrefix + u.pathname + u.search + u.hash
+    }
+    // Cross-origin redirect that we shouldn't follow — route through _ext.
     return `${proxyPathPrefix}/_ext?u=${encodeURIComponent(u.toString())}`
   } catch {
     return location
