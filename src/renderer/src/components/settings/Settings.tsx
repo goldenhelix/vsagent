@@ -15,6 +15,7 @@ import {
   Palette,
   Server,
   SlidersHorizontal,
+  Smartphone,
   Blocks,
   SquareTerminal,
   UserCog
@@ -51,6 +52,7 @@ import {
   DEVELOPER_PERMISSIONS_PANE_SEARCH_ENTRIES
 } from './DeveloperPermissionsPane'
 import { ComputerUsePane, COMPUTER_USE_PANE_SEARCH_ENTRIES } from './ComputerUsePane'
+import { MobileSettingsPane, MOBILE_SETTINGS_PANE_SEARCH_ENTRIES } from './MobileSettingsPane'
 import { PrivacyPane } from './PrivacyPane'
 import { PRIVACY_PANE_SEARCH_ENTRIES } from './privacy-search'
 import { SettingsSidebar } from './SettingsSidebar'
@@ -432,6 +434,14 @@ function Settings(): React.JSX.Element {
         searchEntries: NOTIFICATIONS_PANE_SEARCH_ENTRIES
       },
       {
+        id: 'mobile',
+        title: 'Mobile',
+        description: 'Pair and manage mobile devices.',
+        icon: Smartphone,
+        searchEntries: MOBILE_SETTINGS_PANE_SEARCH_ENTRIES,
+        badge: 'Beta'
+      },
+      {
         id: 'computer-use',
         title: 'Computer Use',
         description: 'Enable agents to control any app on your computer.',
@@ -779,6 +789,16 @@ function Settings(): React.JSX.Element {
                   searchEntries={NOTIFICATIONS_PANE_SEARCH_ENTRIES}
                 >
                   <NotificationsPane settings={settings} updateSettings={updateSettings} />
+                </SettingsSection>
+
+                <SettingsSection
+                  id="mobile"
+                  title="Mobile"
+                  badge="Beta"
+                  description="Pair and manage mobile devices."
+                  searchEntries={MOBILE_SETTINGS_PANE_SEARCH_ENTRIES}
+                >
+                  <MobileSettingsPane settings={settings} updateSettings={updateSettings} />
                 </SettingsSection>
 
                 <SettingsSection

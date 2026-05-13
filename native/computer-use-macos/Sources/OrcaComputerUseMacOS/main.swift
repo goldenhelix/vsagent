@@ -2317,6 +2317,11 @@ private final class PermissionView: NSView {
 }
 
 private final class PermissionDragAssistantController: NSWindowController {
+    private struct SettingsWindowState {
+        let frame: NSRect
+        let isVisible: Bool
+    }
+
     private let fallbackVisibleFrame: NSRect?
     private let onClose: () -> Void
     private var hasSeenSettingsWindow = false
@@ -2337,7 +2342,10 @@ private final class PermissionDragAssistantController: NSWindowController {
         window.hidesOnDeactivate = false
         window.isFloatingPanel = true
         window.becomesKeyOnlyIfNeeded = true
-        window.isMovableByWindowBackground = true
+        // Why: the assistant belongs to System Settings' position; user drags
+        // should either start the app-file drag or do nothing, not move the panel.
+        window.isMovable = false
+        window.isMovableByWindowBackground = false
         window.hasShadow = true
         self.init(window: window, fallbackVisibleFrame: fallbackVisibleFrame, onClose: onClose)
         window.contentView = PermissionDragAssistantView(permission: permission, appURL: Bundle.main.bundleURL) { [weak self, weak window] in
@@ -2372,11 +2380,12 @@ private final class PermissionDragAssistantController: NSWindowController {
         for (index, delay) in delays.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.window?.isVisible != true else { return }
-                if self.systemSettingsIsFrontmost() && self.positionNearSettingsWindow() {
+                if let settingsWindow = self.systemSettingsWindowState(), settingsWindow.isVisible {
+                    self.positionNearSettingsWindow(settingsWindow.frame)
                     self.showWindow(nil)
                     self.window?.orderFrontRegardless()
                 } else if index == delays.count - 1 && self.systemSettingsIsFrontmost() {
-                        self.positionFallback()
+                    self.positionFallback()
                     self.showWindow(nil)
                     self.window?.orderFrontRegardless()
                 }
@@ -2399,14 +2408,17 @@ private final class PermissionDragAssistantController: NSWindowController {
             followTimer = nil
             return
         }
-        let settingsWindowExists = systemSettingsWindowFrame() != nil
-        if settingsWindowExists {
+        let settingsWindow = systemSettingsWindowState()
+        if settingsWindow != nil {
             hasSeenSettingsWindow = true
         } else if hasSeenSettingsWindow {
             NSApp.terminate(nil)
             return
         }
-        if systemSettingsIsFrontmost() && settingsWindowExists && positionNearSettingsWindow() {
+        // Why: System Settings can stay visible on one display while the user
+        // works on another; follow actual occlusion instead of app focus.
+        if let settingsWindow, settingsWindow.isVisible {
+            positionNearSettingsWindow(settingsWindow.frame)
             if !window.isVisible {
                 showWindow(nil)
             }
@@ -2421,14 +2433,12 @@ private final class PermissionDragAssistantController: NSWindowController {
         return bundleId == "com.apple.systempreferences" || bundleId == "com.apple.SystemSettings"
     }
 
-    private func positionNearSettingsWindow() -> Bool {
-        guard let window else { return false }
-        guard let settingsFrame = systemSettingsWindowFrame() else { return false }
+    private func positionNearSettingsWindow(_ settingsFrame: NSRect) {
+        guard let window else { return }
         let visibleFrame = visibleFrameContaining(settingsFrame)
         let x = settingsFrame.maxX - window.frame.width - 18
         let y = settingsFrame.minY + 18
         window.setFrameOrigin(clampedOrigin(x: x, y: y, window: window, visibleFrame: visibleFrame))
-        return true
     }
 
     private func positionFallback() {
@@ -2453,28 +2463,87 @@ private final class PermissionDragAssistantController: NSWindowController {
         )
     }
 
-    private func systemSettingsWindowFrame() -> NSRect? {
+    private func systemSettingsWindowState() -> SettingsWindowState? {
         guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return nil
         }
+        var occludingFrames: [NSRect] = []
         for windowInfo in windows {
-            guard
-                let ownerName = windowInfo[kCGWindowOwnerName as String] as? String,
-                ownerName == "System Settings" || ownerName == "System Preferences",
-                (windowInfo[kCGWindowLayer as String] as? Int) == 0,
-                let bounds = windowInfo[kCGWindowBounds as String] as? [String: CGFloat],
-                let x = bounds["X"],
-                let y = bounds["Y"],
-                let width = bounds["Width"],
-                let height = bounds["Height"],
-                width > 520,
-                height > 360
-            else {
+            guard let frame = cgWindowFrame(windowInfo), isNormalWindow(windowInfo), frame.width > 0, frame.height > 0 else {
                 continue
             }
-            return appKitFrameForCGWindowFrame(NSRect(x: x, y: y, width: width, height: height))
+            if isSystemSettingsWindow(windowInfo), frame.width > 520, frame.height > 360 {
+                return SettingsWindowState(
+                    frame: appKitFrameForCGWindowFrame(frame),
+                    isVisible: !isWindowFullyCovered(frame, by: occludingFrames)
+                )
+            }
+            occludingFrames.append(frame)
         }
         return nil
+    }
+
+    private func isSystemSettingsWindow(_ windowInfo: [String: Any]) -> Bool {
+        guard let ownerName = windowInfo[kCGWindowOwnerName as String] as? String else {
+            return false
+        }
+        return ownerName == "System Settings" || ownerName == "System Preferences"
+    }
+
+    private func isNormalWindow(_ windowInfo: [String: Any]) -> Bool {
+        guard (windowInfo[kCGWindowLayer as String] as? Int) == 0 else {
+            return false
+        }
+        if let alpha = windowInfo[kCGWindowAlpha as String] as? CGFloat, alpha <= 0 {
+            return false
+        }
+        return true
+    }
+
+    private func cgWindowFrame(_ windowInfo: [String: Any]) -> NSRect? {
+        guard
+            let bounds = windowInfo[kCGWindowBounds as String] as? [String: CGFloat],
+            let x = bounds["X"],
+            let y = bounds["Y"],
+            let width = bounds["Width"],
+            let height = bounds["Height"]
+        else {
+            return nil
+        }
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func isWindowFullyCovered(_ frame: NSRect, by occludingFrames: [NSRect]) -> Bool {
+        var uncoveredFrames = [frame]
+        for occludingFrame in occludingFrames {
+            uncoveredFrames = uncoveredFrames.flatMap { subtract(occludingFrame, from: $0) }
+            if uncoveredFrames.isEmpty {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func subtract(_ coveringFrame: NSRect, from frame: NSRect) -> [NSRect] {
+        let overlap = frame.intersection(coveringFrame)
+        guard !overlap.isNull, overlap.width > 0, overlap.height > 0 else {
+            return [frame]
+        }
+
+        var remaining: [NSRect] = []
+        if overlap.minY > frame.minY {
+            remaining.append(NSRect(x: frame.minX, y: frame.minY, width: frame.width, height: overlap.minY - frame.minY))
+        }
+        if overlap.maxY < frame.maxY {
+            remaining.append(NSRect(x: frame.minX, y: overlap.maxY, width: frame.width, height: frame.maxY - overlap.maxY))
+        }
+        if overlap.minX > frame.minX {
+            remaining.append(NSRect(x: frame.minX, y: overlap.minY, width: overlap.minX - frame.minX, height: overlap.height))
+        }
+        if overlap.maxX < frame.maxX {
+            remaining.append(NSRect(x: overlap.maxX, y: overlap.minY, width: frame.maxX - overlap.maxX, height: overlap.height))
+        }
+        return remaining.filter { $0.width > 0 && $0.height > 0 }
     }
 
     private func appKitFrameForCGWindowFrame(_ cgFrame: NSRect) -> NSRect {
@@ -2662,11 +2731,32 @@ private final class DraggableAppTile: NSView, NSDraggingSource {
 }
 
 private enum PermissionPalette {
-    static let background = NSColor(calibratedWhite: 0.16, alpha: 0.98)
-    static let card = NSColor(calibratedWhite: 0.22, alpha: 0.98)
-    static let border = NSColor(calibratedWhite: 0.36, alpha: 0.9)
-    static let primaryText = NSColor(calibratedWhite: 0.94, alpha: 1)
-    static let secondaryText = NSColor(calibratedWhite: 0.66, alpha: 1)
+    static let background = adaptiveColor(
+        light: NSColor(calibratedWhite: 0.94, alpha: 0.98),
+        dark: NSColor(calibratedWhite: 0.20, alpha: 0.98)
+    )
+    static let card = adaptiveColor(
+        light: NSColor(calibratedWhite: 0.99, alpha: 0.98),
+        dark: NSColor(calibratedWhite: 0.25, alpha: 0.98)
+    )
+    static let border = adaptiveColor(
+        light: NSColor(calibratedWhite: 0.0, alpha: 0.14),
+        dark: NSColor(calibratedWhite: 1.0, alpha: 0.22)
+    )
+    static let primaryText = NSColor.labelColor
+    static let secondaryText = NSColor.secondaryLabelColor
+
+    private static func adaptiveColor(light: NSColor, dark: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let bestMatch = appearance.bestMatch(from: [
+                .aqua,
+                .darkAqua,
+                .accessibilityHighContrastAqua,
+                .accessibilityHighContrastDarkAqua
+            ])
+            return bestMatch == .darkAqua || bestMatch == .accessibilityHighContrastDarkAqua ? dark : light
+        }
+    }
 }
 
 private final class ButtonTarget: NSObject {

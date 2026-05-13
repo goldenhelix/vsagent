@@ -13,7 +13,7 @@ import { deployAndLaunchRelay } from './ssh-relay-deploy'
 import { isRelayVersionMismatchError } from './ssh-relay-version-mismatch-error'
 import type { RelayVersionMismatchError } from './ssh-relay-version-mismatch-error'
 import { SshChannelMultiplexer } from './ssh-channel-multiplexer'
-import { SshPtyProvider } from '../providers/ssh-pty-provider'
+import { SshPtyProvider, isSshPtyNotFoundError } from '../providers/ssh-pty-provider'
 import { SshFilesystemProvider } from '../providers/ssh-filesystem-provider'
 import { SshGitProvider } from '../providers/ssh-git-provider'
 import {
@@ -23,7 +23,8 @@ import {
   getPtyIdsForConnection,
   clearPtyOwnershipForConnection,
   clearProviderPtyState,
-  deletePtyOwnership
+  deletePtyOwnership,
+  setPtyOwnership
 } from '../ipc/pty'
 import {
   registerSshFilesystemProvider,
@@ -135,6 +136,7 @@ export class SshRelaySession {
 
       const mux = new SshChannelMultiplexer(transport)
       this.mux = mux
+      const ownsAttempt = (): boolean => this.mux === mux && !this.isDisposed()
 
       // Why: verify the relay is actually responsive before registering
       // providers. In --connect mode the bridge may have already closed
@@ -156,7 +158,15 @@ export class SshRelaySession {
       }
 
       if (this.isDisposed()) {
-        this.teardownProviders('shutdown')
+        this.teardownProviders('connection_lost')
+        throw new Error('Session disposed during establish')
+      }
+
+      // Why: explicit disconnect keeps PTY ownership so a later manual connect
+      // must reattach those remote PTYs through the fresh relay connection.
+      await this.reattachKnownPtys(ownsAttempt)
+
+      if (!ownsAttempt()) {
         throw new Error('Session disposed during establish')
       }
 
@@ -170,7 +180,7 @@ export class SshRelaySession {
       // registered. teardownProviders cleans up everything so a subsequent
       // establish() call starts from a clean slate.
       if (!this.isDisposed()) {
-        this.teardownProviders('shutdown')
+        this.teardownProviders('connection_lost')
         this._state = 'idle'
       }
       // Why: a wire-handshake mismatch on the FIRST connect is also terminal
@@ -278,34 +288,7 @@ export class SshRelaySession {
         return
       }
 
-      // Re-attach to any PTYs that were alive before the disconnect.
-      const ptyIds = getPtyIdsForConnection(this.targetId)
-      const ptyProvider = getSshPtyProvider(this.targetId) as SshPtyProvider | undefined
-      if (ptyProvider) {
-        for (const ptyId of ptyIds) {
-          if (!ownsAttempt()) {
-            return
-          }
-          try {
-            await ptyProvider.attach(ptyId)
-          } catch (err) {
-            console.warn(
-              `[ssh-relay-session] Dropping stale PTY ${ptyId} for ${this.targetId} after relay reattach failed: ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            )
-            clearProviderPtyState(ptyId)
-            deletePtyOwnership(ptyId)
-            // Why: if the new relay cannot reattach this id, the remote
-            // backing process is gone. Tell the renderer so it clears stale
-            // pane bindings instead of keeping a cursor-only terminal.
-            const win = this.getMainWindow()
-            if (win && !win.isDestroyed()) {
-              win.webContents.send('pty:exit', { id: ptyId, code: -1 })
-            }
-          }
-        }
-      }
+      await this.reattachKnownPtys(ownsAttempt)
 
       if (!ownsAttempt()) {
         return
@@ -330,6 +313,9 @@ export class SshRelaySession {
         console.warn(
           `[ssh-relay-session] Terminal relay version mismatch for ${this.targetId}: ${err.message}`
         )
+        if (this.abortController === abortController && !this.isDisposed()) {
+          this._state = 'idle'
+        }
         this._onTerminalRelayError?.(this.targetId, err)
         return
       }
@@ -339,6 +325,13 @@ export class SshRelaySession {
       console.warn(
         `[ssh-relay-session] Failed to re-establish relay for ${this.targetId}: ${err instanceof Error ? err.message : String(err)}`
       )
+      if (this.abortController === abortController && !this.isDisposed()) {
+        // Why: non-not-found PTY attach failures are usually transient mux or
+        // relay transport failures. Treat them like relay loss so ssh.ts's
+        // bounded backoff retries instead of stranding the session forever in
+        // reconnecting.
+        this._onRelayLost?.(this.targetId)
+      }
     } finally {
       if (this.abortController === abortController) {
         this.abortController = null
@@ -357,6 +350,22 @@ export class SshRelaySession {
     void this.portForwardManager.removeAllForwards(this.targetId)
     this.broadcastEmptyLists()
     this.teardownProviders('shutdown')
+    this.store.markSshRemotePtyLeases(this.targetId, 'terminated')
+    this._state = 'disposed'
+  }
+
+  detach(): void {
+    if (this._state === 'disposed') {
+      return
+    }
+    this.abortController?.abort()
+    this.stopPortScanning()
+    this.broadcastEmptyLists()
+    // Why: app/window disconnect is non-destructive for remote PTYs. The relay
+    // owns the grace timer, so Orca must unregister local providers without
+    // clearing PTY ownership needed for reattach.
+    this.teardownProviders('connection_lost')
+    this.store.markSshRemotePtyLeases(this.targetId, 'detached')
     this._state = 'disposed'
   }
 
@@ -519,11 +528,58 @@ export class SshRelaySession {
     ptyProvider.onExit((payload) => {
       clearProviderPtyState(payload.id)
       deletePtyOwnership(payload.id)
+      this.store.markSshRemotePtyLease(this.targetId, payload.id, 'terminated')
       this.runtime?.onPtyExit(payload.id, payload.code)
       const win = getWin()
       if (win && !win.isDestroyed()) {
         win.webContents.send('pty:exit', payload)
       }
     })
+  }
+
+  private async reattachKnownPtys(shouldContinue: () => boolean): Promise<void> {
+    const leasedPtyIds = this.store
+      .getSshRemotePtyLeases(this.targetId)
+      .filter((lease) => lease.state !== 'terminated' && lease.state !== 'expired')
+      .map((lease) => lease.ptyId)
+    // Why: after app restart, ptyOwnership is empty but durable SSH leases
+    // still describe remote PTYs that survived in the relay grace window.
+    const ptyIds = Array.from(new Set([...getPtyIdsForConnection(this.targetId), ...leasedPtyIds]))
+    const ptyProvider = getSshPtyProvider(this.targetId) as SshPtyProvider | undefined
+    if (!ptyProvider) {
+      return
+    }
+    for (const ptyId of ptyIds) {
+      if (!shouldContinue()) {
+        return
+      }
+      try {
+        await ptyProvider.attach(ptyId)
+        if (!shouldContinue()) {
+          return
+        }
+        setPtyOwnership(ptyId, this.targetId)
+        this.store.markSshRemotePtyLease(this.targetId, ptyId, 'attached')
+      } catch (err) {
+        if (!isSshPtyNotFoundError(err)) {
+          throw err
+        }
+        console.warn(
+          `[ssh-relay-session] Dropping stale PTY ${ptyId} for ${this.targetId} after relay reattach failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        )
+        clearProviderPtyState(ptyId)
+        deletePtyOwnership(ptyId)
+        this.store.markSshRemotePtyLease(this.targetId, ptyId, 'expired')
+        // Why: if the new relay cannot reattach this id, the remote backing
+        // process is gone. Tell the renderer so it clears stale pane bindings
+        // instead of keeping a cursor-only terminal.
+        const win = this.getMainWindow()
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('pty:exit', { id: ptyId, code: -1 })
+        }
+      }
+    }
   }
 }

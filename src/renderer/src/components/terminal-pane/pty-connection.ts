@@ -4,7 +4,6 @@ import type { IDisposable } from '@xterm/xterm'
 import { isGeminiTerminalTitle, isClaudeAgent } from '@/lib/agent-status'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { useAppStore } from '@/store'
-import { toast } from 'sonner'
 import type { PtyConnectResult } from './pty-transport'
 import { createIpcPtyTransport } from './pty-transport'
 import { shouldSeedCacheTimerOnInitialTitle } from './cache-timer-seeding'
@@ -29,14 +28,42 @@ import {
 } from '@/lib/pane-manager/pane-terminal-output-scheduler'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
+const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
 
 // Why: when multiple panes/tabs need the same deferred SSH connection,
 // the first one calls ssh.connect() and subsequent ones must wait for it
 // rather than returning early (which would leave them disconnected). This
 // helper either connects or waits for an in-flight connect to finish.
 type SshConnectResult = { connected: true } | { connected: false; error: string }
+type UserInitiatedSshConnectOutcome = 'connected' | 'cancelled' | 'failed'
 
 const sshConnectPromises = new Map<string, Promise<SshConnectResult>>()
+
+function isSshSessionExpiredError(err: unknown): boolean {
+  return (err instanceof Error ? err.message : String(err)).includes(SSH_SESSION_EXPIRED_ERROR)
+}
+
+function formatSshSessionExpiredMessage(): string {
+  return 'Previous SSH session expired. Start a new terminal to continue.'
+}
+
+function sshPromptConnectOutcomeForStatus(
+  status: string | undefined,
+  sawNonDisconnected: boolean
+): UserInitiatedSshConnectOutcome | null {
+  if (status === 'connected') {
+    return 'connected'
+  }
+  if (status === 'auth-failed' || status === 'error' || status === 'reconnection-failed') {
+    return 'failed'
+  }
+  // Why: this only counts after a real connect attempt; the entry-time
+  // disconnected state just means the user still needs to initiate auth.
+  if (sawNonDisconnected && status === 'disconnected') {
+    return 'cancelled'
+  }
+  return null
+}
 
 async function waitForSshConnection(connectionId: string): Promise<SshConnectResult> {
   const state = useAppStore.getState().sshConnectionStates.get(connectionId)
@@ -491,28 +518,35 @@ export function connectPanePty(
       if (disposed) {
         return
       }
-      const unregisterSerializer = registerPtySerializer(ptyId, async (opts) => {
-        try {
-          await waitForTerminalOutputParsed(pane.terminal)
-          // Why: alt-screen TUIs (vim, claude-code) hold transient state in
-          // the alternate screen. The hydration path requests
-          // altScreenForcesZeroRows so normal-buffer scrollback isn't bled
-          // into the seed when the user is mid-TUI; the read-fallback path
-          // omits it because it wants the user's currently-visible content.
-          const alt = pane.terminal.buffer.active.type === 'alternate'
-          const data =
-            opts?.altScreenForcesZeroRows && alt
-              ? pane.serializeAddon.serialize({ scrollback: 0 })
-              : pane.serializeAddon.serialize({ scrollback: opts?.scrollbackRows })
-          return {
-            data,
-            cols: pane.terminal.cols,
-            rows: pane.terminal.rows
+      const unregisterSerializer = registerPtySerializer(
+        ptyId,
+        async (opts) => {
+          try {
+            await waitForTerminalOutputParsed(pane.terminal)
+            // Why: alt-screen TUIs (vim, claude-code) hold transient state in
+            // the alternate screen. The hydration path requests
+            // altScreenForcesZeroRows so normal-buffer scrollback isn't bled
+            // into the seed when the user is mid-TUI; the read-fallback path
+            // omits it because it wants the user's currently-visible content.
+            const alt = pane.terminal.buffer.active.type === 'alternate'
+            const data =
+              opts?.altScreenForcesZeroRows && alt
+                ? pane.serializeAddon.serialize({ scrollback: 0 })
+                : pane.serializeAddon.serialize({ scrollback: opts?.scrollbackRows })
+            return {
+              data,
+              cols: pane.terminal.cols,
+              rows: pane.terminal.rows
+            }
+          } catch {
+            return null
           }
-        } catch {
-          return null
+        },
+        () => {
+          discardTerminalOutput(pane.terminal)
+          pane.terminal.clear()
         }
-      })
+      )
       const unregisterTitleSource = registerPtyTitleSource(ptyId, (handler) =>
         pane.terminal.onTitleChange(handler)
       )
@@ -661,6 +695,14 @@ export function connectPanePty(
         startFreshSpawn()
         return
       }
+      if (connectResult?.sessionExpired) {
+        reportError(formatSshSessionExpiredMessage())
+        deps.syncPanePtyLayoutBinding(pane.id, null)
+        if (staleSessionId) {
+          deps.clearTabPtyId(deps.tabId, staleSessionId)
+        }
+        return
+      }
       bindPanePtyId(pane.id, ptyId, deps.tabId)
       pane.container.dataset.ptyId = ptyId
       deps.syncPanePtyLayoutBinding(pane.id, ptyId)
@@ -723,13 +765,6 @@ export function connectPanePty(
         writeReplayData(POST_REPLAY_MODE_RESET)
         window.api.pty.ackColdRestore(ptyId)
       }
-      if (connectResult?.sessionExpired) {
-        toast.info('Previous SSH session expired.', {
-          id: `ssh-session-expired-${deps.tabId}`,
-          description: 'Started a new shell.'
-        })
-      }
-
       // Why: when a mobile-fit override is active, skip sending desktop dims
       // to the PTY — the PTY is already at phone dimensions and must stay there.
       const reattachPtyId = transport.getPtyId()
@@ -796,7 +831,7 @@ export function connectPanePty(
               // forever if the user cancels or the connect fails —
               // waitForSshConnection below has its own error path that will
               // surface the failure via reportError.
-              await new Promise<void>((resolve) => {
+              const outcome = await new Promise<UserInitiatedSshConnectOutcome>((resolve) => {
                 // Why: 'disconnected' counts as terminal only after we've
                 // observed a non-disconnected status — i.e. the user actually
                 // initiated a connect attempt that returned to 'disconnected'
@@ -807,51 +842,41 @@ export function connectPanePty(
                   useAppStore.getState().sshConnectionStates.get(connectionId)?.status !==
                     'disconnected' &&
                   useAppStore.getState().sshConnectionStates.get(connectionId)?.status !== undefined
-                const isTerminalStatus = (status: string | undefined): boolean => {
-                  if (
-                    status === 'connected' ||
-                    status === 'auth-failed' ||
-                    status === 'error' ||
-                    status === 'reconnection-failed'
-                  ) {
-                    return true
-                  }
-                  // Why: a return to 'disconnected' after a connect attempt
-                  // means the user cancelled or the dialog was dismissed —
-                  // resolve so the gate doesn't hang forever.
-                  return sawNonDisconnected && status === 'disconnected'
-                }
+                let resolvedOutcome: UserInitiatedSshConnectOutcome = 'cancelled'
                 let settled = false
-                const finish = (): void => {
+                const finish = (nextOutcome: UserInitiatedSshConnectOutcome): void => {
                   if (settled) {
                     return
                   }
+                  resolvedOutcome = nextOutcome
                   settled = true
                   unsub()
-                  const idx = waitTeardowns.indexOf(finish)
+                  const idx = waitTeardowns.indexOf(teardown)
                   if (idx !== -1) {
                     waitTeardowns.splice(idx, 1)
                   }
-                  resolve()
+                  resolve(resolvedOutcome)
                 }
+                const teardown = (): void => finish('cancelled')
                 // Why: registering a teardown lets dispose() actively
                 // unsubscribe + resolve if the pane is torn down while the
                 // wait is in flight. Without this the zustand subscriber and
                 // the surrounding async IIFE leak for the rest of the app
                 // session because the callback only checks `disposed` when
                 // it next fires — and it may never fire again.
-                waitTeardowns.push(finish)
+                waitTeardowns.push(teardown)
                 const unsub = useAppStore.subscribe((state) => {
                   if (disposed) {
-                    finish()
+                    finish('cancelled')
                     return
                   }
                   const status = state.sshConnectionStates.get(connectionId)?.status
                   if (status && status !== 'disconnected') {
                     sawNonDisconnected = true
                   }
-                  if (isTerminalStatus(status)) {
-                    finish()
+                  const nextOutcome = sshPromptConnectOutcomeForStatus(status, sawNonDisconnected)
+                  if (nextOutcome) {
+                    finish(nextOutcome)
                   }
                 })
                 // Why: re-read state immediately after subscribing to close the
@@ -859,17 +884,28 @@ export function connectPanePty(
                 // check above and the subscribe registration — otherwise we'd
                 // wait forever for a state change that already happened.
                 if (disposed) {
-                  finish()
+                  finish('cancelled')
                   return
                 }
                 const currentStatus = useAppStore
                   .getState()
                   .sshConnectionStates.get(connectionId)?.status
-                if (isTerminalStatus(currentStatus)) {
-                  finish()
+                const currentOutcome = sshPromptConnectOutcomeForStatus(
+                  currentStatus,
+                  sawNonDisconnected
+                )
+                if (currentOutcome) {
+                  finish(currentOutcome)
                 }
               })
               if (disposed) {
+                return
+              }
+              if (outcome === 'cancelled') {
+                return
+              }
+              if (outcome === 'failed') {
+                reportError('SSH connection failed')
                 return
               }
             }
@@ -905,6 +941,7 @@ export function connectPanePty(
             const preSignalPromise = window.api.pty
               .declarePendingPaneSerializer(cacheKey)
               .catch(() => null)
+            let expiredReattachError = false
             const reattachPromise = transport.connect({
               url: '',
               cols,
@@ -913,7 +950,13 @@ export function connectPanePty(
               callbacks: {
                 onData: dataCallback,
                 onReplayData: replayDataCallback,
-                onError: reportError
+                onError: (message) => {
+                  if (isSshSessionExpiredError(message)) {
+                    expiredReattachError = true
+                    return
+                  }
+                  reportError(message)
+                }
               }
             })
             void Promise.resolve(reattachPromise)
@@ -927,6 +970,16 @@ export function connectPanePty(
                       }
                     : 'undefined'
                 )
+                if (!result && expiredReattachError) {
+                  reportError(formatSshSessionExpiredMessage())
+                  deps.syncPanePtyLayoutBinding(pane.id, null)
+                  deps.clearTabPtyId(deps.tabId, pendingSessionId)
+                  const gen = await preSignalPromise
+                  if (typeof gen === 'number') {
+                    void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
+                  }
+                  return
+                }
                 handleReattachResult(result, pendingSessionId)
                 const gen = await preSignalPromise
                 if (typeof gen === 'number') {
@@ -940,6 +993,12 @@ export function connectPanePty(
                 }
                 console.warn(`[pty-connection] Reattach FAILED for tab=${deps.tabId}:`, err)
                 if (disposed) {
+                  return
+                }
+                if (isSshSessionExpiredError(err)) {
+                  reportError(formatSshSessionExpiredMessage())
+                  deps.syncPanePtyLayoutBinding(pane.id, null)
+                  deps.clearTabPtyId(deps.tabId, pendingSessionId)
                   return
                 }
                 startFreshSpawn()
@@ -1011,6 +1070,7 @@ export function connectPanePty(
         .declarePendingPaneSerializer(cacheKey)
         .catch(() => null)
 
+      let expiredReattachError = false
       const reattachPromise = transport.connect({
         url: '',
         cols,
@@ -1019,12 +1079,28 @@ export function connectPanePty(
         callbacks: {
           onData: dataCallback,
           onReplayData: replayDataCallback,
-          onError: reportError
+          onError: (message) => {
+            if (isSshSessionExpiredError(message)) {
+              expiredReattachError = true
+              return
+            }
+            reportError(message)
+          }
         }
       })
 
       void Promise.resolve(reattachPromise)
         .then(async (result) => {
+          if (!result && expiredReattachError) {
+            reportError(formatSshSessionExpiredMessage())
+            deps.syncPanePtyLayoutBinding(pane.id, null)
+            deps.clearTabPtyId(deps.tabId, deferredReattachSessionId)
+            const gen = await preSignalPromise
+            if (typeof gen === 'number') {
+              void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
+            }
+            return
+          }
           handleReattachResult(result, deferredReattachSessionId)
           const gen = await preSignalPromise
           if (typeof gen === 'number') {
@@ -1045,9 +1121,13 @@ export function connectPanePty(
             ptyId: deferredReattachSessionId,
             reason: message
           })
-          reportError(message)
           deps.syncPanePtyLayoutBinding(pane.id, null)
           deps.clearTabPtyId(deps.tabId, deferredReattachSessionId)
+          if (connectionId && isSshSessionExpiredError(err)) {
+            reportError(formatSshSessionExpiredMessage())
+            return
+          }
+          reportError(message)
           startFreshSpawn()
         })
     } else if (detachedLivePtyId) {

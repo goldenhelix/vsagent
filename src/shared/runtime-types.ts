@@ -1,6 +1,12 @@
 /* eslint-disable max-lines -- Why: shared type definitions for all runtime RPC methods live in one file for discoverability and import simplicity. */
 import type { TerminalPaneLayoutNode } from './types'
 import type { BrowserSessionProfile, GitWorktreeInfo, Repo } from './types'
+import type {
+  RuntimeMarkdownReadTabResult,
+  RuntimeMarkdownSaveTabResult
+} from './mobile-markdown-document'
+
+export type { RuntimeMarkdownReadTabResult, RuntimeMarkdownSaveTabResult }
 
 export type RuntimeGraphStatus = 'ready' | 'reloading' | 'unavailable'
 
@@ -61,6 +67,126 @@ export type RuntimeSyncedLeaf = {
 export type RuntimeSyncWindowGraph = {
   tabs: RuntimeSyncedTab[]
   leaves: RuntimeSyncedLeaf[]
+  mobileSessionTabs?: RuntimeMobileSessionTabsSnapshot[]
+}
+
+export type RuntimeMobileSessionTerminalTab = {
+  type: 'terminal'
+  id: string
+  title: string
+  parentTabId: string
+  leafId: string
+  isActive: boolean
+}
+
+export type RuntimeMobileSessionMarkdownTab = {
+  type: 'markdown'
+  id: string
+  title: string
+  filePath: string
+  relativePath: string
+  language: 'markdown'
+  mode: 'edit' | 'markdown-preview'
+  isDirty: boolean
+  isActive: boolean
+  sourceFileId: string
+  sourceFilePath: string
+  sourceRelativePath: string
+  documentVersion: string
+}
+
+export type RuntimeMobileSessionFileTab = {
+  type: 'file'
+  id: string
+  title: string
+  filePath: string
+  relativePath: string
+  language: string
+  isDirty: boolean
+  isActive: boolean
+}
+
+export type RuntimeMobileSessionSnapshotTab =
+  | RuntimeMobileSessionTerminalTab
+  | RuntimeMobileSessionMarkdownTab
+  | RuntimeMobileSessionFileTab
+
+export type RuntimeMobileSessionTerminalClientTab =
+  | (RuntimeMobileSessionTerminalTab & {
+      status: 'pending-handle'
+      terminal: null
+    })
+  | (RuntimeMobileSessionTerminalTab & {
+      status: 'ready'
+      terminal: string
+    })
+
+export type RuntimeMobileSessionClientTab =
+  | RuntimeMobileSessionTerminalClientTab
+  | RuntimeMobileSessionMarkdownTab
+  | RuntimeMobileSessionFileTab
+
+export type RuntimeMobileSessionTabsSnapshot = {
+  worktree: string
+  publicationEpoch: string
+  snapshotVersion: number
+  activeGroupId: string | null
+  activeTabId: string | null
+  activeTabType: 'terminal' | 'markdown' | 'file' | null
+  tabs: RuntimeMobileSessionSnapshotTab[]
+}
+
+export type RuntimeMobileSessionTabsResult = {
+  worktree: string
+  publicationEpoch: string
+  snapshotVersion: number
+  activeGroupId: string | null
+  activeTabId: string | null
+  activeTabType: 'terminal' | 'markdown' | 'file' | null
+  tabs: RuntimeMobileSessionClientTab[]
+}
+
+export type RuntimeMobileSessionCreateTerminalResult = {
+  tab: RuntimeMobileSessionTerminalClientTab
+  publicationEpoch: string
+  snapshotVersion: number
+}
+
+export type RuntimeMobileSessionTabsRemovedResult = RuntimeMobileSessionTabsResult & {
+  removed: true
+  activeGroupId: null
+  activeTabId: null
+  activeTabType: null
+  tabs: []
+}
+
+export type RuntimeFileListEntry = {
+  relativePath: string
+  basename: string
+  kind: 'text' | 'binary'
+}
+
+export type RuntimeFileListResult = {
+  worktree: string
+  rootPath: string
+  files: RuntimeFileListEntry[]
+  totalCount: number
+  truncated: boolean
+}
+
+export type RuntimeFileOpenResult = {
+  worktree: string
+  relativePath: string
+  kind: 'markdown' | 'text' | 'binary'
+  opened: boolean
+}
+
+export type RuntimeFileReadResult = {
+  worktree: string
+  relativePath: string
+  content: string
+  truncated: boolean
+  byteLength: number
 }
 
 export type RuntimeTerminalSummary = {
@@ -115,6 +241,7 @@ export type RuntimeTerminalCreate = {
   handle: string
   worktreeId: string
   title: string | null
+  surface?: 'background' | 'visible'
 }
 
 export type RuntimeTerminalSplit = {

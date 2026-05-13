@@ -61,6 +61,8 @@ type TabBarProps = {
   /** On Windows, opens a new terminal with a specific shell instead of the default. */
   onNewTerminalWithShell?: (shell: string) => void
   onNewBrowserTab: () => void
+  terminalOnly?: boolean
+  showAgentLaunchItems?: boolean
   onNewFileTab?: () => void
   /** Whether WSL is installed on this Windows machine. When true, the "+"
    *  dropdown shows a WSL option under the terminal submenu. */
@@ -126,6 +128,8 @@ function TabBarInner({
   onNewTerminalTab,
   onNewTerminalWithShell,
   onNewBrowserTab,
+  terminalOnly = false,
+  showAgentLaunchItems = true,
   onNewFileTab,
   onSetCustomTitle,
   onSetTabColor,
@@ -550,15 +554,17 @@ function TabBarInner({
               <DropdownMenuShortcut>{NEW_TERMINAL_SHORTCUT}</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem
-            onSelect={onNewBrowserTab}
-            className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
-          >
-            <Globe className="size-4 text-muted-foreground" />
-            New Browser Tab
-            <DropdownMenuShortcut>{NEW_BROWSER_SHORTCUT}</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          {onNewFileTab && (
+          {!terminalOnly && (
+            <DropdownMenuItem
+              onSelect={onNewBrowserTab}
+              className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+            >
+              <Globe className="size-4 text-muted-foreground" />
+              New Browser Tab
+              <DropdownMenuShortcut>{NEW_BROWSER_SHORTCUT}</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {!terminalOnly && onNewFileTab && (
             <DropdownMenuItem
               onSelect={onNewFileTab}
               className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
@@ -568,12 +574,16 @@ function TabBarInner({
               <DropdownMenuShortcut>{NEW_FILE_SHORTCUT}</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
-          <DropdownMenuSeparator />
-          <QuickLaunchAgentMenuItems
-            worktreeId={worktreeId}
-            groupId={resolvedGroupId}
-            onFocusTerminal={focusTerminalTabSurface}
-          />
+          {showAgentLaunchItems ? (
+            <>
+              <DropdownMenuSeparator />
+              <QuickLaunchAgentMenuItems
+                worktreeId={worktreeId}
+                groupId={resolvedGroupId}
+                onFocusTerminal={focusTerminalTabSurface}
+              />
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

@@ -38,17 +38,26 @@ import { TelemetryFirstLaunchSurface } from './components/TelemetryFirstLaunchSu
 import { ZoomOverlay } from './components/ZoomOverlay'
 import { shouldShowOnboarding } from './components/onboarding/should-show-onboarding'
 import { SshPassphraseDialog } from './components/settings/SshPassphraseDialog'
+import {
+  FloatingTerminalPanel,
+  FloatingTerminalToggleButton
+} from './components/floating-terminal/FloatingTerminalPanel'
+import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
 import { useGitStatusPolling } from './components/right-sidebar/useGitStatusPolling'
 import { useEditorExternalWatch } from './hooks/useEditorExternalWatch'
 import { useAutoAckViewedAgent } from './hooks/useAutoAckViewedAgent'
 import { useUnreadDockBadge } from './hooks/useUnreadDockBadge'
 import {
+  getRuntimeMobileSessionSyncKey,
+  runtimeMobileSessionSyncKeysEqual,
+  scheduleRuntimeGraphSync,
   setRuntimeGraphStoreStateGetter,
   setRuntimeGraphSyncEnabled
 } from './runtime/sync-runtime-graph'
 import { useGlobalFileDrop } from './hooks/useGlobalFileDrop'
 import { registerUpdaterBeforeUnloadBypass } from './lib/updater-beforeunload'
 import { buildWorkspaceSessionPayload } from './lib/workspace-session'
+import { createSessionWriteSubscriber } from './lib/session-write-subscriber'
 import { applyDocumentTheme } from './lib/document-theme'
 import { isEditableTarget } from './lib/editable-target'
 import {
@@ -147,6 +156,7 @@ const OnboardingFlow = lazy(() => import('./components/onboarding/OnboardingFlow
 
 function App(): React.JSX.Element {
   useUnreadDockBadge()
+  const [floatingTerminalOpen, setFloatingTerminalOpen] = useState(false)
 
   // Why: Zustand actions are referentially stable, but each individual
   // useAppStore(s => s.someAction) still registers a subscription that React
@@ -189,6 +199,26 @@ function App(): React.JSX.Element {
   const expandedPaneByTabId = useAppStore((s) => s.expandedPaneByTabId)
   const canExpandPaneByTabId = useAppStore((s) => s.canExpandPaneByTabId)
   const workspaceSessionReady = useAppStore((s) => s.workspaceSessionReady)
+  const floatingTerminalEnabled = useAppStore((s) => s.settings?.floatingTerminalEnabled === true)
+  const floatingTerminalTriggerLocation = useAppStore(
+    (s) => s.settings?.floatingTerminalTriggerLocation ?? 'floating-button'
+  )
+
+  useEffect(() => {
+    const toggleFloatingTerminal = (): void => {
+      if (floatingTerminalEnabled) {
+        setFloatingTerminalOpen((open) => !open)
+      }
+    }
+    window.addEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, toggleFloatingTerminal)
+    return () => window.removeEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, toggleFloatingTerminal)
+  }, [floatingTerminalEnabled])
+
+  useEffect(() => {
+    if (!floatingTerminalEnabled) {
+      setFloatingTerminalOpen(false)
+    }
+  }, [floatingTerminalEnabled])
   const sidebarWidth = useAppStore((s) => s.sidebarWidth)
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const groupBy = useAppStore((s) => s.groupBy)
@@ -414,6 +444,39 @@ function App(): React.JSX.Element {
     }
   }, [])
 
+  useEffect(() => {
+    let previousKey = getRuntimeMobileSessionSyncKey(useAppStore.getState())
+    return useAppStore.subscribe((state, previousState) => {
+      // Why: skip the key build entirely when no input field has changed by
+      // reference. Mirrors every field used by getRuntimeMobileSessionSyncKey
+      // so this gate stays a strict superset of "could the key have changed?"
+      // — if any field's reference is unchanged, neither the projection
+      // serialized from it nor the reference-compared map can have changed.
+      if (
+        state.tabsByWorktree === previousState.tabsByWorktree &&
+        state.groupsByWorktree === previousState.groupsByWorktree &&
+        state.activeGroupIdByWorktree === previousState.activeGroupIdByWorktree &&
+        state.unifiedTabsByWorktree === previousState.unifiedTabsByWorktree &&
+        state.tabBarOrderByWorktree === previousState.tabBarOrderByWorktree &&
+        state.activeFileId === previousState.activeFileId &&
+        state.activeFileIdByWorktree === previousState.activeFileIdByWorktree &&
+        state.openFiles === previousState.openFiles &&
+        state.editorDrafts === previousState.editorDrafts &&
+        state.activeTabId === previousState.activeTabId &&
+        state.terminalLayoutsByTabId === previousState.terminalLayoutsByTabId &&
+        state.runtimePaneTitlesByTabId === previousState.runtimePaneTitlesByTabId
+      ) {
+        return
+      }
+      const nextKey = getRuntimeMobileSessionSyncKey(state)
+      if (runtimeMobileSessionSyncKeysEqual(nextKey, previousKey)) {
+        return
+      }
+      previousKey = nextKey
+      scheduleRuntimeGraphSync()
+    })
+  }, [])
+
   useEffect(() => registerUpdaterBeforeUnloadBypass(), [])
 
   useEffect(() => {
@@ -427,41 +490,25 @@ function App(): React.JSX.Element {
   // Using a Zustand subscribe() outside React removes ~15 subscriptions from
   // App's render cycle, eliminating re-renders on every tab/file/browser change.
   useEffect(() => {
-    let timer: number | null = null
-    const unsub = useAppStore.subscribe((state) => {
-      if (!state.workspaceSessionReady) {
-        return
-      }
-      if (timer) {
-        window.clearTimeout(timer)
-      }
-      timer = window.setTimeout(() => {
-        timer = null
-        const payload = buildWorkspaceSessionPayload(state)
+    return createSessionWriteSubscriber({
+      store: useAppStore,
+      // Why: cross-browser sync needs two things on top of the upstream
+      // perf gate (which already trims unrelated subscriber fires before
+      // they reach here):
+      //   1. dedupe against what we last broadcast OR received, so a
+      //      session:changed → hydrate → subscriber re-fire doesn't
+      //      ping-pong between peers every 150ms;
+      //   2. stamp the broadcast with our clientId so peers can ignore
+      //      our own echoes (see session.onChanged handler below).
+      persist: (payload) => {
         const serialized = JSON.stringify(payload)
-        // Why: when a remote browser broadcasts session:changed and we
-        // hydrate, our Zustand subscriber fires from the resulting state
-        // mutation. Without this guard we'd re-broadcast the same state
-        // back, the other side would hydrate AGAIN, and we'd ping-pong
-        // every 150ms — clobbering any user edits in flight. Skip the
-        // round-trip if our about-to-broadcast payload matches what we
-        // most recently received OR sent.
         if (serialized === lastBroadcastPayloadRef.current) {
           return
         }
         lastBroadcastPayloadRef.current = serialized
-        void window.api.session.set({
-          state: payload,
-          originId: getClientId()
-        })
-      }, 150)
-    })
-    return () => {
-      unsub()
-      if (timer) {
-        window.clearTimeout(timer)
+        void window.api.session.set({ state: payload, originId: getClientId() })
       }
-    }
+    })
   }, [])
 
   // Why: when another browser tab (or the desktop renderer) mutates the
@@ -637,7 +684,10 @@ function App(): React.JSX.Element {
     activeWorktreeId !== null &&
     !hasTabBar &&
     effectiveActiveTabExpanded
-  const showSidebar = activeView !== 'settings'
+  // Why: Activity is a full-page navigation surface — same treatment as
+  // Settings — so the worktree sidebar is removed for that view, letting the
+  // thread list + agent terminal span edge-to-edge.
+  const showSidebar = activeView !== 'settings' && activeView !== 'activity'
   // Why: only the terminal workspace replaces the full-width titlebar with
   // split-column chrome. Full-page navigation views keep the draggable app
   // titlebar so their page-level controls can live in that window strip.
@@ -909,7 +959,9 @@ function App(): React.JSX.Element {
       </div>
       {/* Why: Back/Forward traverse mixed worktree + Tasks history, so the
           cluster is shown wherever the history shortcut is live (terminal or
-          tasks). Hidden in Settings to keep that view modal-ish. */}
+          tasks). Hidden in Settings to keep that view modal-ish, and in
+          Activity since that page owns its own back-out via the Close button
+          in ActivityTitlebarControls. */}
       {(activeView === 'terminal' || activeView === 'tasks') && (
         <div className="ml-auto mr-3 flex items-center">
           <Tooltip>
@@ -1156,7 +1208,21 @@ function App(): React.JSX.Element {
               surface is intentionally distraction-free. */}
           {showRightSidebarControls ? <RightSidebar /> : null}
         </div>
-        <StatusBar />
+        {floatingTerminalEnabled ? (
+          <>
+            <FloatingTerminalPanel
+              open={floatingTerminalOpen}
+              onOpenChange={setFloatingTerminalOpen}
+            />
+            {floatingTerminalTriggerLocation === 'floating-button' ? (
+              <FloatingTerminalToggleButton
+                open={floatingTerminalOpen}
+                onToggle={() => setFloatingTerminalOpen((open) => !open)}
+              />
+            ) : null}
+          </>
+        ) : null}
+        <StatusBar floatingTerminalOpen={floatingTerminalOpen} />
         {/* Why: NewWorkspaceComposerCard renders Radix <Tooltip>s that crash
             when mounted outside a TooltipProvider ancestor. Keep the global
             composer modal inside this provider so the card renders safely

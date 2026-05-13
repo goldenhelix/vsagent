@@ -21,10 +21,7 @@ import {
   type PendingNativeRequest,
   writeNativeProviderLine
 } from './macos-native-provider-contract'
-import {
-  resolveMacOSComputerUseAppPath,
-  resolveMacOSComputerUseExecutablePath
-} from './macos-native-provider-paths'
+import { resolveMacOSComputerUseExecutablePath } from './macos-native-provider-paths'
 import { connectMacOSProviderSocket } from './macos-native-provider-socket'
 import { RuntimeClientError } from './runtime-client-error'
 
@@ -33,7 +30,9 @@ const HELPER_CONNECT_TIMEOUT_MS = 10_000
 
 export function shouldUseMacOSNativeProvider(): boolean {
   return (
-    process.platform === 'darwin' && isMacOS14OrNewer() && resolveMacOSComputerUseAppPath() !== null
+    process.platform === 'darwin' &&
+    isMacOS14OrNewer() &&
+    resolveMacOSComputerUseExecutablePath() !== null
   )
 }
 

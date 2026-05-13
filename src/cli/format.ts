@@ -152,7 +152,8 @@ export function formatTerminalRename(result: { rename: RuntimeTerminalRename }):
 
 export function formatTerminalCreate(result: { terminal: RuntimeTerminalCreate }): string {
   const titleNote = result.terminal.title ? ` (title: "${result.terminal.title}")` : ''
-  return `Created terminal ${result.terminal.handle}${titleNote}`
+  const surfaceNote = result.terminal.surface ? ` [${result.terminal.surface}]` : ''
+  return `Created terminal ${result.terminal.handle}${titleNote}${surfaceNote}`
 }
 
 export function formatTerminalSplit(result: { split: RuntimeTerminalSplit }): string {

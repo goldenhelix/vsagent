@@ -26,11 +26,16 @@ import type {
   NotificationSoundPathResult,
   NotificationSoundResult,
   OnboardingState,
+  FloatingTerminalCwdRequest,
   SearchResult,
   WorktreeBaseStatusEvent,
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
 import type { RuntimeStatus, RuntimeSyncWindowGraph } from '../shared/runtime-types'
+import type {
+  RuntimeMobileMarkdownRequest,
+  RuntimeMobileMarkdownResponse
+} from '../shared/mobile-markdown-document'
 import type { RateLimitState } from '../shared/rate-limit-types'
 import type { GhAuthDiagnostic } from '../shared/github-auth-types'
 import type {
@@ -260,7 +265,9 @@ const api = {
      *  the web gateway (`web: true`) or as the local Electron renderer
      *  (`web: false`). Renderer code checks this to hide native-only UI. */
     getRuntimeFlavor: (): Promise<{ web: boolean; platform: string }> =>
-      ipcRenderer.invoke('app:getRuntimeFlavor')
+      ipcRenderer.invoke('app:getRuntimeFlavor'),
+    getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest): Promise<string> =>
+      ipcRenderer.invoke('app:getFloatingTerminalCwd', args)
   },
 
   wsl: {
@@ -527,6 +534,13 @@ const api = {
       ) => callback(data)
       ipcRenderer.on('pty:serializeBuffer:request', listener)
       return () => ipcRenderer.removeListener('pty:serializeBuffer:request', listener)
+    },
+
+    onClearBufferRequest: (callback: (data: { ptyId: string }) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { ptyId: string }) =>
+        callback(data)
+      ipcRenderer.on('pty:clearBuffer:request', listener)
+      return () => ipcRenderer.removeListener('pty:clearBuffer:request', listener)
     },
 
     sendSerializedBuffer: (
@@ -1744,6 +1758,11 @@ const api = {
       ipcRenderer.on('ui:toggleWorktreePalette', listener)
       return () => ipcRenderer.removeListener('ui:toggleWorktreePalette', listener)
     },
+    onToggleFloatingTerminal: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:toggleFloatingTerminal', listener)
+      return () => ipcRenderer.removeListener('ui:toggleFloatingTerminal', listener)
+    },
     onOpenQuickOpen: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openQuickOpen', listener)
@@ -1896,11 +1915,25 @@ const api = {
       return () => ipcRenderer.removeListener('ui:activateWorktree', listener)
     },
     onCreateTerminal: (
-      callback: (data: { worktreeId: string; command?: string; title?: string }) => void
+      callback: (data: {
+        requestId?: string
+        worktreeId: string
+        command?: string
+        title?: string
+        ptyId?: string
+        activate?: boolean
+      }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        data: { worktreeId: string; command?: string; title?: string }
+        data: {
+          requestId?: string
+          worktreeId: string
+          command?: string
+          title?: string
+          ptyId?: string
+          activate?: boolean
+        }
       ) => callback(data)
       ipcRenderer.on('ui:createTerminal', listener)
       return () => ipcRenderer.removeListener('ui:createTerminal', listener)
@@ -1909,13 +1942,20 @@ const api = {
       callback: (data: {
         requestId: string
         worktreeId?: string
+        afterTabId?: string
         command?: string
         title?: string
       }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        data: { requestId: string; worktreeId?: string; command?: string; title?: string }
+        data: {
+          requestId: string
+          worktreeId?: string
+          afterTabId?: string
+          command?: string
+          title?: string
+        }
       ) => callback(data)
       ipcRenderer.on('terminal:requestTabCreate', listener)
       return () => ipcRenderer.removeListener('terminal:requestTabCreate', listener)
@@ -1959,14 +1999,55 @@ const api = {
       return () => ipcRenderer.removeListener('ui:renameTerminal', listener)
     },
     onFocusTerminal: (
+      callback: (data: { tabId: string; worktreeId: string; leafId?: string | null }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { tabId: string; worktreeId: string; leafId?: string | null }
+      ) => callback(data)
+      ipcRenderer.on('ui:focusTerminal', listener)
+      return () => ipcRenderer.removeListener('ui:focusTerminal', listener)
+    },
+    onFocusEditorTab: (
       callback: (data: { tabId: string; worktreeId: string }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
         data: { tabId: string; worktreeId: string }
       ) => callback(data)
-      ipcRenderer.on('ui:focusTerminal', listener)
-      return () => ipcRenderer.removeListener('ui:focusTerminal', listener)
+      ipcRenderer.on('ui:focusEditorTab', listener)
+      return () => ipcRenderer.removeListener('ui:focusEditorTab', listener)
+    },
+    onCloseSessionTab: (
+      callback: (data: { tabId: string; worktreeId: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { tabId: string; worktreeId: string }
+      ) => callback(data)
+      ipcRenderer.on('ui:closeSessionTab', listener)
+      return () => ipcRenderer.removeListener('ui:closeSessionTab', listener)
+    },
+    onOpenFileFromMobile: (
+      callback: (data: { worktreeId: string; filePath: string; relativePath: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { worktreeId: string; filePath: string; relativePath: string }
+      ) => callback(data)
+      ipcRenderer.on('ui:openFileFromMobile', listener)
+      return () => ipcRenderer.removeListener('ui:openFileFromMobile', listener)
+    },
+    onMobileMarkdownRequest: (
+      callback: (request: RuntimeMobileMarkdownRequest) => void
+    ): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, request: RuntimeMobileMarkdownRequest) =>
+        callback(request)
+      ipcRenderer.on('ui:mobileMarkdownRequest', listener)
+      return () => ipcRenderer.removeListener('ui:mobileMarkdownRequest', listener)
+    },
+    respondMobileMarkdownRequest: (response: RuntimeMobileMarkdownResponse): void => {
+      ipcRenderer.send('ui:mobileMarkdownResponse', response)
     },
     onCloseTerminal: (
       callback: (data: { tabId: string; paneRuntimeId?: number }) => void
@@ -2218,6 +2299,9 @@ const api = {
 
     disconnect: (args: { targetId: string }): Promise<void> =>
       ipcRenderer.invoke('ssh:disconnect', args),
+
+    terminateSessions: (args: { targetId: string }): Promise<void> =>
+      ipcRenderer.invoke('ssh:terminateSessions', args),
 
     getState: (args: { targetId: string }): Promise<SshConnectionState | null> =>
       ipcRenderer.invoke('ssh:getState', args),

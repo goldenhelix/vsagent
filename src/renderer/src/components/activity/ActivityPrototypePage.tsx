@@ -1,18 +1,9 @@
 /* eslint-disable max-lines -- Why: this prototype keeps the real-data adapter
 and current visual skeleton together until the next refinement pass decides
 which pieces become production modules. */
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  Bell,
-  BellDot,
-  BellOff,
-  GitBranch,
-  MessageSquareText,
-  Plus,
-  Search,
-  Settings
-} from 'lucide-react'
+import { Bell, BellDot, BellOff, MessageSquareText, Search, TerminalSquare } from 'lucide-react'
 
 import { AgentIcon } from '@/lib/agent-catalog'
 import { agentTypeToIconAgent, formatAgentTypeLabel } from '@/lib/agent-status'
@@ -22,35 +13,30 @@ import { useAppStore } from '@/store'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import { getRepoMapFromState, getWorktreeMapFromState } from '@/store/selectors'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
-import { AgentStateDot, agentStateLabel, type AgentDotState } from '@/components/AgentStateDot'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import {
+  setActivityTerminalPortals,
+  type ActivityTerminalPortalTarget
+} from './activity-terminal-portal'
 import type { Repo, TerminalTab, Worktree } from '../../../../shared/types'
 import type {
+  AgentStateHistoryEntry,
   AgentStatusEntry,
   AgentStatusState,
   AgentType
 } from '../../../../shared/agent-status-types'
 
 type ThreadReadFilter = 'all' | 'unread'
-type ActivityDensity = 'compact' | 'comfortable'
+type ActivityEventState = Extract<AgentStatusState, 'done' | 'blocked' | 'waiting'>
 
-type AgentActivityEvent = {
+type ActivityEvent = {
   id: string
-  kind: 'agent'
-  state: Extract<AgentStatusState, 'done' | 'blocked' | 'waiting'>
+  state: ActivityEventState
   timestamp: number
   worktree: Worktree
   repo: Repo | null
@@ -61,24 +47,34 @@ type AgentActivityEvent = {
   unread: boolean
 }
 
-type WorktreeActivityEvent = {
-  id: string
-  kind: 'worktree-created'
-  timestamp: number
+// Why (per-pane thread): the activity feed is keyed on the agent pane (a
+// terminal tab + pane id) rather than on the workspace, so the left list
+// shows one entry per agent. paneKey is the stable identity (`${tabId}:${paneId}`).
+type AgentPaneThread = {
+  paneKey: string
+  paneTitle: string
   worktree: Worktree
   repo: Repo | null
-  unread: boolean
-}
-
-type ActivityEvent = AgentActivityEvent | WorktreeActivityEvent
-
-type WorktreeThread = {
-  worktree: Worktree
-  repo: Repo | null
+  agentType: AgentType
   latestEvent: ActivityEvent
   events: ActivityEvent[]
   unread: boolean
 }
+
+type ActivityTerminalPortalReadiness = {
+  target: HTMLElement | null
+  tabId: string | null
+  ready: boolean
+}
+
+type ActivityTerminalPortalDomStatus = {
+  hasSelectedRoot: boolean
+  ready: boolean
+}
+
+type ActivityTerminalPortalSlotId = 'primary' | 'secondary'
+
+const ACTIVITY_TERMINAL_LOADING_LABEL_DELAY_MS = 180
 
 const absoluteDateFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
@@ -108,13 +104,6 @@ function formatRelativeTime(timestamp: number): string {
   return relativeTimeFormatter.format(diffDays, 'day')
 }
 
-function asDotState(state: AgentStatusState): AgentDotState {
-  if (state === 'blocked' || state === 'waiting' || state === 'done') {
-    return state
-  }
-  return 'idle'
-}
-
 function paneIdFromPaneKey(paneKey: string): number | null {
   const colon = paneKey.indexOf(':')
   const tail = colon > 0 ? paneKey.slice(colon + 1) : ''
@@ -122,14 +111,145 @@ function paneIdFromPaneKey(paneKey: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
-function agentTitle(event: AgentActivityEvent): string {
+function getSelectedActivityTerminalPortalStatus(
+  target: HTMLElement,
+  tabId: string
+): ActivityTerminalPortalDomStatus {
+  let selectedRoot: HTMLElement | null = null
+  for (const candidate of target.querySelectorAll<HTMLElement>('[data-terminal-tab-id]')) {
+    if (candidate.dataset.terminalTabId === tabId) {
+      selectedRoot = candidate
+      break
+    }
+  }
+  if (!selectedRoot) {
+    return { hasSelectedRoot: false, ready: false }
+  }
+  const hasPtyBinding =
+    selectedRoot.hasAttribute('data-pty-id') ||
+    selectedRoot.querySelector<HTMLElement>('[data-pty-id]') !== null
+  const hasXtermScreen = selectedRoot.querySelector<HTMLElement>('.xterm-screen') !== null
+  return { hasSelectedRoot: true, ready: hasPtyBinding && hasXtermScreen }
+}
+
+function useActivityTerminalPortalReadiness(
+  target: HTMLElement | null,
+  tabId: string | null
+): boolean {
+  const [readiness, setReadiness] = useState<ActivityTerminalPortalReadiness>({
+    target: null,
+    tabId: null,
+    ready: false
+  })
+
+  useLayoutEffect(() => {
+    if (!target || !tabId) {
+      setReadiness((prev) =>
+        prev.target === null && prev.tabId === null && !prev.ready
+          ? prev
+          : { target: null, tabId: null, ready: false }
+      )
+      return
+    }
+
+    let disposed = false
+    let readyFrame: number | null = null
+    let sawUnreadySelectedRoot = false
+
+    const updateReadiness = (ready: boolean): void => {
+      setReadiness((prev) =>
+        prev.target === target && prev.tabId === tabId && prev.ready === ready
+          ? prev
+          : { target, tabId, ready }
+      )
+    }
+
+    const cancelReadyFrame = (): void => {
+      if (readyFrame !== null) {
+        cancelAnimationFrame(readyFrame)
+        readyFrame = null
+      }
+    }
+
+    const checkReadiness = (): void => {
+      const status = getSelectedActivityTerminalPortalStatus(target, tabId)
+      if (status.ready) {
+        if (!sawUnreadySelectedRoot) {
+          cancelReadyFrame()
+          updateReadiness(true)
+          return
+        }
+        if (readyFrame !== null) {
+          return
+        }
+        // Why: the PTY id can appear before xterm has painted replayed output.
+        // Waiting one frame keeps Activity's cover in place for the blank canvas
+        // frame without moving terminal lifecycle work into global layout effects.
+        readyFrame = requestAnimationFrame(() => {
+          readyFrame = null
+          if (!disposed && getSelectedActivityTerminalPortalStatus(target, tabId).ready) {
+            updateReadiness(true)
+          }
+        })
+        return
+      }
+      if (status.hasSelectedRoot) {
+        sawUnreadySelectedRoot = true
+      }
+      cancelReadyFrame()
+      updateReadiness(false)
+    }
+
+    updateReadiness(false)
+    checkReadiness()
+
+    const observer = new MutationObserver(checkReadiness)
+    observer.observe(target, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-terminal-tab-id', 'data-pty-id']
+    })
+
+    return () => {
+      disposed = true
+      cancelReadyFrame()
+      observer.disconnect()
+    }
+  }, [target, tabId])
+
+  return readiness.target === target && readiness.tabId === tabId && readiness.ready
+}
+
+function otherActivityTerminalSlot(
+  slotId: ActivityTerminalPortalSlotId
+): ActivityTerminalPortalSlotId {
+  return slotId === 'primary' ? 'secondary' : 'primary'
+}
+
+function useActivityTerminalLoadingLabel(loading: boolean): boolean {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    if (!loading) {
+      setVisible(false)
+      return
+    }
+    const timer = setTimeout(() => setVisible(true), ACTIVITY_TERMINAL_LOADING_LABEL_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [loading])
+
+  return visible
+}
+
+function agentTitle(event: ActivityEvent): string {
   if (event.state === 'done') {
     return event.entry.interrupted ? 'Agent interrupted' : 'Agent finished'
   }
   return event.state === 'waiting' ? 'Agent waiting for input' : 'Agent needs input'
 }
 
-function agentSummary(event: AgentActivityEvent): string {
+function agentSummary(event: ActivityEvent): string {
   const prompt = event.entry.prompt.trim()
   if (event.state === 'done') {
     const message = event.entry.lastAssistantMessage?.trim()
@@ -138,7 +258,7 @@ function agentSummary(event: AgentActivityEvent): string {
   return prompt || event.entry.lastAssistantMessage?.trim() || 'The agent paused for user input.'
 }
 
-function agentMeta(event: AgentActivityEvent): string {
+function agentMeta(event: ActivityEvent): string {
   const agent = formatAgentTypeLabel(event.agentType)
   if (event.state === 'done') {
     return event.entry.interrupted ? `${agent} interrupted` : `${agent} completed`
@@ -146,31 +266,134 @@ function agentMeta(event: AgentActivityEvent): string {
   return event.state === 'waiting' ? `${agent} waiting` : `${agent} blocked`
 }
 
-function eventTitle(event: ActivityEvent): string {
-  return event.kind === 'agent' ? agentTitle(event) : 'Worktree created'
-}
-
-function eventSummary(event: ActivityEvent): string {
-  return event.kind === 'agent' ? agentSummary(event) : event.worktree.displayName
-}
-
-function eventMeta(event: ActivityEvent): string {
-  if (event.kind === 'agent') {
-    return agentMeta(event)
+// Why (label hierarchy): mirror DashboardAgentRow — the agent's last prompt
+// IS what the agent is working on and is the primary signal users want at a
+// glance. A user-renamed customTitle still wins (explicit rename intent), but
+// the OSC-set live title ("Claude Code", "Codex", …) must NOT shadow the
+// prompt: agent CLIs set that title eagerly, so preferring it would pin every
+// row to the agent name and hide the actual turn. Fall back to a non-default
+// liveTitle only when there is no prompt at all.
+function paneTitleForEvent(event: ActivityEvent): string {
+  const tab = event.tab
+  const customTitle = tab.customTitle?.trim()
+  if (customTitle) {
+    return customTitle
   }
-  return event.worktree.branch
+  const prompt = event.entry.prompt.trim()
+  if (prompt) {
+    return prompt
+  }
+  const liveTitle = tab.title?.trim()
+  const defaultTitle = tab.defaultTitle?.trim()
+  if (liveTitle && liveTitle !== defaultTitle) {
+    return liveTitle
+  }
+  return defaultTitle || liveTitle || 'Terminal'
 }
 
-function buildActivityEvents(args: {
+function isActivityEventState(state: AgentStatusState): state is ActivityEventState {
+  return state === 'done' || state === 'blocked' || state === 'waiting'
+}
+
+// Why: per-pane cap guarantees each agent appears in the left list even when one pane has a long history.
+const EVENTS_PER_PANE_CAP = 5
+
+function historyEntrySnapshot(
+  entry: AgentStatusEntry,
+  history: AgentStateHistoryEntry
+): AgentStatusEntry {
+  return {
+    ...entry,
+    state: history.state,
+    prompt: history.prompt,
+    updatedAt: history.startedAt,
+    stateStartedAt: history.startedAt,
+    stateHistory: [],
+    toolName: undefined,
+    toolInput: undefined,
+    lastAssistantMessage: undefined,
+    interrupted: history.interrupted
+  }
+}
+
+function appendActivityEvent(args: {
+  events: ActivityEvent[]
+  seenEventIds: Set<string>
+  state: ActivityEventState
+  timestamp: number
+  worktree: Worktree
+  repo: Repo | null
+  entry: AgentStatusEntry
+  tab: TerminalTab
+  agentType: AgentType
+  agentAlive: boolean
+  acknowledgedAt: number
+}): void {
+  const id = `agent:${args.entry.paneKey}:${args.state}:${args.timestamp}`
+  if (args.seenEventIds.has(id)) {
+    return
+  }
+  args.seenEventIds.add(id)
+  args.events.push({
+    id,
+    state: args.state,
+    timestamp: args.timestamp,
+    worktree: args.worktree,
+    repo: args.repo,
+    entry: args.entry,
+    tab: args.tab,
+    agentType: args.agentType,
+    agentAlive: args.agentAlive,
+    unread: args.acknowledgedAt < args.timestamp
+  })
+}
+
+function appendActivityEventsForEntry(args: {
+  events: ActivityEvent[]
+  seenEventIds: Set<string>
+  entry: AgentStatusEntry
+  worktree: Worktree
+  repo: Repo | null
+  tab: TerminalTab
+  agentType: AgentType
+  agentAlive: boolean
+  acknowledgedAt: number
+}): void {
+  // Why: Activity is an append-only history surface. When a user continues in
+  // the same terminal pane, the live entry moves done→working; stateHistory is
+  // the only place the previous done/blocking event still exists.
+  for (const history of args.entry.stateHistory) {
+    if (!isActivityEventState(history.state)) {
+      continue
+    }
+    appendActivityEvent({
+      ...args,
+      state: history.state,
+      timestamp: history.startedAt,
+      entry: historyEntrySnapshot(args.entry, history)
+    })
+  }
+
+  if (!isActivityEventState(args.entry.state)) {
+    return
+  }
+  appendActivityEvent({
+    ...args,
+    state: args.entry.state,
+    timestamp: args.entry.stateStartedAt
+  })
+}
+
+export function buildActivityEvents(args: {
   agentStatusByPaneKey: Record<string, AgentStatusEntry>
   retainedAgentsByPaneKey: Record<string, RetainedAgentEntry>
   tabsByWorktree: Record<string, TerminalTab[]>
   worktreeMap: Map<string, Worktree>
   repoMap: Map<string, Repo>
   acknowledgedAgentsByPaneKey: Record<string, number>
-  locallyReadEventIds: Set<string>
 }): ActivityEvent[] {
   const events: ActivityEvent[] = []
+  const seenEventIds = new Set<string>()
   const tabContext = new Map<string, { worktree: Worktree; tab: TerminalTab }>()
 
   for (const worktree of args.worktreeMap.values()) {
@@ -178,23 +401,9 @@ function buildActivityEvents(args: {
     for (const tab of tabs) {
       tabContext.set(tab.id, { worktree, tab })
     }
-    if (worktree.createdAt) {
-      const id = `worktree-created:${worktree.id}`
-      events.push({
-        id,
-        kind: 'worktree-created',
-        timestamp: worktree.createdAt,
-        worktree,
-        repo: args.repoMap.get(worktree.repoId) ?? null,
-        unread: worktree.isUnread && !args.locallyReadEventIds.has(id)
-      })
-    }
   }
 
   for (const [paneKey, entry] of Object.entries(args.agentStatusByPaneKey)) {
-    if (entry.state !== 'done' && entry.state !== 'blocked' && entry.state !== 'waiting') {
-      continue
-    }
     const separatorIndex = paneKey.indexOf(':')
     if (separatorIndex <= 0) {
       continue
@@ -205,53 +414,68 @@ function buildActivityEvents(args: {
       continue
     }
     const ackAt = args.acknowledgedAgentsByPaneKey[paneKey] ?? 0
-    events.push({
-      id: `agent-live:${paneKey}:${entry.stateStartedAt}`,
-      kind: 'agent',
-      state: entry.state,
-      timestamp: entry.stateStartedAt,
+    appendActivityEventsForEntry({
+      events,
+      seenEventIds,
       worktree: context.worktree,
       repo: args.repoMap.get(context.worktree.repoId) ?? null,
       entry,
       tab: context.tab,
       agentType: entry.agentType ?? 'unknown',
       agentAlive: true,
-      unread: ackAt < entry.stateStartedAt
+      acknowledgedAt: ackAt
     })
   }
 
   for (const [paneKey, retained] of Object.entries(args.retainedAgentsByPaneKey)) {
     const worktree = args.worktreeMap.get(retained.worktreeId)
-    if (!worktree || retained.entry.state !== 'done') {
+    if (!worktree) {
       continue
     }
     const ackAt = args.acknowledgedAgentsByPaneKey[paneKey] ?? 0
-    events.push({
-      id: `agent-retained:${paneKey}:${retained.entry.stateStartedAt}`,
-      kind: 'agent',
-      state: 'done',
-      timestamp: retained.entry.stateStartedAt,
+    appendActivityEventsForEntry({
+      events,
+      seenEventIds,
       worktree,
       repo: args.repoMap.get(worktree.repoId) ?? null,
       entry: retained.entry,
       tab: retained.tab,
       agentType: retained.agentType,
       agentAlive: false,
-      unread: ackAt < retained.entry.stateStartedAt
+      acknowledgedAt: ackAt
     })
   }
 
-  return events.sort((a, b) => b.timestamp - a.timestamp).slice(0, 80)
+  const sorted = events.sort((a, b) => b.timestamp - a.timestamp)
+  const perPaneCount = new Map<string, number>()
+  const capped: ActivityEvent[] = []
+  for (const event of sorted) {
+    const paneKey = event.entry.paneKey
+    const count = perPaneCount.get(paneKey) ?? 0
+    if (count >= EVENTS_PER_PANE_CAP) {
+      continue
+    }
+    perPaneCount.set(paneKey, count + 1)
+    capped.push(event)
+    if (capped.length >= 80) {
+      break
+    }
+  }
+  return capped
 }
 
-function buildWorktreeThreads(events: ActivityEvent[]): WorktreeThread[] {
-  const byWorktreeId = new Map<string, WorktreeThread>()
+function buildAgentPaneThreads(events: ActivityEvent[]): AgentPaneThread[] {
+  const byPaneKey = new Map<string, AgentPaneThread>()
   for (const event of events) {
-    const existing = byWorktreeId.get(event.worktree.id)
+    const paneKey = event.entry.paneKey
+    const existing = byPaneKey.get(paneKey)
     if (!existing) {
-      byWorktreeId.set(event.worktree.id, {
+      byPaneKey.set(paneKey, {
+        paneKey,
+        paneTitle: paneTitleForEvent(event),
         worktree: event.worktree,
         repo: event.repo,
+        agentType: event.agentType,
         latestEvent: event,
         events: [event],
         unread: event.unread
@@ -262,13 +486,15 @@ function buildWorktreeThreads(events: ActivityEvent[]): WorktreeThread[] {
     existing.unread = existing.unread || event.unread
     if (event.timestamp > existing.latestEvent.timestamp) {
       existing.latestEvent = event
+      existing.paneTitle = paneTitleForEvent(event)
+      existing.agentType = event.agentType
     }
   }
 
-  return Array.from(byWorktreeId.values())
+  return Array.from(byPaneKey.values())
     .map((thread) => ({
       ...thread,
-      events: [...thread.events].sort((a, b) => a.timestamp - b.timestamp)
+      events: [...thread.events].sort((a, b) => b.timestamp - a.timestamp)
     }))
     .sort((a, b) => b.latestEvent.timestamp - a.latestEvent.timestamp)
 }
@@ -308,207 +534,18 @@ function EventRepoBadge({ repo }: { repo: Repo | null }): React.JSX.Element | nu
   )
 }
 
-function AgentEventRow({
-  event,
-  density,
-  onMarkRead
-}: {
-  event: AgentActivityEvent
-  density: ActivityDensity
-  onMarkRead: (event: ActivityEvent) => void
-}): React.JSX.Element {
-  const compact = density === 'compact'
-  const dotState = asDotState(event.state)
-
-  const jumpToAgent = (clickEvent: React.MouseEvent): void => {
-    clickEvent.stopPropagation()
-    onMarkRead(event)
-    activateAndRevealWorktree(event.worktree.id)
-    activateTabAndFocusPane(event.tab.id, paneIdFromPaneKey(event.entry.paneKey))
-  }
-
-  return (
-    <div
-      className={cn(
-        'group grid grid-cols-[2rem_minmax(0,1fr)_7.25rem] gap-3 border-b border-border px-3 transition-colors hover:bg-accent/40',
-        compact ? 'py-2' : 'py-3.5',
-        event.unread && 'bg-accent/20'
-      )}
-      onClick={() => onMarkRead(event)}
-    >
-      <div className="flex justify-center pt-1">
-        <div className="relative flex size-6 items-center justify-center">
-          {event.unread ? (
-            <span className="absolute -left-1 top-1 size-2 rounded-full bg-primary" />
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex">
-                <AgentStateDot state={dotState} size="md" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>
-              {event.entry.interrupted ? 'Interrupted' : agentStateLabel(dotState)}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={cn('truncate text-sm', event.unread ? 'font-semibold' : 'font-medium')}>
-            {agentTitle(event)}
-          </span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex shrink-0">
-                <AgentIcon agent={agentTypeToIconAgent(event.agentType)} size={14} />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>
-              {formatAgentTypeLabel(event.agentType)}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div
-          className={cn(
-            'mt-0.5 truncate text-sm text-muted-foreground',
-            compact ? 'max-w-[760px]' : 'max-w-[920px]'
-          )}
-        >
-          {agentSummary(event)}
-        </div>
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          <span className="inline-flex min-w-0 items-center gap-1">
-            <GitBranch className="size-3 shrink-0" />
-            <span className="truncate">{event.worktree.displayName}</span>
-          </span>
-          <span>{agentMeta(event)}</span>
-        </div>
-        {!compact && event.agentAlive ? (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Button type="button" variant="outline" size="xs" onClick={jumpToAgent}>
-              Jump to agent
-            </Button>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="flex flex-col items-end gap-2 pt-0.5">
-        <EventTime timestamp={event.timestamp} />
-        {compact && event.agentAlive ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={jumpToAgent}
-            className="opacity-0 transition-opacity group-hover:opacity-100"
-          >
-            Agent
-          </Button>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
-function WorktreeEventRow({
-  event,
-  density,
-  onMarkRead
-}: {
-  event: WorktreeActivityEvent
-  density: ActivityDensity
-  onMarkRead: (event: ActivityEvent) => void
-}): React.JSX.Element {
-  const compact = density === 'compact'
-
-  return (
-    <div
-      className={cn(
-        'group grid grid-cols-[2rem_minmax(0,1fr)_7.25rem] gap-3 border-b border-border px-3 transition-colors hover:bg-accent/40',
-        compact ? 'py-2' : 'py-3.5',
-        event.unread && 'bg-accent/20'
-      )}
-      onClick={() => onMarkRead(event)}
-    >
-      <div className="flex justify-center pt-0.5">
-        <div className="relative flex size-6 items-center justify-center text-muted-foreground">
-          {event.unread ? (
-            <span className="absolute -left-1 top-1 size-2 rounded-full bg-primary" />
-          ) : null}
-          <Plus className="size-4" />
-        </div>
-      </div>
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={cn('truncate text-sm', event.unread ? 'font-semibold' : 'font-medium')}>
-            Worktree created
-          </span>
-        </div>
-        <div className="mt-0.5 truncate text-sm text-muted-foreground">
-          {event.worktree.displayName}
-        </div>
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          <span className="inline-flex min-w-0 items-center gap-1">
-            <GitBranch className="size-3 shrink-0" />
-            <span className="truncate">{event.worktree.branch}</span>
-          </span>
-          <span>{event.worktree.path}</span>
-        </div>
-      </div>
-      <div className="flex flex-col items-end gap-2 pt-0.5">
-        <EventTime timestamp={event.timestamp} />
-      </div>
-    </div>
-  )
-}
-
-function ActivityRow({
-  event,
-  density,
-  onMarkRead
-}: {
-  event: ActivityEvent
-  density: ActivityDensity
-  onMarkRead: (event: ActivityEvent) => void
-}): React.JSX.Element {
-  return event.kind === 'agent' ? (
-    <AgentEventRow event={event} density={density} onMarkRead={onMarkRead} />
-  ) : (
-    <WorktreeEventRow event={event} density={density} onMarkRead={onMarkRead} />
-  )
-}
-
-function groupForTimestamp(timestamp: number): 'Today' | 'Yesterday' | 'Earlier' {
-  const date = new Date(timestamp)
-  const today = new Date()
-  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
-  const startYesterday = startToday - 24 * 60 * 60 * 1000
-  if (date.getTime() >= startToday) {
-    return 'Today'
-  }
-  if (date.getTime() >= startYesterday) {
-    return 'Yesterday'
-  }
-  return 'Earlier'
-}
-
 function ThreadRow({
   thread,
-  density,
   selected,
   onSelect,
   onToggleRead
 }: {
-  thread: WorktreeThread
-  density: ActivityDensity
+  thread: AgentPaneThread
   selected: boolean
   onSelect: () => void
   onToggleRead: () => void
 }): React.JSX.Element {
   const latest = thread.latestEvent
-  const compact = density === 'compact'
   const toggleLabel = thread.unread ? 'Mark thread read' : 'Mark thread unread'
   return (
     <div
@@ -523,44 +560,64 @@ function ThreadRow({
         }
       }}
       className={cn(
-        'group relative grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-border px-3 text-left transition-colors hover:bg-accent/40',
-        compact ? 'py-1.5' : 'py-2.5',
-        selected &&
-          'bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:bg-white/[0.10] dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]',
-        thread.unread && 'bg-primary/[0.045] dark:bg-primary/[0.08]'
+        // Why (selected/hover/unread cues match WorktreeCard):
+        // - selected → solid black/white tint + faint shadow, no hover
+        //   override (the active class wins so hover doesn't fight it).
+        // - non-selected → only then does hover apply (bg-accent/40), so a
+        //   selected row stays visually fixed when the cursor moves over it.
+        // - unread → weight + left-edge primary bar carry the cue; no row
+        //   tint, mirroring WorktreeCard's "weight alone" pattern. Three
+        //   stacked tints (selected + unread + hover) made selected and
+        //   unread look identical when hovered.
+        // Why (asymmetric padding): the title uses leading-snug, which adds
+        // ~3px of internal space above the cap-height that isn't present
+        // below the secondary badge row. Symmetric py made the top read
+        // heavier; pt-2 / pb-2.5 visually evens the row.
+        'group relative flex w-full flex-col gap-1 border-b border-border px-3 pt-2 pb-2.5 text-left transition-colors',
+        selected
+          ? 'bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:bg-white/[0.10] dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
+          : 'hover:bg-accent/40'
       )}
     >
       {thread.unread ? (
         <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r-full bg-primary" />
       ) : null}
-      <span className="min-w-0">
-        <span className="flex min-w-0 items-center gap-2">
-          <span
-            className={cn(
-              'truncate text-sm',
-              thread.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground'
-            )}
-          >
-            {thread.worktree.displayName}
-          </span>
+      {/* Why (right cluster aligned to title, not centered between rows):
+          parking time + count on the title row leaves the secondary row
+          full-width for the repo badge + branch name, which used to get
+          truncated when the right cluster ate horizontal space. */}
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="inline-flex shrink-0 pt-[3px]">
+          <AgentIcon agent={agentTypeToIconAgent(thread.agentType)} size={14} />
         </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1.5">
-          <EventRepoBadge repo={thread.repo} />
-          <span className="truncate text-xs text-muted-foreground">{eventTitle(latest)}</span>
+        <span
+          className={cn(
+            'line-clamp-2 min-w-0 flex-1 break-words text-[11px] leading-snug',
+            thread.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground'
+          )}
+        >
+          {thread.paneTitle}
         </span>
-        {!compact ? (
-          <span className="mt-1 block truncate text-xs text-muted-foreground">
-            {eventSummary(latest)}
-          </span>
-        ) : null}
-      </span>
-      <span className={cn('flex flex-col items-end pt-0.5', compact ? 'gap-1' : 'gap-2')}>
-        <span className="flex min-w-16 flex-col items-end gap-1">
-          <span className="relative flex h-6 min-w-16 items-start justify-end">
-            <span className="transition-opacity group-hover:opacity-0">
+        <span className="inline-flex shrink-0 items-center gap-1.5 pt-[3px]">
+          <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
+            {thread.events.length}
+          </Badge>
+          {/* Why (single right-most slot): the unread BellDot, the timestamp,
+              and the hover toggle all share this slot. Layered with opacity
+              transitions so on hover the static bell + timestamp fade out and
+              the bell-toggle button fades in — no double-bell on hover. */}
+          <span className="relative inline-flex h-5 min-w-16 items-center justify-end">
+            <span className="inline-flex items-center gap-1.5 transition-opacity group-hover:opacity-0">
+              {thread.unread ? (
+                <BellDot
+                  className="size-3.5 shrink-0 text-primary"
+                  fill="currentColor"
+                  aria-label="Unread"
+                />
+              ) : null}
               <EventTime timestamp={latest.timestamp} />
             </span>
-            <span className="absolute right-0 top-0 opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="absolute right-0 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -581,29 +638,27 @@ function ThreadRow({
               </Tooltip>
             </span>
           </span>
-          <span className="inline-flex items-center gap-1">
-            {thread.unread ? (
-              <span className="rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-semibold leading-none text-primary-foreground">
-                New
-              </span>
-            ) : null}
-            <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
-              {thread.events.length}
-            </Badge>
-          </span>
         </span>
-      </span>
+      </div>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <EventRepoBadge repo={thread.repo} />
+        <span className="truncate text-[11px] text-muted-foreground">
+          {thread.worktree.displayName}
+        </span>
+      </div>
     </div>
   )
 }
 
 export default function ActivityPrototypePage(): React.JSX.Element {
   const [readFilter, setReadFilter] = useState<ThreadReadFilter>('all')
-  const [leftSidebarCompact, setLeftSidebarCompact] = useState(true)
-  const leftSidebarDensity: ActivityDensity = leftSidebarCompact ? 'compact' : 'comfortable'
   const [query, setQuery] = useState('')
-  const [locallyReadEventIds, setLocallyReadEventIds] = useState<Set<string>>(() => new Set())
-  const [selectedWorktreeId, setSelectedWorktreeId] = useState<string | null>(null)
+  const [selectedPaneKey, setSelectedPaneKey] = useState<string | null>(null)
+  const [displayedPaneKey, setDisplayedPaneKey] = useState<string | null>(null)
+  const [activePortalSlotId, setActivePortalSlotId] =
+    useState<ActivityTerminalPortalSlotId>('primary')
+  const [primaryPortalTargetEl, setPrimaryPortalTargetEl] = useState<HTMLElement | null>(null)
+  const [secondaryPortalTargetEl, setSecondaryPortalTargetEl] = useState<HTMLElement | null>(null)
   const [threadListWidth, setThreadListWidth] = useState(340)
   const {
     containerRef: threadListRef,
@@ -627,27 +682,21 @@ export default function ActivityPrototypePage(): React.JSX.Element {
       repoMap: getRepoMapFromState(s),
       acknowledgedAgentsByPaneKey: s.acknowledgedAgentsByPaneKey,
       acknowledgeAgents: s.acknowledgeAgents,
-      unacknowledgeAgents: s.unacknowledgeAgents,
-      markWorktreeUnread: s.markWorktreeUnread,
-      clearWorktreeUnread: s.clearWorktreeUnread
+      unacknowledgeAgents: s.unacknowledgeAgents
     }))
   )
 
-  const allEvents = useMemo(
-    () =>
-      buildActivityEvents({
-        ...storeData,
-        locallyReadEventIds
-      }),
-    [storeData, locallyReadEventIds]
-  )
+  const allEvents = useMemo(() => buildActivityEvents(storeData), [storeData])
 
-  const allThreads = useMemo(() => buildWorktreeThreads(allEvents), [allEvents])
+  const allThreads = useMemo(() => buildAgentPaneThreads(allEvents), [allEvents])
 
   const visibleThreads = useMemo(() => {
     const trimmedQuery = query.trim().toLowerCase()
     return allThreads.filter((thread) => {
-      if (readFilter === 'unread' && !thread.unread) {
+      // Why: keep the just-selected thread visible even after auto-mark-read
+      // flips it to read, otherwise clicking a row in unread-only mode makes it
+      // vanish from the left list while staying selected on the right.
+      if (readFilter === 'unread' && !thread.unread && thread.paneKey !== selectedPaneKey) {
         return false
       }
       if (!trimmedQuery) {
@@ -655,84 +704,201 @@ export default function ActivityPrototypePage(): React.JSX.Element {
       }
       const latest = thread.latestEvent
       const text =
-        `${thread.worktree.displayName} ${thread.repo?.displayName ?? ''} ${eventTitle(latest)} ${eventSummary(latest)} ${eventMeta(latest)}`.toLowerCase()
+        `${thread.paneTitle} ${thread.worktree.displayName} ${thread.repo?.displayName ?? ''} ${agentTitle(latest)} ${agentSummary(latest)} ${agentMeta(latest)}`.toLowerCase()
       return text.includes(trimmedQuery)
     })
-  }, [allThreads, readFilter, query])
+  }, [allThreads, readFilter, query, selectedPaneKey])
 
   useEffect(() => {
-    if (visibleThreads.length === 0) {
-      setSelectedWorktreeId(null)
+    if (selectedPaneKey && !allThreads.some((thread) => thread.paneKey === selectedPaneKey)) {
+      setSelectedPaneKey(null)
+    }
+  }, [allThreads, selectedPaneKey])
+
+  const selectedThread = selectedPaneKey
+    ? (allThreads.find((thread) => thread.paneKey === selectedPaneKey) ?? null)
+    : null
+  const selectedTabId = selectedThread?.latestEvent.tab.id ?? null
+  const selectedHasLiveTab =
+    selectedThread && selectedTabId
+      ? (storeData.tabsByWorktree[selectedThread.worktree.id] ?? []).some(
+          (tab) => tab.id === selectedTabId
+        )
+      : false
+  const displayedThread = displayedPaneKey
+    ? (allThreads.find((thread) => thread.paneKey === displayedPaneKey) ?? null)
+    : null
+  const displayedTabId = displayedThread?.latestEvent.tab.id ?? null
+  const displayedHasLiveTab =
+    displayedThread && displayedTabId
+      ? (storeData.tabsByWorktree[displayedThread.worktree.id] ?? []).some(
+          (tab) => tab.id === displayedTabId
+        )
+      : false
+  const displayedIsSelectedTerminal =
+    selectedThread &&
+    displayedThread &&
+    displayedThread.worktree.id === selectedThread.worktree.id &&
+    displayedThread.latestEvent.tab.id === selectedThread.latestEvent.tab.id
+  const visibleThread =
+    selectedThread && selectedHasLiveTab
+      ? displayedThread && displayedHasLiveTab && displayedThread.paneKey !== selectedThread.paneKey
+        ? displayedIsSelectedTerminal
+          ? selectedThread
+          : displayedThread
+        : selectedThread
+      : null
+  const stagedThread =
+    selectedThread &&
+    selectedHasLiveTab &&
+    visibleThread &&
+    visibleThread.paneKey !== selectedThread.paneKey &&
+    !displayedIsSelectedTerminal
+      ? selectedThread
+      : null
+  const inactivePortalSlotId = otherActivityTerminalSlot(activePortalSlotId)
+  const portalTargetBySlot = {
+    primary: primaryPortalTargetEl,
+    secondary: secondaryPortalTargetEl
+  } satisfies Record<ActivityTerminalPortalSlotId, HTMLElement | null>
+  const activePortalTargetEl = portalTargetBySlot[activePortalSlotId]
+  const inactivePortalTargetEl = portalTargetBySlot[inactivePortalSlotId]
+  const visibleTabId = visibleThread?.latestEvent.tab.id ?? null
+  const stagedTabId = stagedThread?.latestEvent.tab.id ?? null
+  const visiblePortalReady = useActivityTerminalPortalReadiness(activePortalTargetEl, visibleTabId)
+  const stagedPortalReady = useActivityTerminalPortalReadiness(inactivePortalTargetEl, stagedTabId)
+  const showTerminalLoadingLabel = useActivityTerminalLoadingLabel(
+    Boolean(visibleThread && !stagedThread && !visiblePortalReady)
+  )
+
+  const setPrimaryPortalTarget = useCallback((target: HTMLElement | null): void => {
+    setPrimaryPortalTargetEl(target)
+  }, [])
+
+  const setSecondaryPortalTarget = useCallback((target: HTMLElement | null): void => {
+    setSecondaryPortalTargetEl(target)
+  }, [])
+
+  // Why (no flash on selection): publish the portal descriptor with the
+  // selected thread's worktreeId+tabId directly, instead of letting Terminal
+  // derive it from activeWorktreeId/activeTabId. selectThread updates the
+  // store in multiple steps (setActiveRepo → setActiveWorktree →
+  // setActiveTabType → setActiveTab) and React commits in between can
+  // briefly reflect the new worktree's stale "last active tab" — that's the
+  // wrong-terminal flash. Anchoring the portal to the selected thread
+  // sidesteps the race entirely.
+  // Why useMemo: keep a stable descriptor identity across unrelated re-renders
+  // so subscribers (Terminal → WorktreeSplitSurface) keep their React.memo
+  // bail-outs. The inactive descriptor is a same-size staging slot: the old
+  // terminal stays visible while the next terminal mounts underneath it.
+  const portalDescriptors = useMemo(() => {
+    const descriptors: ActivityTerminalPortalTarget[] = []
+    if (visibleThread && activePortalTargetEl) {
+      descriptors.push({
+        slotId: activePortalSlotId,
+        target: activePortalTargetEl,
+        worktreeId: visibleThread.worktree.id,
+        tabId: visibleThread.latestEvent.tab.id,
+        paneId: paneIdFromPaneKey(visibleThread.paneKey),
+        active: true
+      })
+    }
+    if (stagedThread && inactivePortalTargetEl) {
+      descriptors.push({
+        slotId: inactivePortalSlotId,
+        target: inactivePortalTargetEl,
+        worktreeId: stagedThread.worktree.id,
+        tabId: stagedThread.latestEvent.tab.id,
+        paneId: paneIdFromPaneKey(stagedThread.paneKey),
+        active: false
+      })
+    }
+    return descriptors
+  }, [
+    activePortalSlotId,
+    activePortalTargetEl,
+    inactivePortalSlotId,
+    inactivePortalTargetEl,
+    stagedThread,
+    visibleThread
+  ])
+
+  useLayoutEffect(() => {
+    if (!selectedThread || !selectedHasLiveTab) {
+      setDisplayedPaneKey(null)
       return
     }
-    if (
-      !selectedWorktreeId ||
-      !visibleThreads.some((thread) => thread.worktree.id === selectedWorktreeId)
-    ) {
-      setSelectedWorktreeId(visibleThreads[0].worktree.id)
+    if (stagedThread && stagedPortalReady) {
+      setActivePortalSlotId(inactivePortalSlotId)
+      setDisplayedPaneKey(stagedThread.paneKey)
+      return
     }
-  }, [selectedWorktreeId, visibleThreads])
+    if (!stagedThread && visibleThread?.paneKey === selectedThread.paneKey && visiblePortalReady) {
+      setDisplayedPaneKey(selectedThread.paneKey)
+    }
+  }, [
+    inactivePortalSlotId,
+    selectedHasLiveTab,
+    selectedThread,
+    stagedPortalReady,
+    stagedThread,
+    visiblePortalReady,
+    visibleThread
+  ])
 
-  const selectedThread =
-    visibleThreads.find((thread) => thread.worktree.id === selectedWorktreeId) ??
-    visibleThreads[0] ??
-    null
+  // Why useLayoutEffect (not useEffect): publish must happen before paint so
+  // Terminal's portal subscriber rerenders in the same commit. With useEffect
+  // the publish runs after paint, so the user briefly sees Terminal's stale
+  // portal target on screen — the "wrong terminal flash" symptom.
+  // Why no cleanup-to-null on every change: clearing on dependency change
+  // forces the portal through a null state on every thread switch (cleanup →
+  // effect within one commit) which can flash the workspace pane behind the
+  // activity slot. We only null on unmount, via a separate effect below.
+  useLayoutEffect(() => {
+    setActivityTerminalPortals(portalDescriptors)
+  }, [portalDescriptors])
 
-  const selectedGroupedEvents = useMemo(() => {
-    const groups: Record<'Today' | 'Yesterday' | 'Earlier', ActivityEvent[]> = {
-      Today: [],
-      Yesterday: [],
-      Earlier: []
+  useLayoutEffect(() => {
+    return () => {
+      setActivityTerminalPortals([])
     }
-    if (!selectedThread) {
-      return groups
-    }
-    for (const event of selectedThread.events) {
-      groups[groupForTimestamp(event.timestamp)].push(event)
-    }
-    return groups
-  }, [selectedThread])
+  }, [])
 
-  const selectThread = (thread: WorktreeThread): void => {
-    setSelectedWorktreeId(thread.worktree.id)
+  const markThreadRead = (thread: AgentPaneThread): void => {
+    storeData.acknowledgeAgents([thread.paneKey])
+  }
+
+  const markThreadUnread = (thread: AgentPaneThread): void => {
+    storeData.unacknowledgeAgents([thread.paneKey])
+  }
+
+  const activateThreadTerminal = (thread: AgentPaneThread): void => {
+    const state = useAppStore.getState()
+    // Why: retained-agent threads can outlive their tab. With no live tab, the
+    // right pane shows the empty-state placeholder; reorienting the workspace
+    // and dispatching focus to a dead tab id would just confuse the user.
+    const liveTabs = state.tabsByWorktree[thread.worktree.id] ?? []
+    const hasLiveTab = liveTabs.some((t) => t.id === thread.latestEvent.tab.id)
+    if (!hasLiveTab) {
+      return
+    }
+    if (state.activeRepoId !== thread.worktree.repoId) {
+      state.setActiveRepo(thread.worktree.repoId)
+    }
+    if (state.activeWorktreeId !== thread.worktree.id) {
+      state.setActiveWorktree(thread.worktree.id)
+    }
+    state.setActiveTabType('terminal')
+    activateTabAndFocusPane(thread.latestEvent.tab.id, paneIdFromPaneKey(thread.paneKey))
+  }
+
+  const selectThread = (thread: AgentPaneThread): void => {
+    setSelectedPaneKey(thread.paneKey)
     markThreadRead(thread)
+    activateThreadTerminal(thread)
   }
 
-  const markThreadRead = (thread: WorktreeThread): void => {
-    const agentPaneKeys = thread.events.flatMap((event) =>
-      event.kind === 'agent' ? [event.entry.paneKey] : []
-    )
-    storeData.acknowledgeAgents(agentPaneKeys)
-    if (thread.events.some((event) => event.kind === 'worktree-created')) {
-      storeData.clearWorktreeUnread(thread.worktree.id)
-    }
-    setLocallyReadEventIds((current) => {
-      const next = new Set(current)
-      for (const event of thread.events) {
-        next.add(event.id)
-      }
-      return next
-    })
-  }
-
-  const markThreadUnread = (thread: WorktreeThread): void => {
-    const agentPaneKeys = thread.events.flatMap((event) =>
-      event.kind === 'agent' ? [event.entry.paneKey] : []
-    )
-    storeData.unacknowledgeAgents(agentPaneKeys)
-    if (thread.events.some((event) => event.kind === 'worktree-created')) {
-      storeData.markWorktreeUnread(thread.worktree.id)
-    }
-    setLocallyReadEventIds((current) => {
-      const next = new Set(current)
-      for (const event of thread.events) {
-        next.delete(event.id)
-      }
-      return next
-    })
-  }
-
-  const toggleThreadRead = (thread: WorktreeThread): void => {
+  const toggleThreadRead = (thread: AgentPaneThread): void => {
     if (thread.unread) {
       markThreadRead(thread)
       return
@@ -740,51 +906,24 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     markThreadUnread(thread)
   }
 
-  const markRead = (event: ActivityEvent): void => {
-    if (event.kind === 'agent') {
-      storeData.acknowledgeAgents([event.entry.paneKey])
-      return
-    }
-    setLocallyReadEventIds((current) => new Set(current).add(event.id))
-    storeData.clearWorktreeUnread(event.worktree.id)
-  }
-
+  // Why (page padding): drop top + horizontal padding so the page extends to
+  // the window's left and right edges (matching how sidebars abut the chrome
+  // elsewhere). The titlebar (ActivityTitlebarControls) already provides the
+  // breathing-room band above; the right pane's title row supplies its own
+  // top padding (pt-2) so the heading isn't pinned to the titlebar.
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background px-4 py-3">
+    <div className="flex h-full min-h-0 flex-col bg-background pb-3">
       <main className="flex min-h-0 flex-1 overflow-hidden">
         <aside
           ref={threadListRef}
           className="relative flex min-h-0 shrink-0 flex-col border-r border-border"
           style={{ width: threadListWidth }}
         >
-          <div className="shrink-0 border-b border-border px-2 py-2">
-            <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="shrink-0 border-b border-border px-2 pt-1.5 pb-2">
+            <div className="mb-2 flex items-center gap-2">
               <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
-                Worktrees
+                Agents
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Activity list display options"
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <Settings className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" side="bottom" className="min-w-44">
-                  <DropdownMenuLabel>Display style</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuCheckboxItem
-                    checked={leftSidebarCompact}
-                    onCheckedChange={(checked) => setLeftSidebarCompact(checked === true)}
-                  >
-                    Compact list
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
@@ -821,17 +960,16 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           <div className="min-h-0 flex-1 overflow-auto scrollbar-sleek">
             {visibleThreads.map((thread) => (
               <ThreadRow
-                key={thread.worktree.id}
+                key={thread.paneKey}
                 thread={thread}
-                density={leftSidebarDensity}
-                selected={thread.worktree.id === selectedThread?.worktree.id}
+                selected={thread.paneKey === selectedThread?.paneKey}
                 onSelect={() => selectThread(thread)}
                 onToggleRead={() => toggleThreadRead(thread)}
               />
             ))}
             {visibleThreads.length === 0 ? (
               <div className="px-3 py-8 text-sm text-muted-foreground">
-                No worktree threads match these filters.
+                No agent activity matches these filters.
               </div>
             ) : null}
           </div>
@@ -854,57 +992,110 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1 overflow-hidden pt-2">
+        <section className="min-w-0 flex-1 overflow-hidden">
           {selectedThread ? (
             <div className="flex h-full min-h-0 flex-col">
-              <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-4 pb-3">
+              <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 pt-2 pb-3">
                 <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <h2 className="truncate text-base font-semibold">
-                      {selectedThread.worktree.displayName}
+                  <div className="flex min-w-0 items-start gap-2">
+                    <span className="inline-flex shrink-0 pt-[3px]">
+                      <AgentIcon agent={agentTypeToIconAgent(selectedThread.agentType)} size={16} />
+                    </span>
+                    {/* Why: clamp to 2 lines (matches ThreadRow) so longer
+                        prompts don't get cut to one ellipsis. Badge moves to
+                        the secondary line so it stays at a fixed position
+                        regardless of title height. */}
+                    <h2 className="line-clamp-2 break-words text-sm font-semibold leading-snug">
+                      {selectedThread.paneTitle}
                     </h2>
-                    <EventRepoBadge repo={selectedThread.repo} />
                   </div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
-                    Complete worktree history, from creation through latest agent updates
+                  <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                    <EventRepoBadge repo={selectedThread.repo} />
+                    <span className="truncate text-xs text-muted-foreground">
+                      {selectedThread.worktree.displayName}
+                    </span>
                   </div>
                 </div>
                 <Button
                   type="button"
                   variant="outline"
                   size="xs"
+                  className="shrink-0 self-center"
                   onClick={() => {
                     markThreadRead(selectedThread)
                     activateAndRevealWorktree(selectedThread.worktree.id)
                   }}
                 >
-                  Jump to worktree
+                  Jump to workspace
                 </Button>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto scrollbar-sleek">
-                {(['Today', 'Yesterday', 'Earlier'] as const).map((group) =>
-                  selectedGroupedEvents[group].length > 0 ? (
-                    <section key={group}>
-                      <div className="border-b border-border px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
-                        {group}
+              {/* Why: Terminal stays mounted in the hidden workspace tree while
+                  Activity is open. This target lets that existing TerminalPane
+                  move here instead of creating a second PTY/xterm owner. */}
+              {(() => {
+                // Why: retained threads can outlive their tab; portal needs a live TerminalPane to render into.
+                if (!selectedHasLiveTab) {
+                  return (
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+                      <TerminalSquare className="size-7" />
+                      Agent terminal closed. Open a new terminal in this workspace to continue.
+                    </div>
+                  )
+                }
+                return (
+                  <div className="relative min-h-0 flex-1 overflow-hidden bg-editor-surface">
+                    <div
+                      ref={setPrimaryPortalTarget}
+                      className={cn(
+                        'absolute inset-0 min-h-0 min-w-0',
+                        activePortalSlotId === 'primary'
+                          ? 'z-10 opacity-100'
+                          : 'pointer-events-none z-0 opacity-0'
+                      )}
+                      aria-hidden={activePortalSlotId !== 'primary'}
+                      data-activity-terminal-slot-id="primary"
+                    />
+                    <div
+                      ref={setSecondaryPortalTarget}
+                      className={cn(
+                        'absolute inset-0 min-h-0 min-w-0',
+                        activePortalSlotId === 'secondary'
+                          ? 'z-10 opacity-100'
+                          : 'pointer-events-none z-0 opacity-0'
+                      )}
+                      aria-hidden={activePortalSlotId !== 'secondary'}
+                      data-activity-terminal-slot-id="secondary"
+                    />
+                    {visibleThread && !stagedThread && !visiblePortalReady ? (
+                      <div
+                        className="pointer-events-none absolute inset-0 z-20 bg-editor-surface"
+                        aria-hidden="true"
+                      >
+                        {showTerminalLoadingLabel ? (
+                          <div className="ml-3 mt-3 inline-flex items-center gap-2 rounded-md border border-border bg-background/85 px-2 py-1 text-xs text-muted-foreground shadow-xs">
+                            <span className="h-3 w-1.5 animate-pulse rounded-sm bg-muted-foreground/70" />
+                            <span>Connecting terminal...</span>
+                          </div>
+                        ) : null}
                       </div>
-                      {[...selectedGroupedEvents[group]].reverse().map((event) => (
-                        <ActivityRow
-                          key={event.id}
-                          event={event}
-                          density="comfortable"
-                          onMarkRead={markRead}
-                        />
-                      ))}
-                    </section>
-                  ) : null
-                )}
-              </div>
+                    ) : null}
+                  </div>
+                )
+              })()}
             </div>
           ) : (
             <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-              <MessageSquareText className="size-7" />
-              No activity yet.
+              {visibleThreads.length === 0 ? (
+                <>
+                  <MessageSquareText className="size-7" />
+                  No activity yet.
+                </>
+              ) : (
+                <>
+                  <TerminalSquare className="size-7" />
+                  Select an agent to open its terminal.
+                </>
+              )}
             </div>
           )}
         </section>

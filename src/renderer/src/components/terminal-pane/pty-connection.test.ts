@@ -60,6 +60,7 @@ const shouldSeedCacheTimerOnInitialTitle = vi.fn(() => false)
 let mockStoreState: StoreState
 let transportFactoryQueue: MockTransport[] = []
 let createdTransportOptions: Record<string, unknown>[] = []
+let storeSubscribers: ((state: StoreState) => void)[] = []
 
 vi.mock('@/runtime/sync-runtime-graph', () => ({
   scheduleRuntimeGraphSync
@@ -67,9 +68,21 @@ vi.mock('@/runtime/sync-runtime-graph', () => ({
 
 vi.mock('@/store', () => ({
   useAppStore: {
-    getState: () => mockStoreState
+    getState: () => mockStoreState,
+    subscribe: (listener: (state: StoreState) => void) => {
+      storeSubscribers.push(listener)
+      return () => {
+        storeSubscribers = storeSubscribers.filter((candidate) => candidate !== listener)
+      }
+    }
   }
 }))
+
+function notifyStoreSubscribers(): void {
+  for (const listener of storeSubscribers.slice()) {
+    listener(mockStoreState)
+  }
+}
 
 vi.mock('@/lib/agent-status', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
@@ -217,6 +230,7 @@ describe('connectPanePty', () => {
     vi.clearAllMocks()
     transportFactoryQueue = []
     createdTransportOptions = []
+    storeSubscribers = []
     mockStoreState = {
       tabsByWorktree: {
         'wt-1': [{ id: 'tab-1', ptyId: 'tab-pty' }]
@@ -244,11 +258,13 @@ describe('connectPanePty', () => {
     ;(globalThis as unknown as { window: unknown }).window = {
       api: {
         ssh: {
-          connect: vi.fn().mockResolvedValue({ status: 'connected' })
+          connect: vi.fn().mockResolvedValue({ status: 'connected' }),
+          needsPassphrasePrompt: vi.fn().mockResolvedValue(false)
         },
         pty: {
           signal: vi.fn(),
           ackColdRestore: vi.fn(),
+          onClearBufferRequest: vi.fn(() => vi.fn()),
           onSerializeBufferRequest: vi.fn(() => vi.fn()),
           declarePendingPaneSerializer: vi.fn().mockResolvedValue(1),
           settlePaneSerializer: vi.fn().mockResolvedValue(undefined),
@@ -612,6 +628,39 @@ describe('connectPanePty', () => {
     expect(deps.clearTabPtyId).toHaveBeenCalledWith('tab-1', 'stale-pty')
     expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(2, 'fresh-pty')
     expect(deps.updateTabPtyId).toHaveBeenCalledWith('tab-1', 'fresh-pty')
+  })
+
+  it('shows a terminal error instead of fresh-spawning when a non-deferred SSH reattach reports expired via onError', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport()
+    transport.connect.mockImplementation(async (opts: { callbacks?: ConnectCallbacks }) => {
+      opts.callbacks?.onError?.('SSH_SESSION_EXPIRED: restored-session')
+      return undefined
+    })
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: 'restored-session' }] },
+      repos: [{ id: 'repo1', connectionId: 'conn-1' }],
+      sshConnectionStates: new Map([['conn-1', { status: 'connected' }]])
+    } as StoreState
+    const pane = createPane(2)
+    const manager = createManager(2)
+    const deps = createDeps({
+      restoredLeafId: 'pane:2',
+      restoredPtyIdByLeafId: { 'pane:2': 'restored-session' }
+    })
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks(10)
+
+    expect(deps.onPtyErrorRef.current).toHaveBeenCalledWith(
+      2,
+      'Previous SSH session expired. Start a new terminal to continue.'
+    )
+    expect(transport.connect).toHaveBeenCalledTimes(1)
+    expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(2, null)
+    expect(deps.clearTabPtyId).toHaveBeenCalledWith('tab-1', 'restored-session')
   })
 
   it('resets focus reporting after daemon snapshot replay without applying the full mode reset', async () => {
@@ -1109,11 +1158,60 @@ describe('connectPanePty', () => {
     expect(api.pty.signal).toHaveBeenCalledWith('leaf-session', 'SIGWINCH')
   })
 
-  it('shows an informational toast instead of a terminal error when an SSH session expired', async () => {
+  it('does not auto-reconnect after a user cancels deferred SSH passphrase auth', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport()
-    transport.connect.mockImplementation(async (opts: { sessionId?: string }) => {
-      return { id: opts.sessionId ?? 'pty-new', sessionExpired: true }
+    transportFactoryQueue.push(transport)
+
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      repos: [{ id: 'repo1', connectionId: 'conn-1' }],
+      sshConnectionStates: new Map([['conn-1', { status: 'disconnected' }]]),
+      deferredSshReconnectTargets: ['conn-1'],
+      deferredSshSessionIdsByTabId: { 'tab-1': 'saved-session' }
+    }
+
+    const api = (
+      globalThis as unknown as {
+        window: {
+          api: {
+            ssh: {
+              connect: ReturnType<typeof vi.fn>
+              needsPassphrasePrompt: ReturnType<typeof vi.fn>
+            }
+          }
+        }
+      }
+    ).window.api
+    api.ssh.needsPassphrasePrompt.mockResolvedValue(true)
+
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks(3)
+
+    mockStoreState.sshConnectionStates = new Map([['conn-1', { status: 'connecting' }]])
+    notifyStoreSubscribers()
+    mockStoreState.sshConnectionStates = new Map([['conn-1', { status: 'disconnected' }]])
+    notifyStoreSubscribers()
+    await flushAsyncTicks(10)
+
+    expect(api.ssh.connect).not.toHaveBeenCalled()
+    expect(transport.connect).not.toHaveBeenCalled()
+    expect(deps.onPtyErrorRef.current).not.toHaveBeenCalled()
+    expect(mockStoreState.removeDeferredSshSessionId).not.toHaveBeenCalled()
+    expect(mockStoreState.removeDeferredSshReconnectTarget).not.toHaveBeenCalled()
+  })
+
+  it('shows a terminal error instead of fresh-spawning when an SSH session expired', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport()
+    transport.connect.mockImplementation(async (opts) => {
+      opts.callbacks?.onError?.('SSH_SESSION_EXPIRED: expired-session')
+      return undefined
     })
     transportFactoryQueue.push(transport)
 
@@ -1135,14 +1233,12 @@ describe('connectPanePty', () => {
     connectPanePty(pane as never, manager as never, deps as never)
     await flushAsyncTicks(20)
 
-    expect(deps.onPtyErrorRef.current).not.toHaveBeenCalledWith(
-      expect.any(Number),
-      expect.stringContaining('Previous session expired')
+    expect(deps.onPtyErrorRef.current).toHaveBeenCalledWith(
+      1,
+      'Previous SSH session expired. Start a new terminal to continue.'
     )
-    expect(toastInfo).toHaveBeenCalledWith('Previous SSH session expired.', {
-      id: 'ssh-session-expired-tab-1',
-      description: 'Started a new shell.'
-    })
+    expect(toastInfo).not.toHaveBeenCalled()
+    expect(transport.connect).toHaveBeenCalledTimes(1)
   })
 
   // Why: the working→idle transition fires an 'agent-task-complete' OS

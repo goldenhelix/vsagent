@@ -25,6 +25,8 @@ vi.mock('./ssh-channel-multiplexer', () => {
 })
 
 vi.mock('../providers/ssh-pty-provider', () => ({
+  isSshPtyNotFoundError: (err: unknown) =>
+    (err instanceof Error ? err.message : String(err)).includes('not found'),
   SshPtyProvider: class MockSshPtyProvider {
     onData = vi.fn().mockReturnValue(() => {})
     onReplay = vi.fn().mockReturnValue(() => {})
@@ -54,7 +56,8 @@ vi.mock('../ipc/pty', () => ({
   getPtyIdsForConnection: vi.fn().mockReturnValue([]),
   clearPtyOwnershipForConnection: vi.fn(),
   clearProviderPtyState: vi.fn(),
-  deletePtyOwnership: vi.fn()
+  deletePtyOwnership: vi.fn(),
+  setPtyOwnership: vi.fn()
 }))
 
 vi.mock('../providers/ssh-filesystem-dispatch', () => ({
@@ -78,7 +81,10 @@ function createMockDeps(): {
 } {
   const mockConn = {} as SshConnection
   const mockStore = {
-    getRepos: vi.fn().mockReturnValue([])
+    getRepos: vi.fn().mockReturnValue([]),
+    getSshRemotePtyLeases: vi.fn().mockReturnValue([]),
+    markSshRemotePtyLease: vi.fn(),
+    markSshRemotePtyLeases: vi.fn()
   } as unknown as Store
   const mockPortForward = {
     removeAllForwards: vi.fn()
@@ -159,5 +165,6 @@ describe('SshRelaySession terminal relay error (RelayVersionMismatchError)', () 
     await session.reconnect(mockConn)
     expect(onTerminal).toHaveBeenCalledTimes(1)
     expect(onTerminal).toHaveBeenCalledWith('target-1', mismatchErr)
+    expect(session.getState()).toBe('idle')
   })
 })

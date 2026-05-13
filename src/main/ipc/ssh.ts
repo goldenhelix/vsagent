@@ -14,9 +14,17 @@ import type {
   DetectedPort,
   SavedPortForward
 } from '../../shared/ssh-types'
+import { SSH_TERMINATE_RECONNECT_REQUIRED } from '../../shared/constants'
 import { isAuthError } from '../ssh/ssh-connection-utils'
+import { isSshPtyNotFoundError } from '../providers/ssh-pty-provider'
 import { registerSshBrowseHandler } from './ssh-browse'
 import { requestCredential, registerCredentialHandler } from './ssh-passphrase'
+import {
+  clearProviderPtyState,
+  deletePtyOwnership,
+  getPtyIdsForConnection,
+  getSshPtyProvider
+} from './pty'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 
 let sshStore: SshConnectionStore | null = null
@@ -194,6 +202,7 @@ export function registerSshHandlers(
     'ssh:importConfig',
     'ssh:connect',
     'ssh:disconnect',
+    'ssh:terminateSessions',
     'ssh:getState',
     'ssh:needsPassphrasePrompt',
     'ssh:testConnection',
@@ -278,7 +287,24 @@ export function registerSshHandlers(
     }
   )
 
-  ipcMain.handle('ssh:removeTarget', (_event, args: { id: string }) => {
+  ipcMain.handle('ssh:removeTarget', async (_event, args: { id: string }) => {
+    const session = activeSessions.get(args.id)
+    if (session) {
+      // Why: removing a target is destructive. Tear down the live relay before
+      // deleting metadata so callbacks cannot keep using an orphan target id.
+      await portForwardManager!.removeAllForwards(args.id)
+      session.dispose()
+      activeSessions.delete(args.id)
+      clearRelayLostBackoff(args.id)
+    }
+    try {
+      await connectionManager!.disconnect(args.id)
+    } catch (err) {
+      console.warn(
+        `[ssh] Failed to disconnect removed target ${args.id}: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+    store.removeSshRemotePtyLeases(args.id)
     sshStore!.removeTarget(args.id)
   })
 
@@ -322,7 +348,7 @@ export function registerSshHandlers(
       // local ports. Without this, restorePortForwards in the new session
       // can hit EADDRINUSE on the same ports the old session was using.
       await portForwardManager!.removeAllForwards(targetId)
-      existingSession.dispose()
+      existingSession.detach()
       activeSessions.delete(targetId)
       clearRelayLostBackoff(targetId)
     }
@@ -540,6 +566,52 @@ export function registerSshHandlers(
       // Why: await port teardown so local listeners are fully released
       // before the disconnect completes. Without this, an immediate
       // reconnect can hit EADDRINUSE on the same ports.
+      await portForwardManager!.removeAllForwards(args.targetId)
+      session.detach()
+      activeSessions.delete(args.targetId)
+      clearRelayLostBackoff(args.targetId)
+    }
+    await connectionManager!.disconnect(args.targetId)
+  })
+
+  ipcMain.handle('ssh:terminateSessions', async (_event, args: { targetId: string }) => {
+    const session = activeSessions.get(args.targetId)
+    const provider = getSshPtyProvider(args.targetId)
+    const leasedIds = store
+      .getSshRemotePtyLeases(args.targetId)
+      .filter((lease) => lease.state !== 'terminated' && lease.state !== 'expired')
+      .map((lease) => lease.ptyId)
+    const ptyIds = Array.from(new Set([...getPtyIdsForConnection(args.targetId), ...leasedIds]))
+
+    if (ptyIds.length > 0 && !provider) {
+      throw new Error(
+        `${SSH_TERMINATE_RECONNECT_REQUIRED}: SSH relay is not connected; reconnect before terminating remote sessions.`
+      )
+    }
+    const shutdownResults = provider
+      ? await Promise.allSettled(
+          ptyIds.map((ptyId) => provider.shutdown(ptyId, { immediate: true, keepHistory: false }))
+        )
+      : []
+    const shutdownFailures: string[] = []
+    for (const [index, result] of shutdownResults.entries()) {
+      const ptyId = ptyIds[index]
+      if (result.status !== 'fulfilled' && !isSshPtyNotFoundError(result.reason)) {
+        shutdownFailures.push(
+          `${ptyId}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+        )
+        continue
+      }
+      clearProviderPtyState(ptyId)
+      deletePtyOwnership(ptyId)
+      store.markSshRemotePtyLease(args.targetId, ptyId, 'terminated')
+    }
+    if (shutdownFailures.length > 0) {
+      // Why: a failed relay shutdown can leave the remote process alive in the
+      // grace window. Keep the lease/session intact so the user can retry.
+      throw new Error(`Failed to terminate remote SSH sessions: ${shutdownFailures.join('; ')}`)
+    }
+    if (session) {
       await portForwardManager!.removeAllForwards(args.targetId)
       session.dispose()
       activeSessions.delete(args.targetId)

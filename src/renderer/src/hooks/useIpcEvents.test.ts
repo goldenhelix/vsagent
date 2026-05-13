@@ -156,6 +156,7 @@ describe('useIpcEvents updater integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -167,6 +168,9 @@ describe('useIpcEvents updater integration', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -361,6 +365,7 @@ describe('useIpcEvents updater integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -372,6 +377,9 @@ describe('useIpcEvents updater integration', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -466,8 +474,55 @@ describe('useIpcEvents updater integration', () => {
     const revealWorktreeInSidebar = vi.fn()
     const setTabCustomTitle = vi.fn()
     const queueTabStartupCommand = vi.fn()
+    const replyTerminalCreate = vi.fn()
+    const storeState = {
+      setUpdateStatus: vi.fn(),
+      createTab,
+      setActiveView,
+      setActiveWorktree,
+      markWorktreeVisited: vi.fn(),
+      setActiveTabType,
+      setActiveTab,
+      revealWorktreeInSidebar,
+      setTabCustomTitle,
+      queueTabStartupCommand,
+      tabsByWorktree: {} as Record<string, { id: string; ptyId?: string | null; title?: string }[]>,
+      ptyIdsByTabId: {} as Record<string, string[]>,
+      fetchRepos: vi.fn(),
+      fetchWorktrees: vi.fn(),
+      activeModal: null,
+      closeModal: vi.fn(),
+      openModal: vi.fn(),
+      activeWorktreeId: 'wt-1',
+      activeView: 'terminal',
+      setActiveRepo: vi.fn(),
+      setIsFullScreen: vi.fn(),
+      updateBrowserPageState: vi.fn(),
+      activeTabType: 'terminal',
+      editorFontZoomLevel: 0,
+      setEditorFontZoomLevel: vi.fn(),
+      setRateLimitsFromPush: vi.fn(),
+      setSshConnectionState: vi.fn(),
+      setSshTargetLabels: vi.fn(),
+      setPortForwards: vi.fn(),
+      clearPortForwards: vi.fn(),
+      setDetectedPorts: vi.fn(),
+      enqueueSshCredentialRequest: vi.fn(),
+      removeSshCredentialRequest: vi.fn(),
+      clearTabPtyId: vi.fn(),
+      settings: { terminalFontSize: 13 }
+    }
     const createTerminalListenerRef: {
-      current: ((data: { worktreeId: string; command?: string; title?: string }) => void) | null
+      current:
+        | ((data: {
+            requestId?: string
+            worktreeId: string
+            command?: string
+            title?: string
+            ptyId?: string
+            activate?: boolean
+          }) => void)
+        | null
     } = { current: null }
 
     vi.resetModules()
@@ -486,41 +541,7 @@ describe('useIpcEvents updater integration', () => {
     vi.doMock('../store', () => ({
       useAppStore: {
         subscribe: vi.fn(() => () => {}),
-        getState: () => ({
-          setUpdateStatus: vi.fn(),
-          createTab,
-          setActiveView,
-          setActiveWorktree,
-          markWorktreeVisited: vi.fn(),
-          setActiveTabType,
-          setActiveTab,
-          revealWorktreeInSidebar,
-          setTabCustomTitle,
-          queueTabStartupCommand,
-          fetchRepos: vi.fn(),
-          fetchWorktrees: vi.fn(),
-          activeModal: null,
-          closeModal: vi.fn(),
-          openModal: vi.fn(),
-          activeWorktreeId: 'wt-1',
-          activeView: 'terminal',
-          setActiveRepo: vi.fn(),
-          setIsFullScreen: vi.fn(),
-          updateBrowserPageState: vi.fn(),
-          activeTabType: 'terminal',
-          editorFontZoomLevel: 0,
-          setEditorFontZoomLevel: vi.fn(),
-          setRateLimitsFromPush: vi.fn(),
-          setSshConnectionState: vi.fn(),
-          setSshTargetLabels: vi.fn(),
-          setPortForwards: vi.fn(),
-          clearPortForwards: vi.fn(),
-          setDetectedPorts: vi.fn(),
-          enqueueSshCredentialRequest: vi.fn(),
-          removeSshCredentialRequest: vi.fn(),
-          clearTabPtyId: vi.fn(),
-          settings: { terminalFontSize: 13 }
-        })
+        getState: () => storeState
       }
     }))
 
@@ -560,22 +581,33 @@ describe('useIpcEvents updater integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
           onActivateWorktree: () => () => {},
           onWorktreeHistoryNavigate: () => () => {},
           onCreateTerminal: (
-            listener: (data: { worktreeId: string; command?: string; title?: string }) => void
+            listener: (data: {
+              requestId?: string
+              worktreeId: string
+              command?: string
+              title?: string
+              ptyId?: string
+              activate?: boolean
+            }) => void
           ) => {
             createTerminalListenerRef.current = listener
             return () => {}
           },
           onRequestTerminalCreate: () => () => {},
-          replyTerminalCreate: () => {},
+          replyTerminalCreate,
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -657,6 +689,65 @@ describe('useIpcEvents updater integration', () => {
     expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
     expect(setTabCustomTitle).toHaveBeenCalledWith('tab-new', 'Runner')
     expect(queueTabStartupCommand).toHaveBeenCalledWith('tab-new', { command: 'opencode' })
+
+    createTab.mockClear()
+    createTerminalListenerRef.current({
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg'
+    })
+
+    expect(createTab).toHaveBeenCalledWith('wt-2', undefined, undefined, {
+      initialPtyId: 'pty-bg',
+      activate: true
+    })
+
+    createTab.mockClear()
+    setActiveView.mockClear()
+    setActiveWorktree.mockClear()
+    setActiveTabType.mockClear()
+    setActiveTab.mockClear()
+    revealWorktreeInSidebar.mockClear()
+    createTerminalListenerRef.current({
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg-2',
+      activate: false
+    })
+
+    expect(createTab).toHaveBeenCalledWith('wt-2', undefined, undefined, {
+      initialPtyId: 'pty-bg-2',
+      activate: false
+    })
+    expect(setActiveView).not.toHaveBeenCalled()
+    expect(setActiveWorktree).not.toHaveBeenCalled()
+    expect(setActiveTabType).not.toHaveBeenCalled()
+    expect(setActiveTab).not.toHaveBeenCalled()
+    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
+
+    storeState.tabsByWorktree = {
+      'wt-2': [{ id: 'tab-existing', ptyId: 'pty-bg', title: 'Terminal 1' }]
+    }
+    storeState.ptyIdsByTabId = { 'tab-existing': ['pty-bg'] }
+    createTab.mockClear()
+    setActiveTab.mockClear()
+    createTerminalListenerRef.current({
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg'
+    })
+
+    expect(createTab).not.toHaveBeenCalled()
+    expect(setActiveTab).toHaveBeenCalledWith('tab-existing')
+
+    createTerminalListenerRef.current({
+      requestId: 'req-reveal',
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg'
+    })
+
+    expect(replyTerminalCreate).toHaveBeenCalledWith({
+      requestId: 'req-reveal',
+      tabId: 'tab-existing',
+      title: 'Terminal 1'
+    })
   })
 })
 
@@ -771,6 +862,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -782,6 +874,9 @@ describe('useIpcEvents browser tab close routing', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -971,6 +1066,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -982,6 +1078,9 @@ describe('useIpcEvents browser tab close routing', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -1166,6 +1265,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -1177,6 +1277,9 @@ describe('useIpcEvents browser tab close routing', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -1370,6 +1473,7 @@ describe('useIpcEvents CLI-created worktree activation', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -1390,6 +1494,9 @@ describe('useIpcEvents CLI-created worktree activation', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -1564,6 +1671,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -1575,6 +1683,9 @@ describe('useIpcEvents agent status snapshot integration', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
