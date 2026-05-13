@@ -191,12 +191,21 @@ export function WebBrowserPane({
         // proxy path). Force a reload via about:blank → src round-trip
         // when the src is unchanged so the user always gets a fresh fetch.
         if (iframeSrc === nextIframeSrc) {
+          // Why: the iframe is always served from the gateway origin
+          // (same-origin with the renderer), so contentWindow.location
+          // is reachable. Reload through there to refetch — the about:blank
+          // round-trip via direct .src= assignment loses to React's
+          // reconciler resetting .src back to the unchanged iframeSrc.
           const ifr = iframeRef.current
-          if (ifr) {
-            ifr.src = 'about:blank'
-            requestAnimationFrame(() => {
-              ifr.src = nextIframeSrc
-            })
+          try {
+            ifr?.contentWindow?.location?.reload()
+          } catch {
+            if (ifr) {
+              ifr.src = 'about:blank'
+              requestAnimationFrame(() => {
+                ifr.src = nextIframeSrc
+              })
+            }
           }
         } else {
           setIframeSrc(nextIframeSrc)

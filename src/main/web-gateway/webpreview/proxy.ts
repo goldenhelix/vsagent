@@ -18,7 +18,7 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import { request as httpRequest } from 'http'
 import { request as httpsRequest } from 'https'
 import { URL } from 'url'
-import { getSession, updateSessionOrigin } from './registry'
+import { getSession, followSessionOrigin } from './registry'
 import { buildRewriteScript } from './rewrite-script'
 
 const PROXY_PREFIX = '/__orca/webpreview'
@@ -385,8 +385,15 @@ function rewriteLocation(
       return proxyPathPrefix + u.pathname + u.search + u.hash
     }
     if (opts.followCrossOriginRedirect) {
-      updateSessionOrigin(opts.sessionId, u.origin)
-      return proxyPathPrefix + u.pathname + u.search + u.hash
+      // Why: followSessionOrigin returns null when the per-nav cap is hit,
+      // which protects against upstream flip-flop chains (http→https→http→…).
+      // When capped, fall back to _ext so the loop surfaces to the browser
+      // as a "too many redirects" page only if the upstream itself loops —
+      // we don't add to it.
+      const updated = followSessionOrigin(opts.sessionId, u.origin)
+      if (updated) {
+        return proxyPathPrefix + u.pathname + u.search + u.hash
+      }
     }
     // Cross-origin redirect that we shouldn't follow — route through _ext.
     return `${proxyPathPrefix}/_ext?u=${encodeURIComponent(u.toString())}`

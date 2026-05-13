@@ -14,6 +14,11 @@ export type WebPreviewSession = {
   id: string
   targetOrigin: string
   createdAt: number
+  // Why: cap how many times the proxy will retarget a session in response
+  // to upstream 30x's so a flip-flop redirect chain (http→https→http→…)
+  // can't pin us in an infinite loop. Reset to 0 on a fresh navigate from
+  // the renderer (setOrigin).
+  followsSinceLastSetOrigin: number
 }
 
 const sessions = new Map<string, WebPreviewSession>()
@@ -26,7 +31,8 @@ export function createSession(targetOrigin: string): WebPreviewSession {
   const session: WebPreviewSession = {
     id,
     targetOrigin: normalized,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    followsSinceLastSetOrigin: 0
   }
   sessions.set(id, session)
   return session
@@ -40,6 +46,22 @@ export function updateSessionOrigin(id: string, targetOrigin: string): WebPrevie
   const existing = sessions.get(id)
   if (!existing) return null
   existing.targetOrigin = normalizeOrigin(targetOrigin)
+  // Why: reset the follow counter — this is a fresh navigate from the
+  // renderer, not an upstream-driven retarget.
+  existing.followsSinceLastSetOrigin = 0
+  return existing
+}
+
+// Why: separate entry point for proxy-side retargeting so the depth cap
+// only applies to upstream-driven follows, not renderer-driven navigations.
+// Returns null when the cap is exceeded so the caller can fall back to _ext.
+const MAX_FOLLOWS_PER_NAV = 4
+export function followSessionOrigin(id: string, targetOrigin: string): WebPreviewSession | null {
+  const existing = sessions.get(id)
+  if (!existing) return null
+  if (existing.followsSinceLastSetOrigin >= MAX_FOLLOWS_PER_NAV) return null
+  existing.targetOrigin = normalizeOrigin(targetOrigin)
+  existing.followsSinceLastSetOrigin += 1
   return existing
 }
 

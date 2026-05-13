@@ -183,6 +183,32 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
     return origSetAttr.call(this, name, value);
   };
 
+  // === Location navigation ===
+  // Why: pages frequently call \`location.href = '/foo'\`, \`location.assign('/foo')\`,
+  // or \`location.replace('/foo')\`. These bypass every element/setAttribute/fetch
+  // override above — the browser resolves the URL against the document origin
+  // (which is the GATEWAY, not the target) and navigates the iframe to e.g.
+  // http://<gateway>/foo. Without this section, the iframe lands on the
+  // gateway's index.html (the renderer app) and renders the full app inside
+  // itself. Patch Location.prototype so every assign / replace / href set
+  // goes through r().
+  try {
+    var locProto = Location.prototype;
+    var origAssign = locProto.assign;
+    var origReplace = locProto.replace;
+    locProto.assign = function (u) { return origAssign.call(this, r(u)); };
+    locProto.replace = function (u) { return origReplace.call(this, r(u)); };
+    var hrefDesc = Object.getOwnPropertyDescriptor(locProto, 'href');
+    if (hrefDesc && hrefDesc.set) {
+      Object.defineProperty(locProto, 'href', {
+        get: hrefDesc.get,
+        set: function (v) { hrefDesc.set.call(this, r(v)); },
+        configurable: true,
+        enumerable: true
+      });
+    }
+  } catch (e) {}
+
   // === Constructors ===
   var origOpen = window.open;
   window.open = function (u) {
