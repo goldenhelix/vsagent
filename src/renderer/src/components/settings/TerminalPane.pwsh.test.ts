@@ -46,6 +46,11 @@ vi.mock('@/components/terminal-pane/pane-helpers', () => ({
   isWindowsUserAgent: () => true
 }))
 
+vi.mock('@/lib/runtime-flavor', () => ({
+  shellHostIsMac: () => false,
+  shellHostIsWindows: () => true
+}))
+
 vi.mock('../ui/button', () => ({
   Button: function Button() {
     return null
