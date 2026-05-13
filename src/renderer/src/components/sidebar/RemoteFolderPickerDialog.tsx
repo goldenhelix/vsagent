@@ -51,7 +51,11 @@ const RemoteFolderPickerDialog = React.memo(function RemoteFolderPickerDialog() 
         if (!open) closeModal()
       }}
     >
-      <DialogContent className="max-w-lg" showCloseButton={false}>
+      <DialogContent
+        className="max-w-lg z-[200]"
+        overlayClassName="z-[200]"
+        showCloseButton={false}
+      >
         <DialogHeader>
           <DialogTitle className="text-sm">{title}</DialogTitle>
         </DialogHeader>
