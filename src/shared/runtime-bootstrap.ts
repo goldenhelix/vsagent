@@ -42,7 +42,7 @@ export function findTransport(
   return null
 }
 
-const PRIMARY_RUNTIME_METADATA_FILE = 'orca-runtime.json'
+const PRIMARY_RUNTIME_METADATA_FILE = 'vsagent-runtime.json'
 
 export function getRuntimeMetadataPath(userDataPath: string): string {
   return join(userDataPath, PRIMARY_RUNTIME_METADATA_FILE)

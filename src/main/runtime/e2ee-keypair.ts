@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync, chmodSync } from 'fs'
 import { join } from 'path'
 import nacl from 'tweetnacl'
 
-const KEYPAIR_FILENAME = 'orca-e2ee-keypair.json'
+const KEYPAIR_FILENAME = 'vsagent-e2ee-keypair.json'
 const KEYPAIR_VERSION = 1
 
 type KeypairFile = {

@@ -65,7 +65,7 @@ describe('runtime metadata', () => {
     clearRuntimeMetadata(userDataPath)
 
     expect(readRuntimeMetadata(userDataPath)).toBeNull()
-    expect(getRuntimeMetadataPath(userDataPath)).toContain('orca-runtime.json')
+    expect(getRuntimeMetadataPath(userDataPath)).toContain('vsagent-runtime.json')
   })
 
   describe('clearRuntimeMetadataIfOwned', () => {

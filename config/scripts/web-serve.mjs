@@ -8,7 +8,7 @@
 //   ORCA_WEB_TOKEN         Optional shared bearer token (PoC auth)
 //   ORCA_WEB_PICKER_ROOTS  Colon-separated roots the folder picker is allowed
 //                          to traverse (defaults to $HOME)
-//   ORCA_USER_DATA_PATH    Backend data dir (default: ~/.orca-web)
+//   ORCA_USER_DATA_PATH    Backend data dir (default: ~/.vsagent)
 //
 // Defines internally:
 //   ORCA_WEB_GATEWAY=1
@@ -43,7 +43,7 @@ ensure(
 
 const userDataPath =
   process.env.ORCA_USER_DATA_PATH ||
-  path.join(process.env.HOME ?? process.env.USERPROFILE ?? '/tmp', '.orca-web')
+  path.join(process.env.HOME ?? process.env.USERPROFILE ?? '/tmp', '.vsagent')
 mkdirSync(userDataPath, { recursive: true })
 
 // Why: a crashed previous run leaves stale singleton-lock and Unix-socket

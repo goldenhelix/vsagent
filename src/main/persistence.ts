@@ -112,13 +112,13 @@ function decryptOptionalSecret(value: string | null | undefined): string | null 
 let _dataFile: string | null = null
 
 export function initDataPath(): void {
-  _dataFile = join(app.getPath('userData'), 'orca-data.json')
+  _dataFile = join(app.getPath('userData'), 'vsagent-data.json')
 }
 
 function getDataFile(): string {
   if (!_dataFile) {
     // Safety fallback — should not be hit in normal startup.
-    _dataFile = join(app.getPath('userData'), 'orca-data.json')
+    _dataFile = join(app.getPath('userData'), 'vsagent-data.json')
   }
   return _dataFile
 }

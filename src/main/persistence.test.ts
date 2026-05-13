@@ -40,7 +40,7 @@ async function createStore() {
 }
 
 function dataFile(): string {
-  return join(testState.dir, 'orca-data.json')
+  return join(testState.dir, 'vsagent-data.json')
 }
 
 function writeDataFile(data: unknown): void {

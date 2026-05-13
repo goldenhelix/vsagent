@@ -31,7 +31,7 @@ function writeMetadata(
   pid = 123
 ): void {
   writeFileSync(
-    join(userDataPath, 'orca-runtime.json'),
+    join(userDataPath, 'vsagent-runtime.json'),
     JSON.stringify({
       runtimeId: 'runtime-1',
       pid,
