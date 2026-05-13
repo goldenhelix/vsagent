@@ -30,7 +30,6 @@ import { SCROLLBACK_PRESETS_MB } from './SettingsConstants'
 import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch } from './settings-search'
 import { useAppStore } from '../../store'
-import { isMacUserAgent, isWindowsUserAgent } from '@/components/terminal-pane/pane-helpers'
 import { shellHostIsMac, shellHostIsWindows } from '@/lib/runtime-flavor'
 import {
   MANAGE_SESSIONS_SEARCH_ENTRIES,

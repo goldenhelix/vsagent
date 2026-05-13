@@ -22,8 +22,7 @@ import {
   Copy,
   ExternalLink,
   MoreHorizontal,
-  RotateCcw,
-  X
+  RotateCcw
 } from 'lucide-react'
 import {
   DropdownMenu,
