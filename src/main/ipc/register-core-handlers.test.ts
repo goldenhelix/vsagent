@@ -34,7 +34,9 @@ const {
   registerAppHandlersMock,
   registerLinearHandlersMock,
   registerExportHandlersMock,
-  registerOnboardingHandlersMock
+  registerOnboardingHandlersMock,
+  registerFolderPickerHandlersMock,
+  registerWebPreviewHandlersMock
 } = vi.hoisted(() => ({
   registerCliHandlersMock: vi.fn(),
   registerPreflightHandlersMock: vi.fn(),
@@ -69,7 +71,9 @@ const {
   registerAppHandlersMock: vi.fn(),
   registerLinearHandlersMock: vi.fn(),
   registerExportHandlersMock: vi.fn(),
-  registerOnboardingHandlersMock: vi.fn()
+  registerOnboardingHandlersMock: vi.fn(),
+  registerFolderPickerHandlersMock: vi.fn(),
+  registerWebPreviewHandlersMock: vi.fn()
 }))
 
 vi.mock('./onboarding', () => ({
@@ -197,6 +201,14 @@ vi.mock('./app', () => ({
 
 vi.mock('./linear', () => ({
   registerLinearHandlers: registerLinearHandlersMock
+}))
+
+vi.mock('./folder-picker', () => ({
+  registerFolderPickerHandlers: registerFolderPickerHandlersMock
+}))
+
+vi.mock('./webpreview', () => ({
+  registerWebPreviewHandlers: registerWebPreviewHandlersMock
 }))
 
 import { registerCoreHandlers } from './register-core-handlers'
