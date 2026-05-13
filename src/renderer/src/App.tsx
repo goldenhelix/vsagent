@@ -422,20 +422,27 @@ function App(): React.JSX.Element {
     }
   }, [workspaceSessionReady])
 
+  // Why: shared between the broadcast-subscriber and the receive-handler
+  // below so the receiver can skip hydrating while we have a not-yet-flushed
+  // local change. Without this guard, a race like "A opens a tab → A starts
+  // a 150 ms debounce → B broadcasts its (older, tab-less) state in the
+  // meantime → A receives B's broadcast and rehydrates → A's just-opened
+  // tab disappears" wipes the local change on every interleaving broadcast.
+  const pendingBroadcastTimerRef = useRef<number | null>(null)
+
   // Why: session persistence never drives JSX — it only writes to disk.
   // Using a Zustand subscribe() outside React removes ~15 subscriptions from
   // App's render cycle, eliminating re-renders on every tab/file/browser change.
   useEffect(() => {
-    let timer: number | null = null
     const unsub = useAppStore.subscribe((state) => {
       if (!state.workspaceSessionReady) {
         return
       }
-      if (timer) {
-        window.clearTimeout(timer)
+      if (pendingBroadcastTimerRef.current) {
+        window.clearTimeout(pendingBroadcastTimerRef.current)
       }
-      timer = window.setTimeout(() => {
-        timer = null
+      pendingBroadcastTimerRef.current = window.setTimeout(() => {
+        pendingBroadcastTimerRef.current = null
         const payload = buildWorkspaceSessionPayload(state)
         const serialized = JSON.stringify(payload)
         // Why: when a remote browser broadcasts session:changed and we
@@ -457,8 +464,9 @@ function App(): React.JSX.Element {
     })
     return () => {
       unsub()
-      if (timer) {
-        window.clearTimeout(timer)
+      if (pendingBroadcastTimerRef.current) {
+        window.clearTimeout(pendingBroadcastTimerRef.current)
+        pendingBroadcastTimerRef.current = null
       }
     }
   }, [])
@@ -472,6 +480,16 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const unsub = window.api.session.onChanged((data) => {
       if (!data || data.originId === getClientId()) return
+      // Why: if we have a not-yet-flushed local change pending, the
+      // incoming broadcast was constructed without it. Hydrating now would
+      // overwrite the local change (e.g. a just-opened tab) with the
+      // remote's stale view — and our debounced broadcast would then
+      // re-publish the clobbered state, losing the change on every peer.
+      // Drop the hydrate; the next broadcast cycle picks up the merged
+      // state once our local change has been published.
+      if (pendingBroadcastTimerRef.current !== null) {
+        return
+      }
       const session = data.state
       if (!session || typeof session !== 'object') return
       // Why: stamp the broadcast payload BEFORE applying it. The hydrate*
