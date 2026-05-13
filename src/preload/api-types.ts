@@ -379,6 +379,10 @@ export type AppApi = {
   getKeyboardInputSourceId: () => Promise<string | null>
   /** Updates the macOS Dock unread badge. No-op on Windows/Linux. */
   setUnreadDockBadgeCount: (count: number) => Promise<void>
+  /** Returns whether the backend is serving us into a remote browser via the
+   *  web gateway (`web: true`) or as the local Electron renderer
+   *  (`web: false`). Renderer code checks this to hide native-only UI. */
+  getRuntimeFlavor: () => Promise<{ web: boolean; platform: string }>
 }
 
 export type PreloadApi = {
@@ -869,8 +873,21 @@ export type PreloadApi = {
   }
   session: {
     get: () => Promise<WorkspaceSessionState>
-    set: (args: WorkspaceSessionState) => Promise<void>
-    setSync: (args: WorkspaceSessionState) => void
+    /** Web-mode callers pass `{ state, originId }` so the backend can include
+     *  originId in the session:changed broadcast. Legacy desktop callers may
+     *  still pass the WorkspaceSessionState directly; the main process
+     *  normalises both shapes. */
+    set: (args: {
+      state: WorkspaceSessionState
+      originId?: string | null
+    }) => Promise<void>
+    /** Synchronous variant used from beforeunload — blocks until persisted. */
+    setSync: (args: { state: WorkspaceSessionState; originId?: string | null }) => void
+    /** Subscribe to session-state changes from OTHER clients (other browser
+     *  tabs in web mode). Originator filters its own events by clientId. */
+    onChanged: (
+      listener: (data: { state: WorkspaceSessionState; originId: string | null }) => void
+    ) => () => void
   }
   updater: {
     getVersion: () => Promise<string>
@@ -886,7 +903,34 @@ export type PreloadApi = {
   memory: MemoryApi
   claudeUsage: ClaudeUsageApi
   codexUsage: CodexUsageApi
+  webPreview: {
+    /** Create a proxy session for an iframe-backed in-app browser tab. */
+    create: (args: {
+      targetOrigin: string
+    }) => Promise<{ id: string; targetOrigin: string; proxyPath: string }>
+    /** Re-point an existing session at a new origin (address-bar navigation). */
+    setOrigin: (args: {
+      id: string
+      targetOrigin: string
+    }) => Promise<{ id: string; targetOrigin: string; proxyPath: string } | null>
+    delete: (args: { id: string }) => Promise<void>
+  }
   fs: {
+    /** Web-mode folder picker autocomplete: returns subdirectory names that
+     *  start with the typed prefix under the allowlisted roots. */
+    autocompleteDir: (input: string) => Promise<{
+      parent: string
+      suggestions: string[]
+      inputIsExistingDir: boolean
+      inputAbsolute: string
+      inputExists: boolean
+    }>
+    /** Lists subdirectories of an allowed local path for the interactive Browse
+     *  dialog. Mirrors `ssh.browseDir` so the same component drives both. */
+    browseDir: (args: { dirPath: string }) => Promise<{
+      resolvedPath: string
+      entries: { name: string; isDirectory: boolean; isSymlink: boolean }[]
+    }>
     readDir: (args: { dirPath: string; connectionId?: string }) => Promise<DirEntry[]>
     readFile: (args: {
       filePath: string
