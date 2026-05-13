@@ -68,6 +68,19 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
         if (parsed.origin === targetParsed.origin) {
           return P + parsed.pathname + parsed.search + parsed.hash;
         }
+        // Why: the iframe's actual document origin is the GATEWAY (since
+        // the proxy serves the page from our host). Pages routinely build
+        // URLs from \`location.origin\`, \`window.origin\`, or absolute
+        // strings hard-coded against what they THINK is their origin —
+        // and that comes out as gateway-origin from inside the iframe.
+        // If we let those through to _ext, _ext fetches the gateway root,
+        // which returns the renderer's index.html, and the entire app
+        // renders recursively inside the iframe. Treat gateway-origin
+        // URLs the same as target-origin URLs: rewrite to a proxy-path
+        // so the request lands on the configured upstream.
+        if (parsed.origin === location.origin) {
+          return P + parsed.pathname + parsed.search + parsed.hash;
+        }
         return E + encodeURIComponent(u);
       } catch (e) {}
     }
