@@ -1484,6 +1484,15 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         .flat()
         .map((w) => w.id)
     )
-    set(buildHydratedTabState(session, validWorktreeIds))
+    // Why: pass the current store snapshot so the hydrator can merge
+    // local-only tabs (created since the last remote hydrate) instead of
+    // replacing them with the incoming payload. Prevents concurrent tab
+    // opens from being wiped when a peer broadcasts an older view.
+    set(
+      buildHydratedTabState(session, validWorktreeIds, {
+        unifiedTabs: state.unifiedTabs,
+        tabGroups: state.tabGroups
+      })
+    )
   }
 })

@@ -16,6 +16,7 @@ import { ORCA_BROWSER_BLANK_URL } from '../../../../shared/constants'
 import { redactKagiSessionToken } from '../../../../shared/browser-url'
 import { pickNeighbor } from './tab-group-state'
 import { destroyWorkspaceWebviews } from './browser-webview-cleanup'
+import { getLastHydrateAt } from '../../lib/session-hydrate-clock'
 
 type CreateBrowserTabOptions = {
   activate?: boolean
@@ -1148,6 +1149,11 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
 
       const browserTabsByWorktree: Record<string, BrowserWorkspace[]> = {}
       const browserPagesByWorkspace: Record<string, BrowserPage[]> = {}
+      // Why: see session-hydrate-clock. Merge in local-only browser tabs
+      // (created since the last remote hydrate) so a concurrent open in
+      // this browser isn't wiped by an interleaved remote broadcast that
+      // doesn't include it yet.
+      const cutoff = getLastHydrateAt()
 
       for (const [worktreeId, tabs] of Object.entries(persistedTabsByWorktree)) {
         if (!validWorktreeIds.has(worktreeId)) {
@@ -1194,6 +1200,26 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         }
         if (hydratedTabs.length > 0) {
           browserTabsByWorktree[worktreeId] = hydratedTabs
+        }
+      }
+
+      // Why: merge in local-only browser workspaces created after the last
+      // remote hydrate. The incoming payload may have been built by a peer
+      // that hasn't yet seen our just-opened browser tab — without this,
+      // the tab would flash open and immediately disappear when the peer's
+      // older view round-trips back to us.
+      for (const [worktreeId, localTabs] of Object.entries(s.browserTabsByWorktree)) {
+        if (!validWorktreeIds.has(worktreeId)) continue
+        const hydratedTabs = browserTabsByWorktree[worktreeId] ?? []
+        const hydratedIds = new Set(hydratedTabs.map((t) => t.id))
+        const toAdd = localTabs.filter((t) => !hydratedIds.has(t.id) && t.createdAt > cutoff)
+        if (toAdd.length === 0) continue
+        browserTabsByWorktree[worktreeId] = [...hydratedTabs, ...toAdd]
+        for (const tab of toAdd) {
+          const localPages = s.browserPagesByWorkspace[tab.id]
+          if (localPages && !browserPagesByWorkspace[tab.id]) {
+            browserPagesByWorkspace[tab.id] = localPages
+          }
         }
       }
 

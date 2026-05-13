@@ -4,6 +4,7 @@ import type {
   TabGroupLayoutNode,
   WorkspaceSessionState
 } from '../../../../shared/types'
+import { getLastHydrateAt } from '../../lib/session-hydrate-clock'
 import {
   dedupeTabOrder,
   getPersistedEditFileIdsByWorktree,
@@ -17,6 +18,17 @@ type HydratedTabState = {
   groupsByWorktree: Record<string, TabGroup[]>
   activeGroupIdByWorktree: Record<string, string>
   layoutByWorktree: Record<string, TabGroupLayoutNode>
+}
+
+// Why: when a cross-browser hydrate lands, any local-only tab created after
+// our last hydrate hasn't been seen by the remote yet. Keeping it (rather
+// than replacing with the remote's state) lets concurrent tab opens survive
+// the broadcast round-trip. Genuine remote closures of older tabs (created
+// before our last hydrate) still propagate — those get filtered out by the
+// normal "not in incoming" path.
+export type LocalTabSnapshotForMerge = {
+  unifiedTabs: Record<string, Tab[]>
+  tabGroups: Record<string, TabGroup[]>
 }
 
 function pruneLayoutForGroups(
@@ -241,10 +253,70 @@ function hydrateLegacyFormat(
 
 export function buildHydratedTabState(
   session: WorkspaceSessionState,
+  validWorktreeIds: Set<string>,
+  localSnapshot?: LocalTabSnapshotForMerge
+): HydratedTabState {
+  const hydrated =
+    session.unifiedTabs && session.tabGroups
+      ? hydrateUnifiedFormat(session, validWorktreeIds)
+      : hydrateLegacyFormat(session, validWorktreeIds)
+  if (!localSnapshot) {
+    return hydrated
+  }
+  return mergeLocalOnlyTabs(hydrated, localSnapshot, validWorktreeIds)
+}
+
+function mergeLocalOnlyTabs(
+  hydrated: HydratedTabState,
+  local: LocalTabSnapshotForMerge,
   validWorktreeIds: Set<string>
 ): HydratedTabState {
-  if (session.unifiedTabs && session.tabGroups) {
-    return hydrateUnifiedFormat(session, validWorktreeIds)
+  const cutoff = getLastHydrateAt()
+  const mergedTabs: Record<string, Tab[]> = { ...hydrated.unifiedTabsByWorktree }
+  const mergedGroups: Record<string, TabGroup[]> = { ...hydrated.groupsByWorktree }
+
+  for (const [worktreeId, localTabs] of Object.entries(local.unifiedTabs)) {
+    if (!validWorktreeIds.has(worktreeId)) continue
+    const hydratedTabs = mergedTabs[worktreeId] ?? []
+    const hydratedIds = new Set(hydratedTabs.map((t) => t.id))
+    const toAdd = localTabs.filter((t) => !hydratedIds.has(t.id) && t.createdAt > cutoff)
+    if (toAdd.length === 0) continue
+
+    // Re-sort so newly merged local tabs land in createdAt order at the end.
+    mergedTabs[worktreeId] = [...hydratedTabs, ...toAdd].sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt
+    )
+
+    // Restore each tab's group membership. The local-only tabs reference
+    // groupIds that exist either in the hydrated groups or only locally.
+    const groupsForWorktree = [...(mergedGroups[worktreeId] ?? [])]
+    const localGroups = local.tabGroups[worktreeId] ?? []
+    for (const tab of toAdd) {
+      let group = groupsForWorktree.find((g) => g.id === tab.groupId)
+      if (!group) {
+        const localGroup = localGroups.find((g) => g.id === tab.groupId)
+        if (localGroup) {
+          group = { ...localGroup, tabOrder: [], recentTabIds: [] }
+          groupsForWorktree.push(group)
+        } else if (groupsForWorktree.length > 0) {
+          group = groupsForWorktree[0]
+        }
+      }
+      if (group && !group.tabOrder.includes(tab.id)) {
+        const next = [...group.tabOrder, tab.id]
+        const idx = groupsForWorktree.findIndex((g) => g.id === group!.id)
+        if (idx !== -1) {
+          groupsForWorktree[idx] = { ...group, tabOrder: next }
+        }
+      }
+    }
+    mergedGroups[worktreeId] = groupsForWorktree
   }
-  return hydrateLegacyFormat(session, validWorktreeIds)
+
+  return {
+    unifiedTabsByWorktree: mergedTabs,
+    groupsByWorktree: mergedGroups,
+    activeGroupIdByWorktree: hydrated.activeGroupIdByWorktree,
+    layoutByWorktree: hydrated.layoutByWorktree
+  }
 }
