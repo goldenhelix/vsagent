@@ -8,7 +8,7 @@ import { ThemeStep } from './ThemeStep'
 import { NotificationStep } from './NotificationStep'
 import { RepoStep } from './RepoStep'
 import { STEPS, useOnboardingFlow } from './use-onboarding-flow'
-import logo from '../../../../../resources/logo.svg'
+import logo from '../../../../../resources/vsagent.svg'
 
 const isMac = navigator.userAgent.includes('Mac')
 // Why: AGENTS.md mandates `Ctrl+Enter` style on non-Mac; bare `Ctrl↵` reads as one glyph.

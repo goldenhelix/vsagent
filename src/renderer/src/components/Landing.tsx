@@ -4,7 +4,7 @@ import { cn } from '../lib/utils'
 import { useAppStore } from '../store'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { ShortcutKeyCombo } from './ShortcutKeyCombo'
-import logo from '../../../../resources/logo.svg'
+import logo from '../../../../resources/vsagent.svg'
 import { isWebMode } from '@/lib/runtime-flavor'
 
 type ShortcutItem = {

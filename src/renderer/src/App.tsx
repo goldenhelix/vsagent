@@ -10,7 +10,7 @@ import {
   PanelLeft,
   PanelRight
 } from 'lucide-react'
-import logo from '../../../resources/logo.svg'
+import logo from '../../../resources/vsagent.svg'
 import { SYNC_FIT_PANES_EVENT, TOGGLE_TERMINAL_PANE_EXPAND_EVENT } from '@/constants/terminal'
 import { syncZoomCSSVar } from '@/lib/ui-zoom'
 import { buildAppFontFamily } from '@/lib/app-font-family'
