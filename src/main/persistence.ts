@@ -42,6 +42,23 @@ function applyWorkspaceDirEnv(state: PersistedState): PersistedState {
   return state
 }
 
+// Why: pre-VSAgent installs persisted `workspaceDir` defaulting to
+// `${homedir}/orca/workspaces`. The new default is `$HOME`. Users who never
+// touched the setting were silently pinned to a path they didn't choose;
+// migrate them to the new default. The env var still wins on top, so
+// operators can pin a workspace root for their install.
+function migrateLegacyWorkspaceDir(state: PersistedState, home: string): PersistedState {
+  const legacy = `${home}/orca/workspaces`
+  if (state.settings?.workspaceDir === legacy) {
+    state.settings.workspaceDir = home
+  }
+  const override = process.env.VSAGENT_WORKSPACE_DIR
+  if (override && override.length > 0) {
+    state.settings.workspaceDir = override
+  }
+  return state
+}
+
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
     return plaintext
@@ -398,6 +415,7 @@ export class Store {
             }
           })()
         }
+        result = migrateLegacyWorkspaceDir(result, homedir())
       }
     } catch (err) {
       console.error('[persistence] Failed to load state, using defaults:', err)
