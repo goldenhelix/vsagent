@@ -78,8 +78,20 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
         // renders recursively inside the iframe. Treat gateway-origin
         // URLs the same as target-origin URLs: rewrite to a proxy-path
         // so the request lands on the configured upstream.
+        //
+        // Pages often build the URL by concatenating onto \`location.href\`
+        // or \`location.pathname\`, which ALREADY contains our proxy prefix
+        // (because the iframe's real path IS the proxy path). If we
+        // blindly re-prepend, we get \`<P>/<P>/<path>\` — a double-prefix
+        // URL that the gateway can't route, so its SPA fallback serves
+        // the renderer's index.html and the app loads recursively. Strip
+        // the existing prefix before re-prepending.
         if (parsed.origin === location.origin) {
-          return P + parsed.pathname + parsed.search + parsed.hash;
+          var pn = parsed.pathname;
+          if (pn === P || pn.startsWith(P + '/')) {
+            return pn + parsed.search + parsed.hash;
+          }
+          return P + pn + parsed.search + parsed.hash;
         }
         return E + encodeURIComponent(u);
       } catch (e) {}
