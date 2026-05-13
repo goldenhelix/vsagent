@@ -84,7 +84,7 @@ describe('Store', () => {
     expect(settings.refreshLocalBaseRefOnWorktreeCreate).toBe(false)
     expect(settings.theme).toBe('system')
     expect(settings.appFontFamily).toBe('Geist')
-    expect(settings.editorAutoSave).toBe(false)
+    expect(settings.editorAutoSave).toBe(true)
     expect(settings.editorAutoSaveDelayMs).toBe(1000)
     expect(settings.terminalFontSize).toBe(14)
     expect(settings.terminalFontWeight).toBe(500)
@@ -154,7 +154,7 @@ describe('Store', () => {
     // settings should preserve the overridden value
     expect(store.getSettings().theme).toBe('dark')
     // new fields get defaults when missing from persisted data
-    expect(store.getSettings().editorAutoSave).toBe(false)
+    expect(store.getSettings().editorAutoSave).toBe(true)
     expect(store.getSettings().editorAutoSaveDelayMs).toBe(1000)
     expect(store.getSettings().refreshLocalBaseRefOnWorktreeCreate).toBe(false)
     expect(store.getSettings().rightSidebarOpenByDefault).toBe(true)
@@ -365,13 +365,13 @@ describe('Store', () => {
 
   it('updateSettings toggles editorAutoSave', async () => {
     const store = await createStore()
-    expect(store.getSettings().editorAutoSave).toBe(false)
-
-    store.updateSettings({ editorAutoSave: true })
     expect(store.getSettings().editorAutoSave).toBe(true)
 
     store.updateSettings({ editorAutoSave: false })
     expect(store.getSettings().editorAutoSave).toBe(false)
+
+    store.updateSettings({ editorAutoSave: true })
+    expect(store.getSettings().editorAutoSave).toBe(true)
   })
 
   it('updateSettings toggles rightSidebarOpenByDefault', async () => {
