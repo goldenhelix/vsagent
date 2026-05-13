@@ -170,66 +170,297 @@ type ForwardArgs = {
   followCrossOriginRedirect: boolean
 }
 
-function forwardRequest(args: ForwardArgs): Promise<void> {
-  const { req, res, target, sessionId } = args
-  return new Promise((resolve) => {
+// Maximum number of redirects the proxy will follow server-side before
+// giving up. A real browser typically allows ~20 — we cap lower because
+// our session-update side effects compound on each hop.
+const MAX_REDIRECT_FOLLOWS = 8
+
+function isRedirectStatus(s: number): boolean {
+  return s === 301 || s === 302 || s === 303 || s === 307 || s === 308
+}
+
+function doUpstreamRequest(
+  target: URL,
+  reqHeaders: IncomingMessage['headers'],
+  method: string,
+  reqBodyPipe: IncomingMessage | null
+): Promise<IncomingMessage> {
+  return new Promise((resolve, reject) => {
     const isHttps = target.protocol === 'https:'
     const requester = isHttps ? httpsRequest : httpRequest
     const upstreamHeaders: Record<string, string | string[]> = {}
-    for (const [name, value] of Object.entries(req.headers)) {
+    for (const [name, value] of Object.entries(reqHeaders)) {
       if (value === undefined) continue
       if (HOP_BY_HOP_REQUEST.has(name.toLowerCase())) continue
       upstreamHeaders[name] = value as string | string[]
     }
     upstreamHeaders['host'] = target.host
-    // Why: many SPA dev servers (Vite, webpack) check the Origin header for
-    // HMR. Passing through the iframe's origin (the gateway) would fail —
-    // set it to the target origin so dev tooling is happy.
     upstreamHeaders['origin'] = `${target.protocol}//${target.host}`
     upstreamHeaders['referer'] = `${target.protocol}//${target.host}${target.pathname}${target.search}`
-    // Why: ask for uncompressed so HTML injection works without gunzipping.
     upstreamHeaders['accept-encoding'] = 'identity'
-
     const upstreamReq = requester({
-      method: req.method,
+      method,
       protocol: target.protocol,
       hostname: target.hostname,
       port: target.port || (isHttps ? 443 : 80),
       path: target.pathname + target.search,
       headers: upstreamHeaders,
-      // Why: dev servers may serve a self-signed cert. The proxy is
-      // user-driven and only reaches what the operator typed in the
-      // address bar, so soft-checking TLS is acceptable here.
       rejectUnauthorized: false
     })
+    upstreamReq.on('error', reject)
+    upstreamReq.on('response', resolve)
+    if (reqBodyPipe) {
+      reqBodyPipe.pipe(upstreamReq)
+    } else {
+      upstreamReq.end()
+    }
+  })
+}
 
-    upstreamReq.on('error', (err) => {
-      // Why: node's `connect ECONNREFUSED` errors carry the code on the
-      // error object itself; `.message` is usually populated too, but for
-      // ENOTFOUND etc. it can be empty. Build a friendly explanation so
-      // the renderer can show something users can act on (start your dev
-      // server, check the port, etc.).
-      const code = (err as NodeJS.ErrnoException).code
-      const msg = err.message || String(err)
-      console.warn(
-        `[webpreview] upstream error for ${target.toString()}: code=${code} msg=${msg}`
+async function forwardRequest(args: ForwardArgs): Promise<void> {
+  const { req, res, sessionId } = args
+  const dbg = process.env.ORCA_WEBPREVIEW_DEBUG === '1'
+  const isTopLevelNav =
+    req.headers['sec-fetch-dest'] === 'document' ||
+    String(req.headers['accept'] || '').includes('text/html')
+  // Why: follow redirects server-side instead of bouncing the browser.
+  // For cross-origin redirects, update the session's targetOrigin so the
+  // address bar (via postNav) tracks the final URL, and the rest of the
+  // page's same-origin requests resolve against the right place. The
+  // browser only ever sees the final, non-redirect response.
+  let currentTarget = args.target
+  const hops: string[] = []
+  for (let depth = 0; depth <= MAX_REDIRECT_FOLLOWS; depth++) {
+    hops.push(currentTarget.toString())
+    let upstreamRes: IncomingMessage
+    try {
+      upstreamRes = await doUpstreamRequest(
+        currentTarget,
+        req.headers,
+        req.method || 'GET',
+        depth === 0 && req.method && req.method !== 'GET' && req.method !== 'HEAD' ? req : null
       )
-      const reason =
-        code === 'ECONNREFUSED'
-          ? `Nothing is listening on ${target.host}. Is your dev server running?`
-          : code === 'ENOTFOUND'
-            ? `Could not resolve ${target.hostname}. Check the hostname.`
-            : code === 'ETIMEDOUT'
-              ? `Connection to ${target.host} timed out.`
-              : code === 'ECONNRESET'
-                ? `${target.host} reset the connection.`
-                : msg || 'Upstream error'
-      const isHtmlRequest = (req.headers['accept'] || '').includes('text/html')
-      const ct = isHtmlRequest ? 'text/html; charset=utf-8' : 'text/plain'
-      // Why: an HTML body styled to look at home inside the iframe so the
-      // user sees a real error page rather than raw text.
-      const body = isHtmlRequest
-        ? `<!doctype html><meta charset="utf-8"><title>Upstream error</title>
+    } catch (err) {
+      return sendUpstreamError(req, res, currentTarget, err as NodeJS.ErrnoException)
+    }
+    const status = upstreamRes.statusCode ?? 0
+    if (dbg) {
+      console.log(
+        `[webpreview] ${req.method} ${currentTarget.toString()} -> ${status}` +
+          (isRedirectStatus(status) ? ` location=${String(upstreamRes.headers['location'] ?? '')}` : '') +
+          ` depth=${depth} topNav=${isTopLevelNav} followCO=${args.followCrossOriginRedirect}`
+      )
+    }
+    // Should we follow this redirect server-side?
+    const loc = upstreamRes.headers['location']
+    const shouldFollow =
+      isRedirectStatus(status) &&
+      typeof loc === 'string' &&
+      isTopLevelNav &&
+      depth < MAX_REDIRECT_FOLLOWS
+    if (!shouldFollow) {
+      // This is the terminal response — stream it to the client (with
+      // body rewriting if HTML / JS).
+      return streamResponseToClient(args, upstreamRes, currentTarget)
+    }
+    // Resolve the redirect target.
+    let nextTarget: URL
+    try {
+      nextTarget = new URL(loc as string, currentTarget)
+    } catch {
+      // Can't parse the redirect — stream this 30x to the client as-is.
+      return streamResponseToClient(args, upstreamRes, currentTarget)
+    }
+    // Discard the redirect's body — we don't show 30x bodies.
+    upstreamRes.resume()
+    if (nextTarget.origin !== currentTarget.origin) {
+      if (!args.followCrossOriginRedirect) {
+        // Renderer told us not to retarget (e.g. _ext path). Stream the
+        // redirect itself with a rewritten _ext Location.
+        return streamRedirectThroughExt(args, upstreamRes, currentTarget, nextTarget)
+      }
+      const updated = followSessionOrigin(sessionId, nextTarget.origin)
+      if (!updated) {
+        // Cap hit — bail with a 508-style error so the browser doesn't
+        // try its own loop on a chain we know is bad.
+        return sendLoopError(req, res, hops)
+      }
+    }
+    currentTarget = nextTarget
+  }
+  // Exhausted the depth budget without resolving.
+  return sendLoopError(req, res, hops)
+}
+
+function streamResponseToClient(
+  args: ForwardArgs,
+  upstreamRes: IncomingMessage,
+  finalTarget: URL
+): Promise<void> {
+  const { req, res, sessionId } = args
+  return new Promise((resolve) => {
+    const proxyPathPrefix = `${PROXY_PREFIX}/${sessionId}`
+    for (const [name, value] of Object.entries(upstreamRes.headers)) {
+      if (value === undefined) continue
+      const lower = name.toLowerCase()
+      if (HOP_BY_HOP_RESPONSE.has(lower)) continue
+      if (lower === 'location' && typeof value === 'string') {
+        // Why: same-origin (relative to finalTarget) -> proxy-relative.
+        // We only reach here for non-followed redirects; cross-origin
+        // ones go through streamRedirectThroughExt.
+        try {
+          const u = new URL(value, finalTarget)
+          if (u.origin === finalTarget.origin) {
+            res.setHeader(name, proxyPathPrefix + u.pathname + u.search + u.hash)
+          } else {
+            res.setHeader(name, `${proxyPathPrefix}/_ext?u=${encodeURIComponent(u.toString())}`)
+          }
+        } catch {
+          res.setHeader(name, value)
+        }
+        continue
+      }
+      if (lower === 'set-cookie') {
+        const cookies = Array.isArray(value) ? value : [value]
+        const rescoped = cookies.map((c) =>
+          c.replace(/;\s*Path=[^;]*/gi, '').concat(`; Path=${proxyPathPrefix}`)
+        )
+        res.setHeader('Set-Cookie', rescoped)
+        continue
+      }
+      res.setHeader(name, value as string | string[])
+    }
+    res.statusCode = upstreamRes.statusCode ?? 502
+    const contentType = String(upstreamRes.headers['content-type'] || '')
+    const isHtml = args.injectHtml && args.targetOrigin && contentType.includes('text/html')
+    const isJs = args.injectHtml && (
+      contentType.includes('javascript') ||
+      contentType.includes('application/x-javascript') ||
+      contentType.includes('text/jsx')
+    )
+    if (!isHtml && !isJs) {
+      upstreamRes.pipe(res)
+      upstreamRes.on('end', () => resolve())
+      return
+    }
+    const chunks: Buffer[] = []
+    upstreamRes.on('data', (c: Buffer) => chunks.push(c))
+    upstreamRes.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf-8')
+      let rewritten = body
+      if (isHtml) {
+        rewritten = rewriteHtmlAttributes(rewritten, proxyPathPrefix)
+        // Why: re-resolve session origin in case server-side redirect
+        // follows changed it — the injected script's TO must match the
+        // final upstream origin so postNav reports the right URL.
+        const finalOrigin = args.targetOrigin
+        if (finalOrigin) {
+          rewritten = injectRewriteScript(rewritten, {
+            prefix: proxyPathPrefix,
+            targetOrigin: `${finalTarget.protocol}//${finalTarget.host}`
+          })
+        }
+      } else if (isJs) {
+        rewritten = rewriteJsImports(rewritten, proxyPathPrefix)
+      }
+      const out = Buffer.from(rewritten, 'utf-8')
+      res.setHeader('Content-Length', String(out.length))
+      res.end(out)
+      resolve()
+    })
+  })
+}
+
+function streamRedirectThroughExt(
+  args: ForwardArgs,
+  upstreamRes: IncomingMessage,
+  finalTarget: URL,
+  redirectTarget: URL
+): Promise<void> {
+  const { res, sessionId } = args
+  return new Promise((resolve) => {
+    const proxyPathPrefix = `${PROXY_PREFIX}/${sessionId}`
+    for (const [name, value] of Object.entries(upstreamRes.headers)) {
+      if (value === undefined) continue
+      const lower = name.toLowerCase()
+      if (HOP_BY_HOP_RESPONSE.has(lower)) continue
+      if (lower === 'location') continue
+      if (lower === 'set-cookie') {
+        const cookies = Array.isArray(value) ? value : [value]
+        const rescoped = cookies.map((c) =>
+          c.replace(/;\s*Path=[^;]*/gi, '').concat(`; Path=${proxyPathPrefix}`)
+        )
+        res.setHeader('Set-Cookie', rescoped)
+        continue
+      }
+      res.setHeader(name, value as string | string[])
+    }
+    res.setHeader(
+      'Location',
+      `${proxyPathPrefix}/_ext?u=${encodeURIComponent(redirectTarget.toString())}`
+    )
+    res.statusCode = upstreamRes.statusCode ?? 302
+    res.end()
+    void finalTarget
+    resolve()
+  })
+}
+
+function sendLoopError(
+  req: IncomingMessage,
+  res: ServerResponse,
+  hops: string[]
+): Promise<void> {
+  const isHtmlRequest = String(req.headers['accept'] || '').includes('text/html')
+  const summary = hops.slice(0, 6).join(' →\n  ') + (hops.length > 6 ? ' →\n  …' : '')
+  const ct = isHtmlRequest ? 'text/html; charset=utf-8' : 'text/plain'
+  const body = isHtmlRequest
+    ? `<!doctype html><meta charset="utf-8"><title>Too many redirects</title>
+<style>
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;background:#0a0a0a;color:#e7e7e7;font:14px ui-sans-serif,system-ui,sans-serif}
+  .card{max-width:640px;padding:24px;border:1px solid #2a2a2a;border-radius:12px;background:#141414}
+  h1{margin:0 0 8px;font-size:15px;font-weight:600;color:#f87171}
+  p{margin:6px 0;color:#a1a1aa}
+  pre{font:12px ui-monospace,Menlo,monospace;background:#1c1c1c;padding:8px;border-radius:6px;color:#e7e7e7;white-space:pre-wrap;overflow:auto}
+</style>
+<div class="card">
+  <h1>Too many redirects</h1>
+  <p>The upstream sent us through a redirect chain that didn't settle within ${MAX_REDIRECT_FOLLOWS} hops:</p>
+  <pre>${escapeHtml(summary)}</pre>
+</div>`
+    : `webpreview: too many redirects\n  ${hops.join('\n  ')}`
+  res.statusCode = 508
+  res.setHeader('Content-Type', ct)
+  res.end(body)
+  return Promise.resolve()
+}
+
+function sendUpstreamError(
+  req: IncomingMessage,
+  res: ServerResponse,
+  target: URL,
+  err: NodeJS.ErrnoException
+): Promise<void> {
+  const code = err.code
+  const msg = err.message || String(err)
+  console.warn(
+    `[webpreview] upstream error for ${target.toString()}: code=${code} msg=${msg}`
+  )
+  const reason =
+    code === 'ECONNREFUSED'
+      ? `Nothing is listening on ${target.host}. Is your dev server running?`
+      : code === 'ENOTFOUND'
+        ? `Could not resolve ${target.hostname}. Check the hostname.`
+        : code === 'ETIMEDOUT'
+          ? `Connection to ${target.host} timed out.`
+          : code === 'ECONNRESET'
+            ? `${target.host} reset the connection.`
+            : msg || 'Upstream error'
+  const isHtmlRequest = (req.headers['accept'] || '').includes('text/html')
+  const ct = isHtmlRequest ? 'text/html; charset=utf-8' : 'text/plain'
+  const body = isHtmlRequest
+    ? `<!doctype html><meta charset="utf-8"><title>Upstream error</title>
 <style>
   html,body{height:100%}
   body{margin:0;display:grid;place-items:center;background:#0a0a0a;color:#e7e7e7;font:14px ui-sans-serif,system-ui,sans-serif}
@@ -246,112 +477,13 @@ function forwardRequest(args: ForwardArgs): Promise<void> {
   ${code ? `<p>Code: <code>${escapeHtml(code)}</code></p>` : ''}
   <p class="hint">Start the server, then hit Reload (⟳) on the address bar.</p>
 </div>`
-        : `webpreview: ${reason} (target=${target.toString()}${code ? `, code=${code}` : ''})`
-      res.statusCode = 502
-      res.setHeader('Content-Type', ct)
-      res.end(body)
-      resolve()
-    })
-
-    upstreamReq.on('response', (upstreamRes) => {
-      // Copy response headers, filter out hop-by-hop, rewrite Location +
-      // Set-Cookie so they stay inside the proxy path.
-      const proxyPathPrefix = `${PROXY_PREFIX}/${sessionId}`
-      const statusCode = upstreamRes.statusCode ?? 0
-      const isRedirect =
-        statusCode === 301 ||
-        statusCode === 302 ||
-        statusCode === 303 ||
-        statusCode === 307 ||
-        statusCode === 308
-      // Why: only follow on top-level navigations (the iframe load). Sub-resources
-      // (scripts, images, XHR) handle redirects in the browser; updating the
-      // session for those would break unrelated in-page fetches.
-      const isTopLevelNav =
-        (req.headers['sec-fetch-dest'] === 'document') ||
-        String(req.headers['accept'] || '').includes('text/html')
-      for (const [name, value] of Object.entries(upstreamRes.headers)) {
-        if (value === undefined) continue
-        const lower = name.toLowerCase()
-        if (HOP_BY_HOP_RESPONSE.has(lower)) continue
-        if (lower === 'location' && typeof value === 'string') {
-          res.setHeader(
-            name,
-            rewriteLocation(value, target, proxyPathPrefix, {
-              sessionId,
-              followCrossOriginRedirect:
-                args.followCrossOriginRedirect && isRedirect && isTopLevelNav
-            })
-          )
-          continue
-        }
-        if (lower === 'set-cookie') {
-          const cookies = Array.isArray(value) ? value : [value]
-          // Why: scope cookies to the proxy path so different sessions
-          // don't collide. The browser will only send these back to
-          // requests under the same proxy session.
-          const rescoped = cookies.map((c) =>
-            c.replace(/;\s*Path=[^;]*/gi, '').concat(`; Path=${proxyPathPrefix}`)
-          )
-          res.setHeader('Set-Cookie', rescoped)
-          continue
-        }
-        res.setHeader(name, value as string | string[])
-      }
-      res.statusCode = upstreamRes.statusCode ?? 502
-
-      const contentType = String(upstreamRes.headers['content-type'] || '')
-      const isHtml = args.injectHtml && args.targetOrigin && contentType.includes('text/html')
-
-      // Determine whether we should rewrite the body. HTML and JS are the
-      // two types that contain URLs the browser will resolve relative to
-      // its document origin — and for an iframe-hosted page that's the
-      // gateway, not the upstream. Without rewriting, absolute paths like
-      // `<script src="/docs/@vite/client">` skip the proxy entirely.
-      const isJs = args.injectHtml && (
-        contentType.includes('javascript') ||
-        contentType.includes('application/x-javascript') ||
-        contentType.includes('text/jsx')
-      )
-
-      if (!isHtml && !isJs) {
-        upstreamRes.pipe(res)
-        upstreamRes.on('end', () => resolve())
-        return
-      }
-
-      // Buffer the body so we can rewrite it.
-      const chunks: Buffer[] = []
-      upstreamRes.on('data', (chunk: Buffer) => chunks.push(chunk))
-      upstreamRes.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf-8')
-        let rewritten = body
-        if (isHtml) {
-          rewritten = rewriteHtmlAttributes(rewritten, proxyPathPrefix)
-          rewritten = injectRewriteScript(rewritten, {
-            prefix: proxyPathPrefix,
-            targetOrigin: args.targetOrigin!
-          })
-        } else if (isJs) {
-          rewritten = rewriteJsImports(rewritten, proxyPathPrefix)
-        }
-        const out = Buffer.from(rewritten, 'utf-8')
-        res.setHeader('Content-Length', String(out.length))
-        res.end(out)
-        resolve()
-      })
-    })
-
-    // For GET/HEAD the request body is irrelevant; for POST/PUT pipe it
-    // through. (We strip transfer-encoding above; node will set
-    // content-length if the body is in memory.)
-    if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
-      req.pipe(upstreamReq)
-    } else {
-      upstreamReq.end()
-    }
-  })
+    : `webpreview: ${reason} (target=${target.toString()}${code ? `, code=${code}` : ''})`
+  res.statusCode = 502
+  res.setHeader('Content-Type', ct)
+  res.end(body)
+  return Promise.resolve()
 }
+
 
 function escapeHtml(s: string): string {
   return s
@@ -362,45 +494,6 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
-type RewriteLocationOpts = {
-  sessionId: string
-  // Why: true only on top-level navigations under the session-rooted proxy
-  // path. When the upstream 30x's to a different origin (e.g. http→https,
-  // apex→www), retarget the session at the new origin and keep the
-  // redirect same-origin. This is what a real browser tab does — the
-  // address bar tracks the final URL, and subsequent sub-resource fetches
-  // resolve against the new origin via the same session.
-  followCrossOriginRedirect: boolean
-}
-
-function rewriteLocation(
-  location: string,
-  base: URL,
-  proxyPathPrefix: string,
-  opts: RewriteLocationOpts
-): string {
-  try {
-    const u = new URL(location, base)
-    if (u.origin === base.origin) {
-      return proxyPathPrefix + u.pathname + u.search + u.hash
-    }
-    if (opts.followCrossOriginRedirect) {
-      // Why: followSessionOrigin returns null when the per-nav cap is hit,
-      // which protects against upstream flip-flop chains (http→https→http→…).
-      // When capped, fall back to _ext so the loop surfaces to the browser
-      // as a "too many redirects" page only if the upstream itself loops —
-      // we don't add to it.
-      const updated = followSessionOrigin(opts.sessionId, u.origin)
-      if (updated) {
-        return proxyPathPrefix + u.pathname + u.search + u.hash
-      }
-    }
-    // Cross-origin redirect that we shouldn't follow — route through _ext.
-    return `${proxyPathPrefix}/_ext?u=${encodeURIComponent(u.toString())}`
-  } catch {
-    return location
-  }
-}
 
 function injectRewriteScript(
   html: string,
