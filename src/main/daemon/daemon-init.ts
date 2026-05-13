@@ -154,6 +154,9 @@ function createOutOfProcessLauncher(runtimeDir: string): DaemonLauncher {
         ELECTRON_RUN_AS_NODE: '1',
         // Why: the detached daemon is plain Node and cannot call Electron's
         // app.getPath(), but shell-ready rcfiles must live outside swept tmp.
+        // Set both names — VSAGENT is canonical; ORCA is kept for any older
+        // tools the daemon spawns that haven't switched yet.
+        VSAGENT_USER_DATA_PATH: userDataPath,
         ORCA_USER_DATA_PATH: userDataPath
       }
     })

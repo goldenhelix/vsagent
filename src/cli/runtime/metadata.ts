@@ -6,6 +6,7 @@ import {
   getRuntimeMetadataPath,
   type RuntimeMetadata
 } from '../../shared/runtime-bootstrap'
+import { readUserDataPathEnv } from '../../shared/user-data-path-env'
 import { RuntimeClientError } from './types'
 
 export function readMetadata(userDataPath: string): RuntimeMetadata {
@@ -43,12 +44,15 @@ export function getDefaultUserDataPath(
   platform: NodeJS.Platform = process.platform,
   homeDir = homedir()
 ): string {
-  // Why: in dev mode (and for parallel Orca instances), the Electron app writes
-  // runtime metadata to a separate userData directory (e.g. `orca-dev`) to avoid
-  // clobbering the production app's metadata. The CLI needs to find the same
-  // metadata file, so this env var lets the CLI target a specific instance.
-  if (process.env.ORCA_USER_DATA_PATH) {
-    return process.env.ORCA_USER_DATA_PATH
+  // Why: in dev mode (and for parallel VSAgent instances), the Electron app
+  // writes runtime metadata to a separate userData directory (e.g. `orca-dev`)
+  // to avoid clobbering the production app's metadata. The CLI needs to find
+  // the same metadata file, so this env var lets the CLI target a specific
+  // instance. VSAGENT_USER_DATA_PATH is canonical; ORCA_USER_DATA_PATH is
+  // honoured for backward compat.
+  const override = readUserDataPathEnv()
+  if (override) {
+    return override
   }
   if (platform === 'darwin') {
     return join(homeDir, 'Library', 'Application Support', 'orca')

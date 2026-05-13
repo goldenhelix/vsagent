@@ -8,7 +8,8 @@
 //   ORCA_WEB_TOKEN         Optional shared bearer token (PoC auth)
 //   ORCA_WEB_PICKER_ROOTS  Colon-separated roots the folder picker is allowed
 //                          to traverse (defaults to $HOME)
-//   ORCA_USER_DATA_PATH    Backend data dir (default: ~/.vsagent)
+//   VSAGENT_USER_DATA_PATH Backend data dir (default: ~/.vsagent).
+//                          ORCA_USER_DATA_PATH is honoured as a legacy alias.
 //
 // Defines internally:
 //   ORCA_WEB_GATEWAY=1
@@ -42,6 +43,7 @@ ensure(
 )
 
 const userDataPath =
+  process.env.VSAGENT_USER_DATA_PATH ||
   process.env.ORCA_USER_DATA_PATH ||
   path.join(process.env.HOME ?? process.env.USERPROFILE ?? '/tmp', '.vsagent')
 mkdirSync(userDataPath, { recursive: true })
@@ -84,6 +86,7 @@ const env = {
   ORCA_WEB_HEADLESS: '1',
   ORCA_WEB_ROOT: webRoot,
   ORCA_WEB_PORT: process.env.ORCA_WEB_PORT || '8080',
+  VSAGENT_USER_DATA_PATH: userDataPath,
   ORCA_USER_DATA_PATH: userDataPath,
   ORCA_DEV_USER_DATA_PATH: userDataPath,
   // Why: in headless mode the operator launches us via the CJS wrapper

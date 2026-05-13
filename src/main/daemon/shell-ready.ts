@@ -1,8 +1,8 @@
 import { tmpdir } from 'os'
 import { basename, dirname, join } from 'path'
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'fs'
+import { readUserDataPathEnv } from '../../shared/user-data-path-env'
 
-const ORCA_USER_DATA_PATH_ENV = 'ORCA_USER_DATA_PATH'
 const SHELL_READY_MARKER = '\\033]777;orca-shell-ready\\007'
 
 let didEnsureShellReadyWrappers = false
@@ -12,9 +12,10 @@ function quotePosixSingle(value: string): string {
 }
 
 function getShellReadyWrapperRoot(): string {
-  const userDataPath = process.env[ORCA_USER_DATA_PATH_ENV]
-  // Why: older/test launchers may not seed ORCA_USER_DATA_PATH. Keep a
-  // fallback so daemon startup does not fail before the parent can be fixed.
+  const userDataPath = readUserDataPathEnv()
+  // Why: older/test launchers may not seed VSAGENT_USER_DATA_PATH (nor the
+  // legacy ORCA_USER_DATA_PATH). Keep a fallback so daemon startup does not
+  // fail before the parent can be fixed.
   return join(userDataPath || tmpdir(), userDataPath ? 'shell-ready' : 'orca-shell-ready')
 }
 

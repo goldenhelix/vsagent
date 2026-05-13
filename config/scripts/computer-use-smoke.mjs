@@ -86,6 +86,7 @@ function runCli(cliArgs, options = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
+      VSAGENT_USER_DATA_PATH: process.env.ORCA_COMPUTER_SMOKE_USER_DATA_PATH ?? defaultDevUserDataPath(),
       ORCA_USER_DATA_PATH: process.env.ORCA_COMPUTER_SMOKE_USER_DATA_PATH ?? defaultDevUserDataPath()
     }
   })

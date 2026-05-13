@@ -2,6 +2,7 @@
 import type { OrchestrationDb } from './db'
 import type { MessageRow, TaskRow, CoordinatorStatus } from './types'
 import { buildDispatchPreamble } from './preamble'
+import { readUserDataPathEnv } from '../../../shared/user-data-path-env'
 
 export type CoordinatorRuntime = {
   sendTerminal(handle: string, action: { text?: string; enter?: boolean }): Promise<unknown>
@@ -536,7 +537,7 @@ export class Coordinator {
       // part of its instructions).
       taskSpec: strippedSpec,
       coordinatorHandle: this.opts.coordinatorHandle,
-      devMode: process.env.ORCA_USER_DATA_PATH?.includes('orca-dev'),
+      devMode: readUserDataPathEnv()?.includes('orca-dev'),
       // Why (§3.2): drift section fires only when behind > 0. The preamble
       // builder gates on this itself; passing the object unconditionally lets
       // the coordinator stay dumb about the display rule.

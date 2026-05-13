@@ -8,6 +8,7 @@ import {
 } from '../flags'
 import { RuntimeClientError } from '../runtime-client'
 import { getTerminalHandle } from '../selectors'
+import { readUserDataPathEnv } from '../../shared/user-data-path-env'
 
 // Why: 15 s is well under Claude Code's empirical ~2 min Bash-tool silence
 // budget and generates only ~40 lines per 10 min wait — enough to assure the
@@ -90,7 +91,7 @@ async function resolveOrchestrationTerminalHandle(
 }
 
 function isDevCliInvocation(): boolean {
-  return process.env.ORCA_USER_DATA_PATH?.includes('orca-dev') ?? false
+  return readUserDataPathEnv()?.includes('orca-dev') ?? false
 }
 
 export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {

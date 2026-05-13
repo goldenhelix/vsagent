@@ -24,5 +24,6 @@ case "$(uname -s)" in
   *)            default_data="${XDG_CONFIG_HOME:-$HOME/.config}/orca-dev" ;;
 esac
 
-export ORCA_USER_DATA_PATH="${ORCA_DEV_USER_DATA_PATH:-$default_data}"
+export VSAGENT_USER_DATA_PATH="${ORCA_DEV_USER_DATA_PATH:-$default_data}"
+export ORCA_USER_DATA_PATH="$VSAGENT_USER_DATA_PATH"
 exec node "$CLI_ENTRY" "$@"

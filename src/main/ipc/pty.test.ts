@@ -562,7 +562,7 @@ describe('registerPtyHandlers', () => {
         expect(env.PATH).toContain('/tmp/orca-user-data/orca-terminal-attribution/posix')
       })
 
-      it('injects dev-mode ORCA_USER_DATA_PATH + dev CLI PATH on the daemon path', async () => {
+      it('injects dev-mode VSAGENT_USER_DATA_PATH + dev CLI PATH on the daemon path', async () => {
         // Why: the mocked `app` (see vi.mock at the top of the file) is a
         // plain object, so we can flip isPackaged for the scope of the test.
         const { app } = await import('electron')
@@ -571,7 +571,7 @@ describe('registerPtyHandlers', () => {
         mockedApp.isPackaged = false
         try {
           const env = await daemonSpawnAndGetEnv({ PATH: '/usr/bin' })
-          expect(env.ORCA_USER_DATA_PATH).toBe('/tmp/orca-user-data')
+          expect(env.VSAGENT_USER_DATA_PATH).toBe('/tmp/orca-user-data')
           expect(env.PATH).toContain('/tmp/orca-user-data/cli/bin')
         } finally {
           mockedApp.isPackaged = prev

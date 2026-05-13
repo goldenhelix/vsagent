@@ -37,14 +37,14 @@ function prepareDevCliWrapper() {
   if (process.platform === 'win32') {
     writeFileSync(
       path.join(binDir, 'orca-dev.cmd'),
-      `@echo off\r\nset "ORCA_USER_DATA_PATH=${userDataPath}"\r\nnode "${cliPath}" %*\r\n`,
+      `@echo off\r\nset "VSAGENT_USER_DATA_PATH=${userDataPath}"\r\nset "ORCA_USER_DATA_PATH=${userDataPath}"\r\nnode "${cliPath}" %*\r\n`,
       'utf8'
     )
   } else {
     const wrapperPath = path.join(binDir, 'orca-dev')
     writeFileSync(
       wrapperPath,
-      `#!/usr/bin/env bash\nexport ORCA_USER_DATA_PATH=${JSON.stringify(userDataPath)}\nexec node ${JSON.stringify(cliPath)} "$@"\n`,
+      `#!/usr/bin/env bash\nexport VSAGENT_USER_DATA_PATH=${JSON.stringify(userDataPath)}\nexport ORCA_USER_DATA_PATH=${JSON.stringify(userDataPath)}\nexec node ${JSON.stringify(cliPath)} "$@"\n`,
       'utf8'
     )
     chmodSync(wrapperPath, 0o755)

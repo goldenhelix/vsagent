@@ -59,9 +59,9 @@ describe('createPtySubprocess', () => {
     spawnMock.mockReset()
     isPwshAvailableMock.mockReset()
     isPwshAvailableMock.mockReturnValue(false)
-    previousUserDataPath = process.env.ORCA_USER_DATA_PATH
+    previousUserDataPath = process.env.VSAGENT_USER_DATA_PATH
     userDataPath = mkdtempSync(join(tmpdir(), 'daemon-pty-subprocess-test-'))
-    process.env.ORCA_USER_DATA_PATH = userDataPath
+    process.env.VSAGENT_USER_DATA_PATH = userDataPath
     for (const key of ORCA_SHELL_WRAPPER_ENV) {
       savedWrapperEnv[key] = process.env[key]
       delete process.env[key]
@@ -70,9 +70,9 @@ describe('createPtySubprocess', () => {
 
   afterEach(() => {
     if (previousUserDataPath === undefined) {
-      delete process.env.ORCA_USER_DATA_PATH
+      delete process.env.VSAGENT_USER_DATA_PATH
     } else {
-      process.env.ORCA_USER_DATA_PATH = previousUserDataPath
+      process.env.VSAGENT_USER_DATA_PATH = previousUserDataPath
     }
     rmSync(userDataPath, { recursive: true, force: true })
     for (const key of ORCA_SHELL_WRAPPER_ENV) {
