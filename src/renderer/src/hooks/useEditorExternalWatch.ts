@@ -240,6 +240,20 @@ export function createExternalWatchEventHandler(
 
   const handleFsChanged = (payload: FsChangedPayload): void => {
     const target = findTarget(payload.worktreePath)
+    // Why: set localStorage VSAGENT_EDITOR_SYNC_DEBUG=1 in DevTools to surface
+    // every fs:changed event reaching this renderer. Useful for diagnosing
+    // why an edit in browser A isn't picked up in browser B — confirms the
+    // event arrived (vs. broadcast/subscribe wiring being off).
+    const dbg = typeof window !== 'undefined' && window.localStorage?.getItem('VSAGENT_EDITOR_SYNC_DEBUG') === '1'
+    if (dbg) {
+      console.log(
+        '[editor-sync] fs:changed',
+        target ? 'target=match' : 'target=miss',
+        'worktree=' + payload.worktreePath,
+        'events=' + payload.events.length,
+        payload.events.slice(0, 3).map((e) => `${e.kind}:${('absolutePath' in e ? e.absolutePath : '?')}`)
+      )
+    }
     if (!target) {
       return
     }
@@ -409,9 +423,11 @@ export function createExternalWatchEventHandler(
       }
       const matching = getOpenFilesForExternalFileChange(openFilesSnapshot, notification)
       if (matching.length === 0) {
+        if (dbg) console.log('[editor-sync] skip', relativePath, 'no matching open file')
         continue
       }
       if (matching.some((f) => f.isDirty)) {
+        if (dbg) console.log('[editor-sync] skip', relativePath, 'tab is dirty')
         continue
       }
       // Why: our own save path stamps the registry right before writeFile, so
@@ -422,8 +438,10 @@ export function createExternalWatchEventHandler(
       // after the TTL still reaches the editor via the next fs event.
       const absolutePath = joinPath(notification.worktreePath, notification.relativePath)
       if (hasRecentSelfWrite(absolutePath)) {
+        if (dbg) console.log('[editor-sync] skip', relativePath, 'recent self-write within TTL')
         continue
       }
+      if (dbg) console.log('[editor-sync] reload', relativePath, 'modes=' + matching.map((m) => m.mode).join(','))
       scheduleDebouncedExternalReload(notification)
     }
   }

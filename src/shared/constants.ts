@@ -153,7 +153,10 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     enableGitHubAttribution: false,
     theme: 'system',
     appFontFamily: DEFAULT_APP_FONT_FAMILY,
-    editorAutoSave: false,
+    // Why: auto-save on by default matches the cross-browser sync model —
+    // edits in one tab need to flush to disk for other tabs to pick them up
+    // via the fs watcher. Users can still turn it off in Settings → General.
+    editorAutoSave: true,
     editorAutoSaveDelayMs: DEFAULT_EDITOR_AUTO_SAVE_DELAY_MS,
     editorMinimapEnabled: false,
     terminalFontSize: 14,
