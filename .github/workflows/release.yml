@@ -1,0 +1,186 @@
+name: Release (Linux x64 tarball)
+
+# Builds and uploads the VSAgent Linux x64 release tarball consumed by
+# scripts/install.sh. Triggered on tag push (`v*`) or manually via
+# workflow_dispatch.
+#
+# The job intentionally does NOT shell out to `pnpm run build` (the
+# full electron-builder path); it runs the headless subset that the web
+# service actually ships:
+#   - build:electron-vite  (main + preload + renderer)
+#   - web:build            (browser-served renderer bundle)
+#   - build:cli            (vsagent CLI)
+# All wrapped in config/scripts/build-release-tarball.mjs.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v1.2.3). Optional — defaults to the current ref.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux-x64:
+    name: Build & publish Linux x64 tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: System deps for native modules
+        # better-sqlite3 + node-pty need a basic build toolchain. The
+        # ubuntu-latest runner already has gcc/g++/make, but make this
+        # explicit so the workflow doesn't silently break on future
+        # runner images.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3 pkg-config libssl-dev
+
+      - name: Install dependencies
+        # Why: we DO need devDependencies (electron-vite, vite, tsc) to
+        # produce the bundles. Production-only install happens on the
+        # target host via install.sh.
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve release version
+        id: version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            tag="${{ inputs.tag }}"; version="${tag#v}"
+          else
+            version="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "tag=v$version" >>"$GITHUB_OUTPUT"
+
+      - name: Build release tarball
+        id: tarball
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: node config/scripts/build-release-tarball.mjs
+
+      - name: Create "latest" alias for the asset
+        # The installer's `--version=latest` path downloads
+        # vsagent-linux-x64-latest.tar.gz from /releases/latest/download/.
+        # Copy the versioned artifact under that name so the alias works
+        # for stable releases. Pre-release tags (v*-rc.*) are excluded
+        # so the convenience alias always points at a stable build.
+        id: alias
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          src="${{ steps.tarball.outputs.tarball_path }}"
+          alias_path="dist/vsagent-linux-x64-latest.tar.gz"
+          if [[ "$TAG" =~ -rc|-beta|-alpha ]]; then
+            echo "pre-release detected ($TAG); skipping latest alias"
+            echo "alias_path=" >>"$GITHUB_OUTPUT"
+          else
+            cp "$src" "$alias_path"
+            echo "alias_path=$alias_path" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes
+        id: notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # Prefer CHANGELOG.md if it exists and has a matching section.
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          if [[ -f CHANGELOG.md ]] && grep -q "^## \\[\\?${TAG#v}" CHANGELOG.md; then
+            awk -v ver="${TAG#v}" '
+              BEGIN { take=0 }
+              /^## / {
+                if (take) exit
+                if ($0 ~ "^## \\[?"ver) take=1
+                next
+              }
+              take { print }
+            ' CHANGELOG.md > "$notes_file"
+          fi
+          if [[ ! -s "$notes_file" ]]; then
+            prev_tag="$(git tag --list 'v*' --sort=-version:refname | grep -v -- '-rc\.\|-beta\.\|-alpha\.' | grep -v "^${TAG}\$" | head -n1 || true)"
+            if [[ -z "$prev_tag" ]]; then
+              prev_tag="$(git tag --list 'v*' --sort=-version:refname | grep -v "^${TAG}\$" | head -n1 || true)"
+            fi
+            {
+              echo "## VSAgent ${TAG}"
+              echo
+              if [[ -n "$prev_tag" ]]; then
+                echo "Changes since ${prev_tag}:"
+                echo
+                git log --no-merges --pretty='format:- %s' "${prev_tag}..${TAG}" 2>/dev/null \
+                  || git log --no-merges --pretty='format:- %s' -n 50
+              else
+                echo "Initial release."
+              fi
+              echo
+              echo
+              echo "### Install"
+              echo
+              echo '```bash'
+              echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash"
+              echo '```'
+              echo
+              echo "See \`docs/install-linux.md\` for manual install + systemd notes."
+            } > "$notes_file"
+          fi
+          echo "notes_path=$notes_file" >>"$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: VSAgent ${{ steps.version.outputs.tag }}
+          body_path: ${{ steps.notes.outputs.notes_path }}
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.tarball.outputs.tarball_path }}
+            ${{ steps.tarball.outputs.tarball_path }}.sha256
+            ${{ steps.alias.outputs.alias_path }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### VSAgent release published"
+            echo
+            echo "- tag: \`${{ steps.version.outputs.tag }}\`"
+            echo "- tarball: \`${{ steps.tarball.outputs.tarball_name }}\`"
+            echo "- sha256: \`${{ steps.tarball.outputs.tarball_sha256 }}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
