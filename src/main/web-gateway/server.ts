@@ -130,13 +130,15 @@ export class WebGateway {
   private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!req.url) {
       res.statusCode = 400
-      return res.end()
+      res.end()
+      return
     }
     // Why: serve a tiny health endpoint so it's easy to verify the gateway
     // is alive from curl without having to load the bundle.
     if (req.url === '/__orca/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      return res.end(JSON.stringify({ ok: true, ts: Date.now() }))
+      res.end(JSON.stringify({ ok: true, ts: Date.now() }))
+      return
     }
     // Why: the webpreview HTTP proxy serves an iframe-backed in-app browser.
     // Routed BEFORE the SPA static-file lookup so /__orca/webpreview/...
@@ -156,7 +158,8 @@ export class WebGateway {
       if (!hasCookie && queryToken !== SHARED_TOKEN) {
         res.statusCode = 401
         res.setHeader('Content-Type', 'text/plain')
-        return res.end('Unauthorized')
+        res.end('Unauthorized')
+        return
       }
       if (queryToken === SHARED_TOKEN && !hasCookie) {
         res.setHeader('Set-Cookie', `orca_token=${SHARED_TOKEN}; Path=/; HttpOnly; SameSite=Lax`)
@@ -171,7 +174,8 @@ export class WebGateway {
     const candidate = resolve(this.webRoot, safe)
     if (!candidate.startsWith(this.webRoot)) {
       res.statusCode = 403
-      return res.end()
+      res.end()
+      return
     }
     try {
       const st = await stat(candidate)

@@ -55,7 +55,7 @@ import { browserManager } from './browser/browser-manager'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { installIpcIntercept } from './web-gateway/ipc-intercept'
 import { WebGateway } from './web-gateway/server'
-import { createHeadlessBrowserWindow, setHeadlessBroadcaster } from './web-gateway/headless-window'
+import { createHeadlessBrowserWindow } from './web-gateway/headless-window'
 import { existsSync } from 'fs'
 import { join } from 'path'
 

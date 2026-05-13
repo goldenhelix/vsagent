@@ -78,7 +78,8 @@ export async function handleWebPreview(
 ): Promise<void> {
   if (!req.url) {
     res.statusCode = 400
-    return res.end('webpreview: empty url')
+    res.end('webpreview: empty url')
+    return
   }
 
   // URL form: /__orca/webpreview/<sessionId>/<rest...>
@@ -99,7 +100,8 @@ export async function handleWebPreview(
   }
   if (!sessionId) {
     res.statusCode = 400
-    return res.end('webpreview: missing session id')
+    res.end('webpreview: missing session id')
+    return
   }
 
   // Special path: /_ext?u=<encoded-url> — cross-origin escape hatch used by
@@ -108,7 +110,8 @@ export async function handleWebPreview(
     const u = new URL(restPath, 'http://x').searchParams.get('u')
     if (!u) {
       res.statusCode = 400
-      return res.end('webpreview: _ext requires ?u=')
+      res.end('webpreview: _ext requires ?u=')
+      return
     }
     try {
       const ext = new URL(u)
@@ -122,14 +125,16 @@ export async function handleWebPreview(
       })
     } catch {
       res.statusCode = 400
-      return res.end('webpreview: invalid _ext URL')
+      res.end('webpreview: invalid _ext URL')
+      return
     }
   }
 
   const session = getSession(sessionId)
   if (!session) {
     res.statusCode = 404
-    return res.end(`webpreview: unknown session "${sessionId}"`)
+    res.end(`webpreview: unknown session "${sessionId}"`)
+    return
   }
 
   // Resolve the upstream URL: target origin + restPath.
@@ -138,7 +143,8 @@ export async function handleWebPreview(
     upstreamUrl = new URL(restPath, session.targetOrigin)
   } catch {
     res.statusCode = 400
-    return res.end('webpreview: failed to resolve upstream url')
+    res.end('webpreview: failed to resolve upstream url')
+    return
   }
 
   return forwardRequest({
@@ -297,7 +303,7 @@ function streamResponseToClient(
   upstreamRes: IncomingMessage,
   finalTarget: URL
 ): Promise<void> {
-  const { req, res, sessionId } = args
+  const { res, sessionId } = args
   return new Promise((resolve) => {
     const proxyPathPrefix = `${PROXY_PREFIX}/${sessionId}`
     for (const [name, value] of Object.entries(upstreamRes.headers)) {
