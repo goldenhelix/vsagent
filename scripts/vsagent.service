@@ -1,0 +1,30 @@
+[Unit]
+Description=VSAgent web service (Orca renderer over WebSocket)
+Documentation=https://github.com/goldenhelix/vsagent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# install.sh fills these placeholders in when it writes
+# ~/.config/systemd/user/vsagent.service. The defaults below are kept as
+# documentation of the contract; the installed copy will have concrete
+# values substituted via sed.
+Environment=ORCA_WEB_PORT=__PORT__
+Environment=VSAGENT_USER_DATA_PATH=__USER_DATA_PATH__
+Environment=NODE_ENV=production
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/bin/vsagent
+Restart=on-failure
+RestartSec=5
+# Capture stdout/stderr into the journal in addition to the rotating log
+# under VSAGENT_USER_DATA_PATH/logs/web-serve.log (handled by
+# web-serve.mjs itself).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vsagent
+# A 30s shutdown grace gives the daemon time to flush sqlite WAL.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
