@@ -274,8 +274,14 @@ function mergeLocalOnlyTabs(
   const cutoff = getLastHydrateAt()
   const mergedTabs: Record<string, Tab[]> = { ...hydrated.unifiedTabsByWorktree }
   const mergedGroups: Record<string, TabGroup[]> = { ...hydrated.groupsByWorktree }
+  // Why: at very first boot the unified tab maps haven't been initialised
+  // yet, so the snapshot can carry undefined for these fields. Defend so
+  // session:changed handling doesn't throw before the store finishes
+  // its first-mount hydrate.
+  const localUnifiedTabs = local.unifiedTabs ?? {}
+  const localTabGroups = local.tabGroups ?? {}
 
-  for (const [worktreeId, localTabs] of Object.entries(local.unifiedTabs)) {
+  for (const [worktreeId, localTabs] of Object.entries(localUnifiedTabs)) {
     if (!validWorktreeIds.has(worktreeId)) continue
     const hydratedTabs = mergedTabs[worktreeId] ?? []
     const hydratedIds = new Set(hydratedTabs.map((t) => t.id))
@@ -290,7 +296,7 @@ function mergeLocalOnlyTabs(
     // Restore each tab's group membership. The local-only tabs reference
     // groupIds that exist either in the hydrated groups or only locally.
     const groupsForWorktree = [...(mergedGroups[worktreeId] ?? [])]
-    const localGroups = local.tabGroups[worktreeId] ?? []
+    const localGroups = localTabGroups[worktreeId] ?? []
     for (const tab of toAdd) {
       let group = groupsForWorktree.find((g) => g.id === tab.groupId)
       if (!group) {
