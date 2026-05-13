@@ -12,8 +12,8 @@ export const GIT_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     keywords: ['main', 'master', 'origin/main', 'git diff', 'base ref', 'worktree']
   },
   {
-    title: 'Orca Attribution',
-    description: 'Add Orca attribution to commits, PRs, and issues.',
+    title: 'VSAgent Attribution',
+    description: 'Add VSAgent attribution to commits, PRs, and issues.',
     keywords: ['github', 'gh', 'pr', 'issue', 'co-author', 'coauthored', 'attribution', 'orca']
   }
 ]

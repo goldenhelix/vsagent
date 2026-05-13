@@ -474,7 +474,7 @@ function Settings(): React.JSX.Element {
       {
         id: 'stats',
         title: 'Stats & Usage',
-        description: 'Orca stats and Claude usage analytics.',
+        description: 'VSAgent stats and Claude usage analytics.',
         icon: BarChart3,
         searchEntries: STATS_PANE_SEARCH_ENTRIES
       },
@@ -846,7 +846,7 @@ function Settings(): React.JSX.Element {
                 <SettingsSection
                   id="stats"
                   title="Stats"
-                  description="How much Orca has helped you."
+                  description="How much VSAgent has helped you."
                   searchEntries={STATS_PANE_SEARCH_ENTRIES}
                 >
                   <StatsPane />
