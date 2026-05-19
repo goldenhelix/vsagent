@@ -379,6 +379,10 @@ function App(): React.JSX.Element {
   // skips re-broadcasting, breaking the ping-pong loop that would
   // otherwise have two browsers hydrate each other every 150ms.
   const lastBroadcastPayloadRef = useRef<string | null>(null)
+  // Why: timestamp until which the persist subscriber must drop its writes.
+  // Set when a peer's session:changed lands; cleared by elapsing time. Stops
+  // hydrate→persist→broadcast ping-pong between two browser clients.
+  const suppressPersistUntilRef = useRef<number>(0)
   const [collapsedSidebarHeaderWidth, setCollapsedSidebarHeaderWidth] = useState(0)
   const [mountedLazyModalIds, setMountedLazyModalIds] = useState(() => new Set<string>())
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null)
@@ -800,6 +804,17 @@ function App(): React.JSX.Element {
       //   2. stamp the broadcast with our clientId so peers can ignore
       //      our own echoes (see session.onChanged handler below).
       persist: (payload) => {
+        // Why: when another client's session:changed broadcast just hydrated
+        // us, the resulting Zustand mutation will trigger this persist a few
+        // ticks later. JSON-stringify dedupe is unreliable across the
+        // hydrate→serialize round-trip (Set→Array swaps, key reordering,
+        // transient state). Without a suppress window, two clients ping-pong
+        // session:changed every ~300ms and any local-only edit (e.g. a new
+        // tab) gets wiped by the next incoming broadcast. The window must
+        // outlive the 150ms persist debounce; 600ms is a safe ceiling.
+        if (Date.now() < suppressPersistUntilRef.current) {
+          return
+        }
         const serialized = JSON.stringify(payload)
         if (serialized !== lastBroadcastPayloadRef.current) {
           lastBroadcastPayloadRef.current = serialized
@@ -842,6 +857,13 @@ function App(): React.JSX.Element {
     const unsub = window.api.session.onChanged((data) => {
       if (!data || data.originId === getClientId()) return
       const session = data.state
+      // Why: suppress the next ~600ms of persist writes so the hydrate below
+      // doesn't bounce back as a re-broadcast that wipes any local-only edit
+      // the peer hasn't seen yet (or worse, ping-pongs the same state forever
+      // with two clients). 600ms covers the 150ms persist debounce plus
+      // hydrate ticks; longer than that and a real local edit by THIS user
+      // would be suppressed unfairly.
+      suppressPersistUntilRef.current = Date.now() + 600
       if (!session || typeof session !== 'object') return
       // Why: stamp the broadcast payload BEFORE applying it. The hydrate*
       // actions below will trigger our Zustand subscriber a few render
