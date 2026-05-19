@@ -78,11 +78,22 @@ function patchMethod(
 // Why: must run after the Electron app is ready — on some platforms
 // `WebContents` isn't a resolvable class at module load. Called from inside
 // `WebGateway.start()` which is itself behind `app.whenReady()`.
+//
+// In our headless Linux deployment (ORCA_WEB_HEADLESS=1) no real BrowserWindow
+// is ever constructed (Gtk would crash without an X server, see
+// headless-window.ts), so Electron never lazy-loads the WebContents class and
+// `require('electron').WebContents` is undefined. That's fine: the
+// headless-broadcaster path in `setHeadlessBroadcaster` covers fake-webContents
+// sends. Treat the missing class as expected in headless mode and skip the
+// patch silently; only warn when we're in a non-headless gateway run where the
+// missing class would actually mean broken broadcasts.
 export function patchWebContentsSend(): void {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { WebContents } = require('electron') as { WebContents?: { prototype: object } }
   if (!WebContents || !WebContents.prototype) {
-    console.warn('[web-gateway] WebContents.prototype unavailable; events will not broadcast')
+    if (process.env.ORCA_WEB_HEADLESS !== '1') {
+      console.warn('[web-gateway] WebContents.prototype unavailable; events will not broadcast')
+    }
     return
   }
   const proto = WebContents.prototype as unknown as {
