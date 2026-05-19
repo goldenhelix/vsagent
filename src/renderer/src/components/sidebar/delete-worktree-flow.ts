@@ -5,6 +5,11 @@ import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { getDeleteWorktreeToastCopy } from './delete-worktree-toast'
 import type { Worktree } from '../../../../shared/types'
 
+type WorktreeBatchDeleteOptions = {
+  forceConfirm?: boolean
+  onDeleted?: (worktreeIds: string[]) => void
+}
+
 // Why: a failed delete almost always means the worktree still has changes
 // that need attention (uncommitted work, unpushed commits, conflicts). The
 // "View" affordance should surface those changes directly, not just bring
@@ -15,6 +20,39 @@ function viewWorktreeDiff(worktreeId: string): void {
   const state = useAppStore.getState()
   state.setRightSidebarTab('source-control')
   state.setRightSidebarOpen(true)
+}
+
+export async function runWorktreeDeletesInParallel(
+  targets: readonly Pick<Worktree, 'id' | 'displayName' | 'repoId'>[]
+): Promise<string[]> {
+  // Why: `git worktree remove`/`prune`/`branch -D` mutate repo-wide ref state
+  // and contend on `.git/packed-refs.lock` and per-worktree HEAD.lock. Running
+  // every target through Promise.all races those locks on the same repo and
+  // intermittently fails one or more deletes. Serialize per repoId while
+  // still letting deletes across different repos run concurrently.
+  const groups = new Map<string, (typeof targets)[number][]>()
+  for (const target of targets) {
+    const group = groups.get(target.repoId)
+    if (group) {
+      group.push(target)
+    } else {
+      groups.set(target.repoId, [target])
+    }
+  }
+  const groupResults = await Promise.all(
+    Array.from(groups.values()).map(async (group) => {
+      const deletedInGroup: string[] = []
+      for (const target of group) {
+        const deleted = await runWorktreeDeleteWithToast(target.id, target.displayName)
+        if (deleted) {
+          deletedInGroup.push(target.id)
+        }
+      }
+      return deletedInGroup
+    })
+  )
+  const deletedSet = new Set(groupResults.flat())
+  return targets.filter((target) => deletedSet.has(target.id)).map((target) => target.id)
 }
 
 /**
@@ -30,13 +68,16 @@ function viewWorktreeDiff(worktreeId: string): void {
  * concerns into the store slice while still preventing the two delete
  * entry points from drifting apart.
  */
-export function runWorktreeDeleteWithToast(worktreeId: string, worktreeName: string): void {
+export function runWorktreeDeleteWithToast(
+  worktreeId: string,
+  worktreeName: string
+): Promise<boolean> {
   const removeWorktree = useAppStore.getState().removeWorktree
 
-  removeWorktree(worktreeId, false)
+  return removeWorktree(worktreeId, false)
     .then((result) => {
       if (result.ok) {
-        return
+        return true
       }
       const state = useAppStore.getState().deleteStateByWorktreeId[worktreeId]
       const canForceDelete = state?.canForceDelete ?? false
@@ -80,11 +121,13 @@ export function runWorktreeDeleteWithToast(worktreeId: string, worktreeName: str
             }
           : undefined
       })
+      return false
     })
     .catch((err: unknown) => {
       toast.error('Failed to delete worktree', {
         description: err instanceof Error ? err.message : String(err)
       })
+      return false
     })
 }
 
@@ -122,13 +165,16 @@ export function runWorktreeDelete(worktreeId: string): void {
   state.clearWorktreeDeleteState(worktreeId)
   const skipConfirm = state.settings?.skipDeleteWorktreeConfirm ?? false
   if (skipConfirm) {
-    runWorktreeDeleteWithToast(worktreeId, target.displayName)
+    void runWorktreeDeleteWithToast(worktreeId, target.displayName)
     return
   }
   state.openModal('delete-worktree', { worktreeId })
 }
 
-export function runWorktreeBatchDelete(worktreeIds: readonly string[]): void {
+export function runWorktreeBatchDelete(
+  worktreeIds: readonly string[],
+  options: WorktreeBatchDeleteOptions = {}
+): boolean {
   const state = useAppStore.getState()
   const worktreeMap = getWorktreeMapFromState(state)
   const targets = worktreeIds
@@ -136,25 +182,44 @@ export function runWorktreeBatchDelete(worktreeIds: readonly string[]): void {
     .filter((worktree): worktree is Worktree => worktree != null && !worktree.isMainWorktree)
 
   if (targets.length === 0) {
-    return
+    toast.info('No deletable workspaces selected', {
+      description: 'Refresh Space and try again if the workspace list looks stale.'
+    })
+    return false
   }
 
   for (const target of targets) {
     state.clearWorktreeDeleteState(target.id)
   }
 
-  const skipConfirm = state.settings?.skipDeleteWorktreeConfirm ?? false
+  // Why: bulk cleanup can destroy many directories at once, so batch deletes
+  // and Space-triggered deletes must keep an explicit confirmation step.
+  const skipConfirm =
+    !options.forceConfirm &&
+    targets.length === 1 &&
+    (state.settings?.skipDeleteWorktreeConfirm ?? false)
   if (skipConfirm) {
-    for (const target of targets) {
-      runWorktreeDeleteWithToast(target.id, target.displayName)
-    }
-    return
+    void runWorktreeDeletesInParallel(targets).then((deletedIds) => {
+      if (deletedIds.length > 0) {
+        options.onDeleted?.(deletedIds)
+      }
+    })
+    return true
   }
 
   if (targets.length === 1) {
-    state.openModal('delete-worktree', { worktreeId: targets[0].id })
-    return
+    state.openModal('delete-worktree', {
+      worktreeId: targets[0].id,
+      ...(options.forceConfirm ? { allowSkipConfirm: false } : {}),
+      ...(options.onDeleted ? { onDeleted: options.onDeleted } : {})
+    })
+    return true
   }
 
-  state.openModal('delete-worktree', { worktreeIds: targets.map((target) => target.id) })
+  state.openModal('delete-worktree', {
+    worktreeIds: targets.map((target) => target.id),
+    allowSkipConfirm: false,
+    ...(options.onDeleted ? { onDeleted: options.onDeleted } : {})
+  })
+  return true
 }

@@ -40,7 +40,7 @@ const RemoveFolderDialog = React.memo(function RemoveFolderDialog() {
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-sm sm:max-w-sm" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-sm">Remove Folder</DialogTitle>
+          <DialogTitle className="text-sm">Remove Project</DialogTitle>
           <DialogDescription className="text-xs">
             Remove <span className="break-all font-medium text-foreground">{displayName}</span> from
             VSAgent? The folder will not be deleted from disk.

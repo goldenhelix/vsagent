@@ -6,18 +6,29 @@ import type {
   PersistedState,
   PersistedUIState,
   RepoHookSettings,
-  StatusBarItem,
-  WorkspaceSessionState,
-  WorktreeCardProperty
+  WorkspaceSessionState
 } from './types'
+import { DEFAULT_STATUS_BAR_ITEMS } from './status-bar-defaults'
 import { DEFAULT_TERMINAL_FONT_WEIGHT } from './terminal-fonts'
+import { getDefaultTerminalQuickCommands } from './terminal-quick-commands'
+import type { VoiceSettings } from './speech-types'
+import { cloneDefaultWorkspaceStatuses } from './workspace-statuses'
+import { TASK_PROVIDERS } from './task-providers'
+import { DEFAULT_WORKTREE_CARD_PROPERTIES } from './worktree-card-properties'
+
+export { DEFAULT_STATUS_BAR_ITEMS } from './status-bar-defaults'
+export {
+  ALWAYS_VISIBLE_WORKTREE_CARD_PROPERTIES,
+  DEFAULT_WORKTREE_CARD_PROPERTIES,
+  normalizeWorktreeCardProperties
+} from './worktree-card-properties'
 
 export const SCHEMA_VERSION = 1
 export const DEFAULT_APP_FONT_FAMILY = 'Geist'
 
 // Why: the onboarding wizard's last step index. Centralized so backfill,
 // clamps, and UI step references all agree on the same upper bound.
-export const ONBOARDING_FINAL_STEP = 4
+export const ONBOARDING_FINAL_STEP = 5
 
 export const ORCA_BROWSER_PARTITION = 'persist:orca-browser'
 // Why: blank browser tabs must start from an inert guest URL that does not
@@ -33,6 +44,7 @@ export const SSH_TERMINATE_RECONNECT_REQUIRED = 'SSH_TERMINATE_RECONNECT_REQUIRE
 export const BROWSER_FAMILY_LABELS: Record<string, string> = {
   chrome: 'Google Chrome',
   chromium: 'Chromium',
+  comet: 'Comet',
   arc: 'Arc',
   edge: 'Microsoft Edge',
   brave: 'Brave',
@@ -54,6 +66,10 @@ function defaultTerminalFontFamily(): string {
   }
   return 'SF Mono' // macOS default
 }
+
+export const getDefaultPrimarySelectionMiddleClickPaste = (
+  platform = typeof process !== 'undefined' ? process.platform : ''
+): boolean => platform === 'linux'
 /**
  * Why: ProseMirror builds an in-memory tree for the entire document, so large
  * markdown files cause noticeable typing lag in the rich editor. Files above
@@ -72,33 +88,14 @@ export const MAX_EDITOR_AUTO_SAVE_DELAY_MS = 10_000
 // in starNagNextThreshold, so this constant is only the first-time seed.
 export const STAR_NAG_INITIAL_THRESHOLD = 35
 
-export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
-  'status',
-  'unread',
-  'ci',
-  'issue',
-  'pr',
-  'comment',
-  // Why: agent activity is the primary reason users opt into the feature, so
-  // show it inline on each card by default. Unchecking this from the
-  // Workspaces view options hides the inline list entirely — there is no
-  // alternative agent-activity surface in the sidebar.
-  'inline-agents'
-]
-
-export const DEFAULT_STATUS_BAR_ITEMS: StatusBarItem[] = [
-  'claude',
-  'codex',
-  'gemini',
-  'opencode-go',
-  'ssh',
-  'resource-usage'
-]
-
 /** Synthetic worktree id used by the memory collector to bucket PTYs that
  *  are not associated with any worktree. Shared across main and renderer so
  *  the collector and the status-bar popover agree on the sentinel. */
 export const ORPHAN_WORKTREE_ID = '__orphan__'
+
+// Why: the floating terminal is a local synthetic workspace, so persistence
+// pruning must classify it without consulting the repo catalog.
+export const FLOATING_TERMINAL_WORKTREE_ID = 'global-floating-terminal'
 
 export const REPO_COLORS = [
   '#737373', // neutral
@@ -110,6 +107,8 @@ export const REPO_COLORS = [
   '#8b5cf6', // purple
   '#ec4899' // pink
 ] as const
+
+export const DEFAULT_REPO_BADGE_COLOR = REPO_COLORS[0]
 
 export function getDefaultNotificationSettings(): NotificationSettings {
   return {
@@ -163,12 +162,14 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     editorAutoSave: true,
     editorAutoSaveDelayMs: DEFAULT_EDITOR_AUTO_SAVE_DELAY_MS,
     editorMinimapEnabled: false,
+    markdownReviewToolsEnabled: true,
+    primarySelectionMiddleClickPaste: getDefaultPrimarySelectionMiddleClickPaste(),
     terminalFontSize: 14,
     terminalFontFamily: defaultTerminalFontFamily(),
     terminalFontWeight: DEFAULT_TERMINAL_FONT_WEIGHT,
     terminalLineHeight: 1,
-    // Why: VS Code defaults terminal GPU acceleration to "auto": prefer
-    // xterm WebGL for performance, but allow renderer failure to choose DOM.
+    // Why: keep the setting on "auto" so explicit user choices stay available,
+    // but renderer policy maps Linux auto to DOM to avoid GPU glyph corruption.
     terminalGpuAcceleration: 'auto',
     // Why 'auto': when the user has picked a known ligature font we want the
     // feature enabled by default, but we never force it if they pick a font
@@ -179,7 +180,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalCursorBlink: true,
     terminalThemeDark: 'Ghostty Default Style Dark',
     terminalDividerColorDark: '#3f3f46',
-    terminalUseSeparateLightTheme: false,
+    terminalUseSeparateLightTheme: true,
     terminalThemeLight: 'Builtin Tango Light',
     terminalDividerColorLight: '#d4d4d8',
     terminalInactivePaneOpacity: 0.8,
@@ -195,6 +196,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     // is installed, with a safe fallback to the inbox Windows PowerShell.
     terminalWindowsPowerShellImplementation: 'auto',
     terminalMouseHideWhileTyping: false,
+    terminalQuickCommands: getDefaultTerminalQuickCommands(),
     // Default false: opt-in only (matches Ghostty's default). Existing users
     // on upgrade inherit this default via persistence.ts's
     // { ...defaults.settings, ...parsed.settings } merge, so enabling
@@ -206,14 +208,20 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     setupScriptLaunchMode: 'new-tab',
     terminalScrollbackBytes: 10_000_000,
     openLinksInApp: true,
+    openInApplications: [],
     rightSidebarOpenByDefault: true,
+    showGitIgnoredFiles: true,
+    sourceControlViewMode: 'list',
     showTitlebarAppName: true,
     showTasksButton: true,
-    floatingTerminalEnabled: false,
+    ctrlTabOrderMode: 'mru',
+    floatingTerminalEnabled: true,
+    floatingTerminalDefaultedForAllUsers: true,
     floatingTerminalCwd: '~',
     floatingTerminalTriggerLocation: 'floating-button',
     notifications: getDefaultNotificationSettings(),
     diffDefaultView: 'inline',
+    combinedDiffFileTreeVisibleByDefault: false,
     promptCacheTimerEnabled: false,
     promptCacheTtlMs: 300_000,
     codexManagedAccounts: [],
@@ -223,14 +231,17 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalScopeHistoryByWorktree: true,
     defaultTuiAgent: null,
     skipDeleteWorktreeConfirm: false,
+    skipDeleteAutomationConfirm: false,
     defaultTaskViewPreset: 'all',
     defaultTaskSource: 'github',
+    visibleTaskProviders: [...TASK_PROVIDERS],
     defaultRepoSelection: null,
     defaultLinearTeamSelection: null,
     opencodeSessionCookie: '',
     opencodeWorkspaceId: '',
     geminiCliOAuthEnabled: false,
     agentCmdOverrides: {},
+    keepComputerAwakeWhileAgentsRun: false,
     // Why: 'auto' runs a layout-aware probe at boot (see
     // src/renderer/src/lib/keyboard-layout/*) that picks 'true' for US and
     // US-International and 'false' for every other layout. This mirrors
@@ -248,7 +259,11 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     // false keeps the overlay unmounted for users who never enable it.
     experimentalPet: false,
     experimentalActivity: false,
+    experimentalActivityDefaultedOffForAllUsers: true,
     experimentalWorktreeSymlinks: false,
+    // Why: local desktop remains the default server until the user explicitly
+    // selects a saved runtime environment.
+    activeRuntimeEnvironmentId: null,
     // Why: hydrate an empty default so the renderer's optional-chained reads
     // (`settings?.githubProjects?.activeProject`) land on a stable shape
     // instead of `undefined`. Upgraded profiles inherit this via the
@@ -258,7 +273,32 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
       recent: [],
       lastViewByProject: {},
       activeProject: null
-    }
+    },
+    // Why: default-on uses the user's default agent when it supports
+    // non-interactive commit-message generation. Keep agent/model maps empty
+    // so first use follows the default agent's configured default model instead
+    // of freezing a stale choice into new profiles.
+    commitMessageAi: {
+      enabled: true,
+      agentId: null,
+      selectedModelByAgent: {},
+      selectedThinkingByModel: {},
+      customPrompt: '',
+      customAgentCommand: ''
+    },
+    voice: getDefaultVoiceSettings()
+  }
+}
+
+export function getDefaultVoiceSettings(): VoiceSettings {
+  return {
+    enabled: false,
+    sttModel: '',
+    modelsDir: '',
+    language: 'en',
+    dictationMode: 'toggle' as const,
+    terminalConfirmBeforeInsert: false,
+    userModels: []
   }
 }
 
@@ -266,6 +306,7 @@ export function getDefaultRepoHookSettings(): RepoHookSettings {
   return {
     mode: 'auto',
     setupRunPolicy: 'run-by-default',
+    commandSourcePolicy: 'shared-only',
     scripts: {
       setup: '',
       archive: ''
@@ -279,12 +320,17 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     repos: [],
     sparsePresetsByRepo: {},
     worktreeMeta: {},
+    worktreeLineageById: {},
     settings: getDefaultSettings(homedir),
     ui: getDefaultUIState(),
     githubCache: { pr: {}, issue: {} },
     workspaceSession: getDefaultWorkspaceSession(),
     sshTargets: [],
     sshRemotePtyLeases: [],
+    migrationUnsupportedPtyEntries: [],
+    legacyPaneKeyAliasEntries: [],
+    automations: [],
+    automationRuns: [],
     onboarding: getDefaultOnboardingState()
   }
 }
@@ -304,12 +350,21 @@ export function getDefaultUIState(): PersistedUIState {
     uiZoomLevel: 0,
     editorFontZoomLevel: 0,
     worktreeCardProperties: [...DEFAULT_WORKTREE_CARD_PROPERTIES],
+    workspaceStatuses: cloneDefaultWorkspaceStatuses(),
+    workspaceBoardOpacity: 1,
+    workspaceBoardCompact: false,
+    workspaceBoardColumnWidth: 308,
+    _workspaceStatusesDefaultOrderMigrated: true,
+    _workspaceStatusesDefaultWorkflowMigrated: true,
+    _workspaceStatusesDefaultVisualsMigrated: true,
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
     statusBarVisible: true,
     dismissedUpdateVersion: null,
     lastUpdateCheckAt: null,
     trustedOrcaHooks: {},
-    acknowledgedAgentsByPaneKey: {}
+    acknowledgedAgentsByPaneKey: {},
+    workspaceCleanup: { dismissals: {} },
+    featureTipsSeenIds: []
   }
 }
 

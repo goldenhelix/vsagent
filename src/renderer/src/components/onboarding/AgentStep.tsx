@@ -28,7 +28,7 @@ export function AgentStep({ selectedAgent, onSelect, detectedSet, isDetecting }:
   // the active card is visible without forcing the user to expand the disclosure.
   const selectedEntryIsCollapsed =
     selectedAgent != null && fallbackRest.some((a) => a.id === selectedAgent)
-  // Why: one-way latch — auto-open when selection lands in the fallback bucket,
+  // Why: one-way latch: auto-open when selection lands in the fallback bucket,
   // but never force-close. The user can freely toggle via the native <details>
   // disclosure once it's open; controlling `open` directly off the prop would
   // slam it shut as soon as `selectedEntryIsCollapsed` flips back to false.
