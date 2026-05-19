@@ -123,6 +123,12 @@ const args = [
   // hosts without xvfb. Note: BrowserWindow is never created at all in
   // ORCA_WEB_HEADLESS mode (see web-gateway/headless-window.ts).
   '--headless=new',
+  // Why: starting with Electron 41 the new headless mode alone is not
+  // enough — Ozone still tries to bind a platform backend at process
+  // init and SIGSEGVs immediately when no X server / display is present.
+  // Pinning Ozone to its headless backend keeps the GPU-less boot path
+  // happy on bare Linux servers (CI, bastion hosts, container images).
+  '--ozone-platform=headless',
   '--disable-gpu',
   '--enable-logging=stderr',
   wrapperPath

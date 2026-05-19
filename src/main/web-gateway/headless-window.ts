@@ -185,6 +185,13 @@ export function createHeadlessBrowserWindow(): BrowserWindow {
     getOpacity: () => 1,
     setHasShadow: () => {},
     setAlwaysOnTop: () => {},
+    // Why: upstream's deferLoad refactor extracted a loadMainWindow() helper
+    // that calls .loadFile / .loadURL after IPC handlers register. In headless
+    // mode no renderer mounts on the server, so these are no-ops — the bundle
+    // is served to browsers via the gateway instead.
+    loadFile: () => Promise.resolve(),
+    loadURL: () => Promise.resolve(),
+    reload: () => {},
     on: emitter.on.bind(emitter),
     once: emitter.once.bind(emitter),
     off: emitter.off.bind(emitter),

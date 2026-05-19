@@ -43,11 +43,9 @@ function DialogContent({
   className,
   overlayClassName,
   children,
-  overlayClassName,
   showCloseButton = true,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
-  overlayClassName?: string
   showCloseButton?: boolean
   // Why: some callers need to bump z-index above app overlays (e.g. the
   // onboarding fullscreen at z-100) so the picker isn't hidden behind.

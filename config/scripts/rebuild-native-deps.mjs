@@ -31,10 +31,19 @@ const electronVersion = JSON.parse(
   readFileSync(resolve(projectDir, 'node_modules/electron/package.json'), 'utf8')
 ).version
 
-const ignoreModules = process.platform === 'win32' ? ['cpu-features'] : []
+// Why: cpu-features is an optional perf dep of ssh2 that fails to compile
+// against Electron 41 headers with newer LLVM toolchains on Windows AND Linux
+// (it pre-dates the V8 deprecation tags that Electron's headers now mark). ssh2
+// detects the missing native module and uses pure-JS CPU detection. Skipping
+// it everywhere keeps `pnpm install` working without manual env vars; only set
+// VSAGENT_BUILD_CPU_FEATURES=1 if you specifically need the native fast path.
+const skipCpuFeatures =
+  process.env.VSAGENT_BUILD_CPU_FEATURES !== '1' &&
+  (process.platform === 'win32' || process.platform === 'linux')
+const ignoreModules = skipCpuFeatures ? ['cpu-features'] : []
 
 if (ignoreModules.length > 0) {
-  console.log(`[rebuild] Skipping modules on Windows: ${ignoreModules.join(', ')}`)
+  console.log(`[rebuild] Skipping modules: ${ignoreModules.join(', ')}`)
 }
 
 // Why: @electron/rebuild's default module walker doesn't reliably find native

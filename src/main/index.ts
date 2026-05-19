@@ -443,7 +443,12 @@ function openMainWindow(): BrowserWindow {
       })
     }
   })
-  loadMainWindow(window)
+  // Why: headless mode never mounts a renderer on the server — the bundle is
+  // served to remote browsers via the gateway. Skip loadFile() to avoid
+  // calling into our no-op stub paths unnecessarily.
+  if (!isWebHeadless) {
+    loadMainWindow(window)
+  }
   return window
 }
 
