@@ -71,6 +71,48 @@ export class WebGateway {
   private subscriptionsByClient = new WeakMap<WebSocket, Set<string>>()
   private getHostWebContents: () => WebContents | null
 
+  // Why: stringifying large event payloads (notably session:changed snapshots
+  // — multiple KB each) on the synchronous emit path holds the Electron main
+  // thread long enough that inbound WS messages stall until the burst flushes,
+  // which surfaced as multi-second freezes where the browser saw no frames.
+  // Enqueue + setImmediate drain releases the event loop between bursts so
+  // invoke handlers run promptly, and per-channel coalescing collapses rapid
+  // full-snapshot emissions to a single stringify call before the drain.
+  private eventQueue: { channel: string; args: unknown[] }[] = []
+  private coalesceIndices = new Map<string, number>()
+  private drainScheduled = false
+
+  // Channels whose payload is a complete snapshot — newer emissions supersede
+  // older ones, so it is safe to drop in-flight duplicates. Incremental
+  // channels (pty:data, anything keyed by id with delta payloads) MUST NOT go
+  // in here or output will be lost.
+  private static readonly COALESCABLE_CHANNELS = new Set<string>(['session:changed'])
+
+  // Why: production-grade broadcast telemetry. Two paths:
+  //   1. Slow-drain tripwire — silent in healthy operation; logs immediately
+  //      with a per-channel byte breakdown the moment a single drain exceeds
+  //      SLOW_DRAIN_MS, so a regression is loud the first time it happens.
+  //   2. Rolling summary — every TELEMETRY_INTERVAL_MS, emits one line of
+  //      headline counters plus a top-channels-by-bytes line. The summary is
+  //      suppressed when no traffic occurred in the window, so idle hosts
+  //      stay quiet. Overhead is a handful of Map increments per broadcast
+  //      and two console.log lines per window — negligible vs. the visibility
+  //      it gives when the next freeze report lands.
+  private static readonly SLOW_DRAIN_MS = 20
+  private static readonly TELEMETRY_INTERVAL_MS = 30_000
+  private telemetry = {
+    enqueued: 0,
+    coalesced: 0,
+    drains: 0,
+    totalDrainMs: 0,
+    maxDrainMs: 0,
+    maxQueueSize: 0,
+    perChannelCount: new Map<string, number>(),
+    perChannelCoalesced: new Map<string, number>(),
+    perChannelBytes: new Map<string, number>()
+  }
+  private telemetryTimer: ReturnType<typeof setInterval> | null = null
+
   constructor(opts: WebGatewayOptions) {
     this.port = opts.port ?? 8765
     this.host = opts.host ?? '0.0.0.0'
@@ -110,11 +152,17 @@ export class WebGateway {
       this.httpServer!.listen(this.port, this.host, () => resolve())
     })
     console.log(`[web-gateway] listening on http://${this.host}:${this.port}`)
+    this.startTelemetryTimer()
   }
 
   async stop(): Promise<void> {
     setEventBroadcaster(null)
     setHeadlessBroadcaster(null)
+    this.stopTelemetryTimer()
+    // Drop anything queued; a pending setImmediate drain becomes a no-op
+    // because both the queue and the coalesce-index map are empty.
+    this.eventQueue = []
+    this.coalesceIndices.clear()
     if (this.wss) {
       for (const client of this.wss.clients) client.terminate()
       await new Promise<void>((r) => this.wss!.close(() => r()))
@@ -302,9 +350,43 @@ export class WebGateway {
   broadcastEvent(channel: string, args: unknown[]): void {
     const set = this.subscribersByChannel.get(channel)
     if (!set || set.size === 0) return
-    const payload = JSON.stringify({ kind: 'event', channel, args } satisfies WireOut)
-    for (const ws of set) {
-      if (ws.readyState === WebSocket.OPEN) {
+    this.telemetry.enqueued += 1
+    incrementMap(this.telemetry.perChannelCount, channel)
+    if (WebGateway.COALESCABLE_CHANNELS.has(channel)) {
+      const idx = this.coalesceIndices.get(channel)
+      if (idx !== undefined) {
+        this.eventQueue[idx] = { channel, args }
+        this.telemetry.coalesced += 1
+        incrementMap(this.telemetry.perChannelCoalesced, channel)
+      } else {
+        this.coalesceIndices.set(channel, this.eventQueue.length)
+        this.eventQueue.push({ channel, args })
+      }
+    } else {
+      this.eventQueue.push({ channel, args })
+    }
+    if (!this.drainScheduled) {
+      this.drainScheduled = true
+      setImmediate(() => this.drainEventQueue())
+    }
+  }
+
+  private drainEventQueue(): void {
+    this.drainScheduled = false
+    const queue = this.eventQueue
+    this.eventQueue = []
+    this.coalesceIndices.clear()
+    const startedAt = Date.now()
+    const perChannelDrainBytes = new Map<string, number>()
+    for (const { channel, args } of queue) {
+      const set = this.subscribersByChannel.get(channel)
+      if (!set || set.size === 0) continue
+      const payload = JSON.stringify({ kind: 'event', channel, args } satisfies WireOut)
+      const byteLen = Buffer.byteLength(payload)
+      addToMap(this.telemetry.perChannelBytes, channel, byteLen)
+      addToMap(perChannelDrainBytes, channel, byteLen)
+      for (const ws of set) {
+        if (ws.readyState !== WebSocket.OPEN) continue
         try {
           ws.send(payload)
         } catch (err) {
@@ -312,5 +394,85 @@ export class WebGateway {
         }
       }
     }
+    const durationMs = Date.now() - startedAt
+    this.telemetry.drains += 1
+    this.telemetry.totalDrainMs += durationMs
+    if (durationMs > this.telemetry.maxDrainMs) this.telemetry.maxDrainMs = durationMs
+    if (queue.length > this.telemetry.maxQueueSize) this.telemetry.maxQueueSize = queue.length
+    if (durationMs >= WebGateway.SLOW_DRAIN_MS) {
+      const breakdown = formatTopByBytes(perChannelDrainBytes, 5)
+      console.warn(
+        `[web-gateway] slow drain: ${durationMs}ms, ${queue.length} events; top: ${breakdown}`
+      )
+    }
   }
+
+  private startTelemetryTimer(): void {
+    if (this.telemetryTimer) return
+    this.telemetryTimer = setInterval(() => this.logTelemetrySummary(), WebGateway.TELEMETRY_INTERVAL_MS)
+    if (typeof this.telemetryTimer.unref === 'function') this.telemetryTimer.unref()
+  }
+
+  private stopTelemetryTimer(): void {
+    if (this.telemetryTimer) {
+      clearInterval(this.telemetryTimer)
+      this.telemetryTimer = null
+    }
+  }
+
+  private logTelemetrySummary(): void {
+    const t = this.telemetry
+    if (t.enqueued === 0) return
+    const avgDrainMs = t.drains > 0 ? (t.totalDrainMs / t.drains).toFixed(2) : '0'
+    const topBytes = formatTopByBytes(t.perChannelBytes, 5)
+    const topCoalesced = formatTopByCount(t.perChannelCoalesced, 3)
+    console.log(
+      `[web-gateway] telemetry: enqueued=${t.enqueued} coalesced=${t.coalesced} drains=${t.drains} ` +
+        `maxQ=${t.maxQueueSize} maxDrain=${t.maxDrainMs}ms avgDrain=${avgDrainMs}ms`
+    )
+    console.log(`[web-gateway] telemetry by bytes: ${topBytes || '(none)'}`)
+    if (t.coalesced > 0) {
+      console.log(`[web-gateway] telemetry coalesced-by-channel: ${topCoalesced || '(none)'}`)
+    }
+    // Reset rolling counters for the next window.
+    t.enqueued = 0
+    t.coalesced = 0
+    t.drains = 0
+    t.totalDrainMs = 0
+    t.maxDrainMs = 0
+    t.maxQueueSize = 0
+    t.perChannelCount.clear()
+    t.perChannelCoalesced.clear()
+    t.perChannelBytes.clear()
+  }
+}
+
+function incrementMap(m: Map<string, number>, key: string): void {
+  m.set(key, (m.get(key) ?? 0) + 1)
+}
+
+function addToMap(m: Map<string, number>, key: string, value: number): void {
+  m.set(key, (m.get(key) ?? 0) + value)
+}
+
+function formatTopByBytes(m: Map<string, number>, n: number): string {
+  return [...m.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([channel, bytes]) => `${channel}=${formatBytes(bytes)}`)
+    .join(', ')
+}
+
+function formatTopByCount(m: Map<string, number>, n: number): string {
+  return [...m.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([channel, count]) => `${channel}=${count}`)
+    .join(', ')
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
