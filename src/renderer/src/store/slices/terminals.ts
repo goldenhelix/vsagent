@@ -32,6 +32,7 @@ import { normalizeTerminalLayoutSnapshot } from '@/components/terminal-pane/term
 import { shutdownBufferCaptures } from '@/components/terminal-pane/shutdown-buffer-captures'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { parseRemoteRuntimePtyId } from '@/runtime/runtime-terminal-stream'
+import { shellHostIsWindows } from '@/lib/runtime-flavor'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { hasWorktreeSleepIntent } from '@/lib/worktree-sleep-intent'
 import { sanitizeTerminalLayoutPaneTitles } from '@/lib/terminal-pane-title-sanitization'
@@ -66,10 +67,6 @@ function getFallbackTabTitle(tab: TerminalTab, index?: number): string {
   )
 }
 
-function isWindowsRendererRuntime(): boolean {
-  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
-}
-
 function resolveCreatedTabShellOverride(
   explicitShellOverride: string | undefined,
   defaultWindowsShell: string | undefined,
@@ -81,7 +78,15 @@ function resolveCreatedTabShellOverride(
   if (explicitShellOverride !== undefined) {
     return explicitShellOverride
   }
-  if (isWindowsRendererRuntime()) {
+  // Why: defaultWindowsShell is for the host that *runs* the shell, not the
+  // host that runs the renderer. Upstream used navigator.userAgent here, which
+  // is wrong in web mode: a Windows browser hitting a Linux server would
+  // request `powershell.exe`, the daemon would fail to spawn it (no such
+  // binary on Linux), the PTY would exit code=1, and the brand-new terminal
+  // tab would auto-close. `shellHostIsWindows()` correctly resolves the OS
+  // the shell will run on (the backend in web mode, the local machine in
+  // desktop mode).
+  if (shellHostIsWindows()) {
     return defaultWindowsShell
   }
   return undefined

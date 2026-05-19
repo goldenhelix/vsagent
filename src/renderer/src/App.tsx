@@ -804,14 +804,6 @@ function App(): React.JSX.Element {
       //   2. stamp the broadcast with our clientId so peers can ignore
       //      our own echoes (see session.onChanged handler below).
       persist: (payload) => {
-        // Why: when another client's session:changed broadcast just hydrated
-        // us, the resulting Zustand mutation will trigger this persist a few
-        // ticks later. JSON-stringify dedupe is unreliable across the
-        // hydrate→serialize round-trip (Set→Array swaps, key reordering,
-        // transient state). Without a suppress window, two clients ping-pong
-        // session:changed every ~300ms and any local-only edit (e.g. a new
-        // tab) gets wiped by the next incoming broadcast. The window must
-        // outlive the 150ms persist debounce; 600ms is a safe ceiling.
         if (Date.now() < suppressPersistUntilRef.current) {
           return
         }
