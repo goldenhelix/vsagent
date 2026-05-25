@@ -9,6 +9,7 @@ import type {
   NotificationSoundDataResult
 } from '../../shared/types'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { isNotificationDaemonAvailable } from './notification-daemon-probe'
 
 const NOTIFICATION_COOLDOWN_MS = 5000
 const MAX_NOTIFICATION_SOUND_BYTES = 10 * 1024 * 1024
@@ -82,6 +83,13 @@ export function registerNotificationHandlers(store: Store, runtime?: OrcaRuntime
       }
 
       if (!Notification.isSupported()) {
+        return { delivered: false, reason: 'not-supported' }
+      }
+      // Why: on Linux, `isSupported()` only checks for libnotify — not for a
+      // live DBus notification daemon. Without this gate, a headless session
+      // hangs the main thread ~120s on every dispatch while libnotify waits
+      // for DBus service activation that will never succeed.
+      if (!isNotificationDaemonAvailable()) {
         return { delivered: false, reason: 'not-supported' }
       }
 

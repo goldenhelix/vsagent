@@ -40,6 +40,16 @@ const {
   }
 })
 
+// Why: the dispatch handler now gates on a DBus probe to avoid the
+// libnotify→DBus 120s freeze on headless Linux. In unit tests the probe
+// would return false on a CI runner without a notification daemon and
+// cause every "delivered: true" assertion to fail; mock it to "available"
+// here. The probe itself has its own test surface.
+vi.mock('./notification-daemon-probe', () => ({
+  isNotificationDaemonAvailable: () => true,
+  _resetNotificationDaemonProbeForTests: () => {}
+}))
+
 vi.mock('electron', () => ({
   ipcMain: {
     removeHandler: removeHandlerMock,
