@@ -55,7 +55,7 @@ export function BrowserUseSkillStep({
           <span>
             {skillInstalled
               ? 'Marked as installed on this machine.'
-              : "Check off once you've run it in your project."}
+              : "Check off once you've run it on this computer."}
           </span>
           <button
             type="button"

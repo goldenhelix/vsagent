@@ -1,8 +1,26 @@
 import React, { useState } from 'react'
-import { ExternalLink, FolderPlus, Github, MessageSquareText, Settings } from 'lucide-react'
+import {
+  BookOpen,
+  Boxes,
+  CircleHelp,
+  ExternalLink,
+  FolderPlus,
+  Github,
+  HardDrive,
+  MessageSquareText,
+  School,
+  Settings,
+  Smartphone
+} from 'lucide-react'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -15,10 +33,15 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { GitHubViewer } from '../../../../shared/types'
 import { isWebMode } from '@/lib/runtime-flavor'
+import { showOnboardingFromRenderer } from '../onboarding/show-onboarding-event'
 
 const GITHUB_ISSUES_URL = 'https://github.com/stablyai/orca/issues/'
 const DISCORD_URL = 'https://discord.gg/fzjDKHxv8Q'
 const X_URL = 'https://x.com/orca_build'
+const DOCS_URL = 'https://www.onorca.dev/docs'
+// Why: the sidebar resize handle intentionally keeps a wide right-edge hit
+// target, but the bottom Settings action should remain clickable over it.
+const SETTINGS_ACTION_HIT_TARGET_CLASS = 'relative z-20'
 
 type SubmitIdentity = {
   githubLogin: string | null
@@ -234,7 +257,25 @@ function FeedbackDialog({
 const SidebarToolbar = React.memo(function SidebarToolbar() {
   const openModal = useAppStore((s) => s.openModal)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
+  const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
+  const openSkillsPage = useAppStore((s) => s.openSkillsPage)
+  const openSpacePage = useAppStore((s) => s.openSpacePage)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const lastShowOnboardingAtRef = React.useRef(0)
+
+  const handleShowOnboarding = (): void => {
+    const now = Date.now()
+    if (now - lastShowOnboardingAtRef.current < 500) {
+      return
+    }
+    lastShowOnboardingAtRef.current = now
+    void showOnboardingFromRenderer()
+  }
+
+  const openMobileSettings = (): void => {
+    openSettingsTarget({ pane: 'mobile', repoId: null })
+    openSettingsPage()
+  }
 
   return (
     <div className="mt-auto shrink-0">
@@ -257,29 +298,86 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
         </Tooltip>
         <div className="flex items-center gap-1">
           {!isWebMode() && (
+            <DropdownMenu modal={false}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      type="button"
+                      aria-label="Toolbox"
+                      className="text-muted-foreground"
+                    >
+                      <Boxes className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={4}>
+                  Toolbox
+                </TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-44">
+                <DropdownMenuItem onSelect={openMobileSettings}>
+                  <Smartphone className="size-3.5" />
+                  Orca Mobile
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={openSkillsPage}>
+                  <BookOpen className="size-3.5" />
+                  Skills
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={openSpacePage}>
+                  <HardDrive className="size-3.5" />
+                  Space Analyzer
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <DropdownMenu modal={false}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => setFeedbackOpen(true)}
-                  className="text-muted-foreground"
-                >
-                  <MessageSquareText className="size-3.5" />
-                </Button>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    type="button"
+                    aria-label="Help"
+                    className="text-muted-foreground"
+                  >
+                    <CircleHelp className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={4}>
-                Send feedback
+                Help
               </TooltipContent>
             </Tooltip>
-          )}
+            <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48">
+              <DropdownMenuItem
+                className="whitespace-nowrap"
+                onClick={handleShowOnboarding}
+                onSelect={handleShowOnboarding}
+              >
+                <School className="size-3.5" />
+                Show Onboarding
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setFeedbackOpen(true)}>
+                <MessageSquareText className="size-3.5" />
+                Send feedback
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openExternalUrl(DOCS_URL)}>
+                <ExternalLink className="size-3.5" />
+                Docs
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon-xs"
                 onClick={openSettingsPage}
-                className="text-muted-foreground"
+                className={`${SETTINGS_ACTION_HIT_TARGET_CLASS} text-muted-foreground`}
               >
                 <Settings className="size-3.5" />
               </Button>

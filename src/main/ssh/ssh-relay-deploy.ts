@@ -5,7 +5,6 @@ import { join } from 'path'
    sequence and the GC's live-socket invariant. */
 import { existsSync } from 'fs'
 import { app } from 'electron'
-import { createHash } from 'crypto'
 import type { SshConnection } from './ssh-connection'
 import { parseUnameToRelayPlatform, type RelayPlatform } from './relay-protocol'
 import type { MultiplexerTransport } from './ssh-channel-multiplexer'
@@ -25,6 +24,12 @@ import {
   gcOldRelayVersions
 } from './ssh-relay-versioned-install'
 import { shellEscape } from './ssh-connection-utils'
+import { relaySocketNameForInstanceId } from './ssh-relay-instance-id'
+import {
+  DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS,
+  MAX_SSH_RELAY_GRACE_PERIOD_SECONDS,
+  MIN_SSH_RELAY_GRACE_PERIOD_SECONDS
+} from '../../shared/ssh-types'
 
 export type RelayDeployResult = {
   transport: MultiplexerTransport
@@ -185,7 +190,7 @@ async function uploadRelay(
   const localRelayDir = getLocalRelayPath(platform)
   if (!localRelayDir || !existsSync(localRelayDir)) {
     throw new Error(
-      `Relay package for ${platform} not found at ${localRelayDir}. ` +
+      `Relay package for ${platform} not found. Searched: ${getLocalRelayCandidates(platform).join(', ')}. ` +
         `This may be a packaging issue — try reinstalling Orca.`
     )
   }
@@ -193,14 +198,7 @@ async function uploadRelay(
   // Create remote directory
   await execCommand(conn, `mkdir -p ${shellEscape(remoteDir)}`)
 
-  // Upload via SFTP
-  const sftp = await conn.sftp()
-
-  try {
-    await uploadDirectory(sftp, localRelayDir, remoteDir)
-  } finally {
-    sftp.end()
-  }
+  await uploadDirectoryForConnection(conn, localRelayDir, remoteDir)
 
   // Make the node binary executable
   await execCommand(conn, `chmod +x ${shellEscape(`${remoteDir}/node`)} 2>/dev/null; true`)
@@ -208,20 +206,57 @@ async function uploadRelay(
   // Why: write `.version` via SFTP rather than shell to avoid quoting issues
   // with content-hashed version strings. The remote daemon reads this same
   // file on startup so the wire-handshake validates against it.
-  const versionSftp = await conn.sftp()
+  await writeRemoteFile(conn, `${remoteDir}/.version`, fullVersion)
+}
+
+async function uploadDirectoryForConnection(
+  conn: SshConnection,
+  localRelayDir: string,
+  remoteDir: string
+): Promise<void> {
+  if (typeof conn.uploadDirectory === 'function') {
+    await conn.uploadDirectory(localRelayDir, remoteDir)
+    return
+  }
+
+  const sftp = await conn.sftp()
   try {
-    await new Promise<void>((resolve, reject) => {
-      const ws = versionSftp.createWriteStream(`${remoteDir}/.version`)
-      ws.on('close', resolve)
-      ws.on('error', reject)
-      ws.end(fullVersion)
-    })
+    await uploadDirectory(sftp, localRelayDir, remoteDir)
   } finally {
-    versionSftp.end()
+    sftp.end()
   }
 }
 
-const RELAY_NATIVE_DEPS = ['node-pty', '@parcel/watcher'] as const
+async function writeRemoteFile(
+  conn: SshConnection,
+  remotePath: string,
+  contents: string
+): Promise<void> {
+  if (typeof conn.writeFile === 'function') {
+    await conn.writeFile(remotePath, contents)
+    return
+  }
+
+  const sftp = await conn.sftp()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const ws = sftp.createWriteStream(remotePath)
+      // .once: a session 'error' arriving after we've already resolved/rejected
+      // would otherwise become an unhandled error and crash main.
+      sftp.once('error', reject)
+      ws.once('close', resolve)
+      ws.once('error', reject)
+      ws.end(contents)
+    })
+  } finally {
+    sftp.end()
+  }
+}
+
+const RELAY_NATIVE_DEPS = {
+  'node-pty': '1.1.0',
+  '@parcel/watcher': '2.5.6'
+} as const
 
 async function hasRequiredNativeDeps(conn: SshConnection, remoteDir: string): Promise<boolean> {
   const nodePath = await resolveRemoteNodePath(conn)
@@ -298,28 +333,17 @@ async function installNativeDeps(
     version: '1.0.0',
     private: true,
     type: 'commonjs',
-    dependencies: Object.fromEntries(RELAY_NATIVE_DEPS.map((name) => [name, '*']))
+    dependencies: RELAY_NATIVE_DEPS
   })}\n`
-  const sftpPkg = await conn.sftp()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const ws = sftpPkg.createWriteStream(`${remoteDir}/package.json`)
-      // .once: a session 'error' arriving after we've already resolved/rejected
-      // would otherwise become an unhandled error and crash main.
-      sftpPkg.once('error', reject)
-      ws.once('close', resolve)
-      ws.once('error', reject)
-      ws.end(pkgJson)
-    })
-  } finally {
-    sftpPkg.end()
-  }
+  await writeRemoteFile(conn, `${remoteDir}/package.json`, pkgJson)
 
   try {
-    const installArgs = RELAY_NATIVE_DEPS.map((dep) => shellEscape(dep)).join(' ')
+    const installArgs = Object.entries(RELAY_NATIVE_DEPS)
+      .map(([dep, version]) => shellEscape(`${dep}@${version}`))
+      .join(' ')
     await execCommand(
       conn,
-      `export PATH=${escapedBinDir}:$PATH && cd ${escapedDir} && npm install ${installArgs} 2>&1`
+      `export PATH=${escapedBinDir}:$PATH && cd ${escapedDir} && npm install --omit=dev --no-audit --no-fund ${installArgs} 2>&1`
     )
   } catch (err) {
     // Don't write .install-complete on hard fail; reconnect retries on a
@@ -364,26 +388,34 @@ async function installNativeDeps(
 }
 
 function getLocalRelayPath(platform: RelayPlatform): string | null {
-  if (process.env.ORCA_RELAY_PATH) {
-    const override = join(process.env.ORCA_RELAY_PATH, platform)
-    if (existsSync(override)) {
-      return override
+  for (const candidate of getLocalRelayCandidates(platform)) {
+    if (existsSync(candidate)) {
+      return candidate
     }
   }
-
-  // Production: bundled alongside the app
-  const prodPath = join(app.getAppPath(), 'resources', 'relay', platform)
-  if (existsSync(prodPath)) {
-    return prodPath
-  }
-
-  // Development: built by `pnpm build:relay` into out/relay/{platform}/
-  const devPath = join(app.getAppPath(), 'out', 'relay', platform)
-  if (existsSync(devPath)) {
-    return devPath
-  }
-
   return null
+}
+
+export function getLocalRelayCandidates(platform: RelayPlatform): string[] {
+  const candidates: string[] = []
+  if (process.env.ORCA_RELAY_PATH) {
+    candidates.push(join(process.env.ORCA_RELAY_PATH, platform))
+  }
+
+  // Why: electron-builder copies extraResources next to the app bundle, while
+  // app.getAppPath() points at app.asar in packaged builds.
+  if (process.resourcesPath) {
+    candidates.push(join(process.resourcesPath, 'relay', platform))
+    candidates.push(join(process.resourcesPath, 'app.asar.unpacked', 'out', 'relay', platform))
+  }
+
+  const appPath = app.getAppPath()
+  candidates.push(
+    join(appPath, 'resources', 'relay', platform),
+    join(appPath, 'out', 'relay', platform)
+  )
+
+  return [...new Set(candidates)]
 }
 
 async function launchRelay(
@@ -400,15 +432,20 @@ async function launchRelay(
   const nodePath = await resolveRemoteNodePath(conn)
   // Why: graceTimeSeconds originates from user-editable SshTarget config.
   // Clamping to integer prevents shell injection if the type ever loosened.
-  const graceTime = Math.max(60, Math.min(3600, Math.floor(graceTimeSeconds ?? 300)))
+  const requestedGraceTime = Math.floor(graceTimeSeconds ?? DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS)
+  const graceTime =
+    requestedGraceTime === 0
+      ? 0
+      : Math.max(
+          MIN_SSH_RELAY_GRACE_PERIOD_SECONDS,
+          Math.min(MAX_SSH_RELAY_GRACE_PERIOD_SECONDS, requestedGraceTime)
+        )
   const escapedDir = shellEscape(remoteDir)
   const escapedNode = shellEscape(nodePath)
   // Why: remoteRelayDir is shared by every Orca target for the same remote
   // account. Hashing the target ID into the socket name prevents one target
   // from attaching to another target's live relay.
-  const sockName = relayInstanceId
-    ? `relay-${hashRelayInstanceId(relayInstanceId)}.sock`
-    : 'relay.sock'
+  const sockName = relaySocketNameForInstanceId(relayInstanceId)
   const sockFile = `${remoteDir}/${sockName}`
 
   // Why: after an app restart a relay may still be running in its grace
@@ -519,8 +556,4 @@ async function launchRelay(
     `cd ${escapedDir} && ${escapedNode} relay.js --connect --sock-path ${shellEscape(sockFile)}`
   )
   return waitForSentinel(channel)
-}
-
-function hashRelayInstanceId(relayInstanceId: string): string {
-  return createHash('sha256').update(relayInstanceId).digest('hex').slice(0, 16)
 }

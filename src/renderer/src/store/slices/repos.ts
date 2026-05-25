@@ -1,34 +1,51 @@
+/* eslint-disable max-lines -- Why: repo slice owns local/runtime routing,
+add/remove/reorder side effects, and cross-slice teardown. Splitting it during
+the client-server refactor would obscure the invariants this file is currently
+auditing and preserving. */
 import type { StateCreator } from 'zustand'
 import { toast } from 'sonner'
 import type { AppState } from '../types'
 import type { Repo } from '../../../../shared/types'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import { getRepoIdFromWorktreeId } from './worktree-helpers'
+import { callRuntimeRpc, getActiveRuntimeTarget } from '../../runtime/runtime-rpc-client'
+import { buildDismissedOnboardingFolderAgentStartup } from '@/lib/onboarding-folder-agent-startup'
 
 const ERROR_TOAST_DURATION = 60_000
+
+type RepoUpdate = Partial<
+  Pick<
+    Repo,
+    | 'displayName'
+    | 'badgeColor'
+    | 'hookSettings'
+    | 'worktreeBaseRef'
+    | 'kind'
+    | 'symlinkPaths'
+    | 'issueSourcePreference'
+  >
+>
+
+const updateRepoChainsByStore = new WeakMap<() => AppState, Map<string, Promise<void>>>()
+
+function getRepoUpdateChains(get: () => AppState) {
+  let chains = updateRepoChainsByStore.get(get)
+  if (!chains) {
+    chains = new Map<string, Promise<void>>()
+    updateRepoChainsByStore.set(get, chains)
+  }
+  return chains
+}
 
 export type RepoSlice = {
   repos: Repo[]
   activeRepoId: string | null
   fetchRepos: () => Promise<void>
   addRepo: (suppliedPath?: string) => Promise<Repo | null>
+  addRepoPath: (path: string, kind?: 'git' | 'folder') => Promise<Repo | null>
   addNonGitFolder: (path: string) => Promise<Repo | null>
   removeRepo: (repoId: string) => Promise<void>
-  updateRepo: (
-    repoId: string,
-    updates: Partial<
-      Pick<
-        Repo,
-        | 'displayName'
-        | 'badgeColor'
-        | 'hookSettings'
-        | 'worktreeBaseRef'
-        | 'kind'
-        | 'symlinkPaths'
-        | 'issueSourcePreference'
-      >
-    >
-  ) => Promise<void>
+  updateRepo: (repoId: string, updates: RepoUpdate) => Promise<void>
   setActiveRepo: (repoId: string | null) => void
   reorderRepos: (orderedIds: string[]) => Promise<void>
 }
@@ -39,7 +56,21 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
   fetchRepos: async () => {
     try {
-      const repos = await window.api.repos.list()
+      const target = getActiveRuntimeTarget(get().settings)
+      const repos =
+        target.kind === 'local'
+          ? ((await window.api.repos.list()) as Repo[])
+          : (
+              await callRuntimeRpc<{ repos: Repo[] }>(
+                target,
+                'repo.list',
+                undefined,
+                // Why: remote environment fetches cross the network; keep the
+                // boot-time repo hydration bounded instead of inheriting an
+                // unbounded renderer promise.
+                { timeoutMs: 15_000 }
+              )
+            ).repos
       set((s) => {
         const validRepoIds = new Set(repos.map((repo) => repo.id))
         return {
@@ -53,34 +84,30 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
   },
 
-  addRepo: async (suppliedPath?: string) => {
+  addRepoPath: async (path, kind = 'git') => {
     try {
-      // Why: in web mode the Electron open-dialog isn't available. The
-      // picker dialog calls `addRepo(absolutePath)` directly once the user
-      // accepts; legacy callers (e.g. AddRepoDialog's Browse button) pass
-      // no argument and we open the picker modal instead.
-      const { isWebMode } = await import('@/lib/runtime-flavor')
-      let path: string | null = suppliedPath ?? null
-      if (!path) {
-        if (isWebMode()) {
-          get().openModal('remote-folder-picker', { mode: 'add-repo' })
-          return null
-        }
-        path = await window.api.repos.pickFolder()
-      }
-      if (!path) {
-        return null
-      }
+      const target = getActiveRuntimeTarget(get().settings)
       let repo: Repo
       try {
-        const result = await window.api.repos.add({ path })
-        if ('error' in result) {
-          throw new Error(result.error)
+        if (target.kind === 'local') {
+          const result = await window.api.repos.add({ path, kind })
+          if ('error' in result) {
+            throw new Error(result.error)
+          }
+          repo = result.repo
+        } else {
+          repo = (
+            await callRuntimeRpc<{ repo: Repo }>(
+              target,
+              'repo.add',
+              { path, kind },
+              { timeoutMs: 15_000 }
+            )
+          ).repo
         }
-        repo = result.repo
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        if (!message.includes('Not a valid git repository')) {
+        if (kind !== 'git' || !message.includes('Not a valid git repository')) {
           throw err
         }
         // Why: folder mode is a capability downgrade, not a silent fallback.
@@ -121,27 +148,39 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
   },
 
+  addRepo: async (suppliedPath?: string) => {
+    const target = getActiveRuntimeTarget(get().settings)
+    if (target.kind !== 'local' && !suppliedPath) {
+      // Why: OS folder pickers return client-local paths. Remote environments
+      // need an explicit server path, which the Add Project dialog handles.
+      toast.error('Use a server path to add projects from a remote runtime.')
+      return null
+    }
+    // Why: in web mode the Electron open-dialog isn't available. The
+    // picker dialog calls `addRepo(absolutePath)` directly once the user
+    // accepts; legacy callers (e.g. AddRepoDialog's Browse button) pass
+    // no argument and we open the picker modal instead.
+    let path: string | null = suppliedPath ?? null
+    if (!path) {
+      const { isWebMode } = await import('@/lib/runtime-flavor')
+      if (isWebMode()) {
+        get().openModal('remote-folder-picker', { mode: 'add-repo' })
+        return null
+      }
+      path = await window.api.repos.pickFolder()
+    }
+    if (!path) {
+      return null
+    }
+    return get().addRepoPath(path)
+  },
+
   addNonGitFolder: async (path) => {
     try {
-      const result = await window.api.repos.add({ path, kind: 'folder' })
-      if ('error' in result) {
-        throw new Error(result.error)
-      }
-      const repo = result.repo
-      const alreadyAdded = get().repos.some((r) => r.id === repo.id)
-      if (alreadyAdded) {
-        get().clearOrcaHookTrustForRepo(repo.id)
-      }
-      set((s) => {
-        if (s.repos.some((r) => r.id === repo.id)) {
-          return s
-        }
-        return { repos: [...s.repos, repo] }
-      })
-      if (alreadyAdded) {
-        toast.info('Project already added', { description: repo.displayName })
-      } else {
-        toast.success('Folder added', { description: repo.displayName })
+      const hadProjectBeforeAdd = get().repos.length > 0
+      const repo = await get().addRepoPath(path, 'folder')
+      if (!repo) {
+        return null
       }
       // Why: without focusing the new folder, the UI looks unchanged after
       // the dialog closes and users think nothing happened. Fetch the
@@ -153,7 +192,16 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       const folderWorktree = get().worktreesByRepo[repo.id]?.[0]
       if (folderWorktree) {
         const { activateAndRevealWorktree } = await import('../../lib/worktree-activation')
-        activateAndRevealWorktree(folderWorktree.id)
+        const onboarding = await window.api.onboarding.get().catch(() => null)
+        // Why: a new user can dismiss the wizard, then immediately add their
+        // first folder from Landing. That path skips onboarding's completeRepo
+        // hook, so carry the selected default agent into the first terminal here.
+        const startup = buildDismissedOnboardingFolderAgentStartup(
+          get().settings,
+          onboarding,
+          hadProjectBeforeAdd
+        )
+        activateAndRevealWorktree(folderWorktree.id, startup ? { startup } : undefined)
       }
       return repo
     } catch (err) {
@@ -166,21 +214,37 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
   removeRepo: async (repoId) => {
     try {
-      await window.api.repos.remove({ repoId })
+      const target = getActiveRuntimeTarget(get().settings)
+      await (target.kind === 'local'
+        ? window.api.repos.remove({ repoId })
+        : callRuntimeRpc(target, 'repo.rm', { repo: repoId }, { timeoutMs: 15_000 }))
 
       get().clearOrcaHookTrustForRepo(repoId)
+      const repoPath = get().repos.find((repo) => repo.id === repoId)?.path
+      get().evictGitHubRepoCaches(repoId, repoPath)
+      const { clearRepoSlugCacheEntry } = await import('../../lib/repo-slug-index')
+      clearRepoSlugCacheEntry(repoId)
 
       // Kill PTYs for all worktrees belonging to this repo
       const worktreeIds = (get().worktreesByRepo[repoId] ?? []).map((w) => w.id)
       const killedTabIds = new Set<string>()
       const killedPtyIds = new Set<string>()
+      if (target.kind === 'environment') {
+        await Promise.allSettled(
+          worktreeIds.map((worktreeId) =>
+            callRuntimeRpc(target, 'terminal.stop', { worktree: worktreeId }, { timeoutMs: 15_000 })
+          )
+        )
+      }
       for (const wId of worktreeIds) {
         const tabs = get().tabsByWorktree[wId] ?? []
         for (const tab of tabs) {
           killedTabIds.add(tab.id)
           for (const ptyId of get().ptyIdsByTabId[tab.id] ?? []) {
             killedPtyIds.add(ptyId)
-            window.api.pty.kill(ptyId)
+            if (!ptyId.startsWith('remote:')) {
+              window.api.pty.kill(ptyId)
+            }
           }
         }
       }
@@ -270,14 +334,34 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
   },
 
   updateRepo: async (repoId, updates) => {
-    try {
-      await window.api.repos.update({ repoId, updates })
-      set((s) => ({
-        repos: s.repos.map((r) => (r.id === repoId ? { ...r, ...updates } : r))
-      }))
-    } catch (err) {
-      console.error('Failed to update repo:', err)
+    const updateRepoChains = getRepoUpdateChains(get)
+    const applyRepoUpdate = async () => {
+      try {
+        const target = getActiveRuntimeTarget(get().settings)
+        await (target.kind === 'local'
+          ? window.api.repos.update({ repoId, updates })
+          : callRuntimeRpc(target, 'repo.update', { repo: repoId, updates }, { timeoutMs: 15_000 }))
+        set((s) => ({
+          repos: s.repos.map((r) => (r.id === repoId ? { ...r, ...updates } : r))
+        }))
+      } catch (err) {
+        console.error('Failed to update repo:', err)
+      }
     }
+    const previous = updateRepoChains.get(repoId)
+    // Why: repo settings are persisted as full nested values. Preserve call
+    // order per repo so a slower IPC/RPC response cannot overwrite newer state.
+    const next = previous
+      ? previous.catch(() => undefined).then(applyRepoUpdate)
+      : applyRepoUpdate()
+    updateRepoChains.set(repoId, next)
+    const cleanup = () => {
+      if (updateRepoChains.get(repoId) === next) {
+        updateRepoChains.delete(repoId)
+      }
+    }
+    void next.then(cleanup, cleanup)
+    await next
   },
 
   setActiveRepo: (repoId) => set({ activeRepoId: repoId }),
@@ -300,7 +384,16 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
     set({ repos: next })
     try {
-      const result = await window.api.repos.reorder({ orderedIds })
+      const target = getActiveRuntimeTarget(get().settings)
+      const result =
+        target.kind === 'local'
+          ? await window.api.repos.reorder({ orderedIds })
+          : await callRuntimeRpc<{ status: 'applied' | 'rejected' }>(
+              target,
+              'repo.reorder',
+              { orderedIds },
+              { timeoutMs: 15_000 }
+            )
       if (result.status === 'rejected') {
         await get().fetchRepos()
       }

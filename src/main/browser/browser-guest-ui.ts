@@ -8,8 +8,10 @@ import {
   isWindowShortcutModifierChord,
   resolveWindowShortcutAction
 } from '../../shared/window-shortcut-policy'
+import { readGuestNavigationState } from './browser-guest-navigation-state'
 
 type ResolveRenderer = (browserTabId: string) => Electron.WebContents | null
+type ShouldForwardDictationShortcut = () => boolean
 
 function isTerminalTabSwitchChord(input: Electron.Input): boolean {
   return (
@@ -19,6 +21,14 @@ function isTerminalTabSwitchChord(input: Electron.Input): boolean {
     !input.shift &&
     (input.code === 'PageDown' || input.code === 'PageUp')
   )
+}
+
+function isCtrlTabSwitchKey(input: Electron.Input): boolean {
+  return input.code === 'Tab' && input.control && !input.meta && !input.alt
+}
+
+function isControlKeyRelease(input: Electron.Input): boolean {
+  return input.type === 'keyUp' && (input.code === 'ControlLeft' || input.code === 'ControlRight')
 }
 
 export function setupGuestContextMenu(args: {
@@ -50,6 +60,7 @@ export function setupGuestContextMenu(args: {
     // immune to guest/renderer coordinate space mismatches) and fall back to
     // guest coords if the screen API is unavailable.
     const cursor = screen.getCursorScreenPoint()
+    const navigationState = readGuestNavigationState(guest)
     renderer.send('browser:context-menu-requested', {
       browserPageId: browserTabId,
       x: params.x,
@@ -58,8 +69,7 @@ export function setupGuestContextMenu(args: {
       screenY: cursor.y,
       pageUrl,
       linkUrl,
-      canGoBack: guest.canGoBack(),
-      canGoForward: guest.canGoForward()
+      ...navigationState
     })
   }
 
@@ -217,9 +227,29 @@ export function setupGuestShortcutForwarding(args: {
   browserTabId: string
   guest: Electron.WebContents
   resolveRenderer: ResolveRenderer
+  shouldForwardDictationShortcut?: ShouldForwardDictationShortcut
 }): () => void {
-  const { browserTabId, guest, resolveRenderer } = args
+  const { browserTabId, guest, resolveRenderer, shouldForwardDictationShortcut } = args
+  let ctrlTabSwitching = false
   const handler = (event: Electron.Event, input: Electron.Input): void => {
+    if (isCtrlTabSwitchKey(input)) {
+      event.preventDefault()
+      if (input.type === 'keyDown') {
+        ctrlTabSwitching = true
+        const renderer = resolveRenderer(browserTabId)
+        renderer?.send('ui:ctrlTabKeyDown', { shiftKey: input.shift === true })
+      }
+      return
+    }
+
+    if (ctrlTabSwitching && isControlKeyRelease(input)) {
+      event.preventDefault()
+      ctrlTabSwitching = false
+      const renderer = resolveRenderer(browserTabId)
+      renderer?.send('ui:ctrlTabKeyUp')
+      return
+    }
+
     if (input.type !== 'keyDown') {
       return
     }
@@ -229,6 +259,12 @@ export function setupGuestShortcutForwarding(args: {
     // which rejects Alt. Every other chord handled further down can reuse
     // the same `action` rather than re-running the full predicate chain.
     const action = resolveWindowShortcutAction(input, process.platform)
+    if (input.isAutoRepeat) {
+      if (action?.type === 'dictationKeyDown' && shouldForwardDictationShortcut?.()) {
+        event.preventDefault()
+      }
+      return
+    }
     if (action?.type === 'worktreeHistoryNavigate') {
       // Why: preventDefault unconditionally — if we cannot resolve the
       // renderer (torn-down tab or teardown race), dropping the keystroke
@@ -330,6 +366,11 @@ export function setupGuestShortcutForwarding(args: {
       renderer.send('ui:openNewWorkspace')
     } else if (action?.type === 'jumpToWorktreeIndex') {
       renderer.send('ui:jumpToWorktreeIndex', action.index)
+    } else if (action?.type === 'dictationKeyDown') {
+      if (!shouldForwardDictationShortcut?.()) {
+        return
+      }
+      renderer.send('ui:dictationKeyDown')
     } else {
       return
     }

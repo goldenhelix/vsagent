@@ -9,6 +9,9 @@
     "../src/main/ipc/worktree-logic.ts",
     "../src/main/wsl.ts"
   ],
+  "exclude": [
+    "../src/renderer/src/web/**"
+  ],
   "compilerOptions": {
     "baseUrl": null,
     "paths": {
