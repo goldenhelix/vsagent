@@ -49,7 +49,9 @@ class IpcRendererShim {
   }
 
   private setState(s: ConnectionState): void {
-    if (this.currentState === s) return
+    if (this.currentState === s) {
+      return
+    }
     this.currentState = s
     for (const fn of this.connectionListeners) {
       try {
@@ -149,9 +151,13 @@ class IpcRendererShim {
       p?.reject(new Error(msg.error))
     } else if (msg.kind === 'event') {
       const set = this.listenersByChannel.get(msg.channel)
-      if (!set) return
+      if (!set) {
+        return
+      }
+      // Why: snapshot the set with Array.from so a listener that
+      // unsubscribes itself during iteration doesn't perturb the loop.
       const event = { sender: null }
-      for (const listener of [...set]) {
+      for (const listener of Array.from(set)) {
         try {
           listener(event, ...msg.args)
         } catch (e) {
@@ -186,7 +192,9 @@ class IpcRendererShim {
 
   removeListener(channel: string, listener: Listener): this {
     const set = this.listenersByChannel.get(channel)
-    if (!set) return this
+    if (!set) {
+      return this
+    }
     set.delete(listener)
     if (set.size === 0) {
       this.listenersByChannel.delete(channel)

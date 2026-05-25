@@ -16,7 +16,9 @@ let eventBroadcaster: EventBroadcaster | null = null
 let installed = false
 
 export function installIpcIntercept(): void {
-  if (installed) return
+  if (installed) {
+    return
+  }
   installed = true
   // Why: Object.defineProperty rather than `ipcMain.handle = wrapped`. On
   // Electron 41, direct reassignment of ipcMain methods at the top of
@@ -100,7 +102,9 @@ export function patchWebContentsSend(): void {
     send: (channel: string, ...args: unknown[]) => void
     __orca_send_patched?: boolean
   }
-  if (proto.__orca_send_patched) return
+  if (proto.__orca_send_patched) {
+    return
+  }
   const realSend = proto.send
   proto.send = function patchedSend(channel: string, ...args: unknown[]): void {
     if (eventBroadcaster) {
@@ -161,11 +165,7 @@ export async function dispatchInvoke(
   return await handler(event as unknown as IpcMainInvokeEvent, ...args)
 }
 
-export function dispatchSend(
-  channel: string,
-  sender: WebContents | null,
-  args: unknown[]
-): void {
+export function dispatchSend(channel: string, sender: WebContents | null, args: unknown[]): void {
   const handlers = sendRegistry.get(channel)
   if (!handlers || handlers.size === 0) {
     return

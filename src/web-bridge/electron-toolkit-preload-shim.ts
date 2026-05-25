@@ -57,8 +57,12 @@ export const electronAPI = {
   process: {
     get platform(): string {
       const ua = navigator.userAgent
-      if (ua.includes('Mac')) return 'darwin'
-      if (ua.includes('Windows')) return 'win32'
+      if (ua.includes('Mac')) {
+        return 'darwin'
+      }
+      if (ua.includes('Windows')) {
+        return 'win32'
+      }
       return 'linux'
     },
     versions: {} as Record<string, string | undefined>,

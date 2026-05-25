@@ -55,10 +55,7 @@ export function RemoteFolderPicker({
   // uses, parameterised with a local browseDir). Selecting a folder there
   // returns to inline mode with the path pre-filled.
   const [browsing, setBrowsing] = useState(false)
-  const localBrowseDir = useCallback(
-    (dirPath: string) => window.api.fs.browseDir({ dirPath }),
-    []
-  )
+  const localBrowseDir = useCallback((dirPath: string) => window.api.fs.browseDir({ dirPath }), [])
   // Why: -1 means "no keyboard selection". Only ArrowKeys promote this above
   // -1. Mouse hover styles `.hover:bg-muted` on the suggestion row but does
   // NOT change activeIdx — that way Enter on the input never accidentally
@@ -120,7 +117,7 @@ export function RemoteFolderPicker({
       // lists that folder's contents.
       const trailingSlash = value.endsWith('/')
       const base = trailingSlash ? value : value.slice(0, value.lastIndexOf('/') + 1)
-      const next = base + suggestion + '/'
+      const next = `${base + suggestion}/`
       setValue(next)
       setActiveIdx(-1)
       inputRef.current?.focus()
@@ -138,7 +135,9 @@ export function RemoteFolderPicker({
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         const max = result?.suggestions.length ?? 0
-        if (max > 0) setActiveIdx((idx) => Math.min(max - 1, idx + 1))
+        if (max > 0) {
+          setActiveIdx((idx) => Math.min(max - 1, idx + 1))
+        }
         return
       }
       if (e.key === 'ArrowUp') {
@@ -148,7 +147,7 @@ export function RemoteFolderPicker({
       }
       if (e.key === 'Tab' && result && result.suggestions.length > 0) {
         e.preventDefault()
-        const idx = activeIdx >= 0 ? activeIdx : 0
+        const idx = Math.max(activeIdx, 0)
         drillInto(result.suggestions[idx])
         return
       }

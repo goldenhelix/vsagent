@@ -51,9 +51,10 @@ function autosaveDebug(): boolean {
   }
 }
 function autosaveLog(...args: unknown[]): void {
-  if (autosaveDebug()) console.log('[autosave]', ...args)
+  if (autosaveDebug()) {
+    console.log('[autosave]', ...args)
+  }
 }
-
 
 export function attachEditorAutosaveController(store: AppStoreApi): () => void {
   const autoSaveTimers = new Map<string, number>()
@@ -208,7 +209,9 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
     }
 
     if (!state.settings?.editorAutoSave) {
-      if (autosaveDebug()) autosaveLog('sync: autoSave setting off, hasSettings=' + Boolean(state.settings))
+      if (autosaveDebug()) {
+        autosaveLog(`sync: autoSave setting off, hasSettings=${Boolean(state.settings)}`)
+      }
       return
     }
 
@@ -235,7 +238,11 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
 
       clearAutoSaveTimer(file.id)
       autoSaveScheduledContent.set(file.id, draft)
-      autosaveLog('schedule timer', { fileId: file.id, delayMs: autoSaveDelayMs, draftLen: draft.length })
+      autosaveLog('schedule timer', {
+        fileId: file.id,
+        delayMs: autoSaveDelayMs,
+        draftLen: draft.length
+      })
       const timerId = window.setTimeout(() => {
         autoSaveTimers.delete(file.id)
         autoSaveScheduledContent.delete(file.id)

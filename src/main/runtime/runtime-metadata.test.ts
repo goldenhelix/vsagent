@@ -190,7 +190,7 @@ describe('runtime metadata', () => {
 
       for (const path of [
         join(userDataPath, 'orca-devices.json'),
-        join(userDataPath, 'orca-e2ee-keypair.json'),
+        join(userDataPath, 'vsagent-e2ee-keypair.json'),
         getEnvironmentStorePath(userDataPath)
       ]) {
         expect(statSync(path).mode & 0o777).toBe(0o600)
@@ -218,7 +218,7 @@ describe('runtime metadata', () => {
       })
 
       const devicesPath = join(userDataPath, 'orca-devices.json')
-      const keypairPath = join(userDataPath, 'orca-e2ee-keypair.json')
+      const keypairPath = join(userDataPath, 'vsagent-e2ee-keypair.json')
       const environmentsPath = getEnvironmentStorePath(userDataPath)
       writeFileSync(
         devicesPath,

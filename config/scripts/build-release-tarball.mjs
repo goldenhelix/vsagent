@@ -61,7 +61,7 @@ function resolveVersion() {
   // to package.json + a `git describe` suffix so dev builds are uniquely
   // named.
   const fromEnv = process.env.RELEASE_VERSION?.trim()
-  if (fromEnv) return fromEnv.replace(/^v/, '')
+  if (fromEnv) {return fromEnv.replace(/^v/, '')}
 
   const base = pkg.version || '0.0.0'
   try {
@@ -71,7 +71,7 @@ function resolveVersion() {
     })
     if (desc.status === 0) {
       const trimmed = desc.stdout.trim()
-      if (trimmed && !trimmed.startsWith('v' + base) && !trimmed.startsWith(base)) {
+      if (trimmed && !trimmed.startsWith(`v${  base}`) && !trimmed.startsWith(base)) {
         return `${base}+${trimmed}`
       }
       return trimmed.replace(/^v/, '') || base
@@ -119,7 +119,7 @@ function stagePath(rel, opts = {}) {
   const src = path.join(repoRoot, rel)
   const dst = path.join(stageDir, rel)
   if (!existsSync(src)) {
-    if (opts.optional) return false
+    if (opts.optional) {return false}
     console.error(`[release-tarball] missing required source path: ${rel}`)
     process.exit(1)
   }
@@ -132,7 +132,7 @@ function stageFile(rel, opts = {}) {
   const src = path.join(repoRoot, rel)
   const dst = path.join(stageDir, rel)
   if (!existsSync(src)) {
-    if (opts.optional) return false
+    if (opts.optional) {return false}
     console.error(`[release-tarball] missing required source file: ${rel}`)
     process.exit(1)
   }
@@ -201,7 +201,7 @@ const stagedPkg = {
 }
 writeFileSync(
   path.join(stageDir, 'package.json'),
-  JSON.stringify(stagedPkg, null, 2) + '\n',
+  `${JSON.stringify(stagedPkg, null, 2)  }\n`,
   'utf8'
 )
 
@@ -248,5 +248,5 @@ if (process.env.GITHUB_OUTPUT) {
     `tarball_sha256=${sha256}`,
     `tarball_version=${version}`
   ]
-  writeFileSync(process.env.GITHUB_OUTPUT, lines.join('\n') + '\n', { flag: 'a' })
+  writeFileSync(process.env.GITHUB_OUTPUT, `${lines.join('\n')  }\n`, { flag: 'a' })
 }

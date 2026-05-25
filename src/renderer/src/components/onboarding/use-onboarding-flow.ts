@@ -8,10 +8,10 @@ import { applyDocumentTheme } from '@/lib/document-theme'
 import { track } from '@/lib/telemetry'
 import { buildAgentPickedPayload } from './agent-picked-payload'
 import { ONBOARDING_FINAL_STEP } from '../../../../shared/constants'
+import type { FeatureWallTourDepthSummary } from '../../../../shared/feature-wall-tour-depth'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import type { EventProps } from '../../../../shared/telemetry-events'
 import type { GlobalSettings, OnboardingState, Repo, TuiAgent } from '../../../../shared/types'
-import type { NotificationDraft } from './NotificationStep'
 import {
   DEFAULT_ONBOARDING_FEATURE_SETUP_SELECTION,
   ONBOARDING_FEATURE_SETUP_IDS,
@@ -20,6 +20,14 @@ import {
   type OnboardingFeatureSetupSelection
 } from './onboarding-feature-setup'
 import { STEPS, type StepNumber } from './use-onboarding-flow-types'
+import {
+  createOnboardingTourOutcomeTracker,
+  markOnboardingTourIntroReached,
+  markOnboardingTourStarted,
+  recordOnboardingTourDepthSummary,
+  resolveOnboardingTourOutcome,
+  resolvePendingOnboardingTourOutcome
+} from './onboarding-tour-outcome-tracker'
 import { persistStep, useCloseWith, usePersistCurrentStep } from './use-onboarding-flow-persistence'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { buildOnboardingFolderAgentStartup } from '@/lib/onboarding-folder-agent-startup'
@@ -80,6 +88,9 @@ export function useOnboardingFlow(
   const preflightStatusLoading = useAppStore((s) => s.preflightStatusLoading)
   const linearStatus = useAppStore((s) => s.linearStatus)
   const linearStatusChecked = useAppStore((s) => s.linearStatusChecked)
+  // Why: App hydrates repos before mounting onboarding. Reading the store
+  // synchronously lets the final step render its already-added state without a flash.
+  const repos = useAppStore((s) => s.repos)
 
   const initialStep = Math.min(Math.max(onboarding.lastCompletedStep, 0), STEPS.length - 1)
   const [stepIndex, setStepIndex] = useState(initialStep)
@@ -91,15 +102,6 @@ export function useOnboardingFlow(
   // Why: hydrate theme from saved settings instead of hardcoding 'dark' so users
   // who already configured a theme see their choice preselected.
   const [theme, setTheme] = useState<GlobalSettings['theme']>(settings?.theme ?? 'dark')
-  // Why: wizard force-defaults every toggle on (ignoring stored settings) so
-  // first-run users land in the most attentive state and choose what to dial
-  // back. Positive framing ("Notify when focused") inverts back to the
-  // persisted `suppressWhenFocused` field at save time.
-  const [notifications, setNotifications] = useState<NotificationDraft>({
-    agentTaskComplete: true,
-    terminalBell: true,
-    notifyWhenFocused: true
-  })
   const [featureSetupSelection, setFeatureSetupSelection] =
     useState<OnboardingFeatureSetupSelection>(DEFAULT_ONBOARDING_FEATURE_SETUP_SELECTION)
   const [featureSetupTerminalCommand, setFeatureSetupTerminalCommand] = useState<string | null>(
@@ -112,8 +114,10 @@ export function useOnboardingFlow(
   const [cloneUrl, setCloneUrl] = useState('')
   const [serverPath, setServerPath] = useState('')
   const [cloneDestination, setCloneDestination] = useState('')
+  const [tourStarted, setTourStarted] = useState(false)
   const [busyLabel, setBusyLabel] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const tourOutcomeTrackerRef = useRef(createOnboardingTourOutcomeTracker())
 
   // Why: settings load async; the lazy useState initializers above run before
   // settings hydrates. Re-sync once when settings transitions to non-null,
@@ -192,6 +196,7 @@ export function useOnboardingFlow(
 
   const detectedSet = useMemo(() => new Set(detectedAgentIds ?? []), [detectedAgentIds])
   const currentStep = STEPS[stepIndex]
+  const hasExistingProject = repos.length > 0
 
   // Why: refs let `setSelectedAgentInteractive` (a stable useCallback) read
   // the freshest detection snapshot at click time without re-rebinding the
@@ -219,6 +224,21 @@ export function useOnboardingFlow(
   useEffect(() => {
     persistedThemeRef.current = settings?.theme ?? 'dark'
   }, [settings?.theme])
+  const themeStepEntryThemeRef = useRef<GlobalSettings['theme'] | null>(null)
+  const themeStepEntryCapturedRef = useRef(false)
+  useEffect(() => {
+    if (currentStep.id !== 'theme') {
+      themeStepEntryCapturedRef.current = false
+      return
+    }
+    if (!settings || themeStepEntryCapturedRef.current) {
+      return
+    }
+    // Why: theme tile clicks persist immediately for normal progression, but
+    // "Skip to project setup" should keep the preference the user arrived with.
+    themeStepEntryCapturedRef.current = true
+    themeStepEntryThemeRef.current = settings.theme
+  }, [currentStep.id, settings])
 
   // Apply preview when local theme changes.
   useEffect(() => {
@@ -243,12 +263,12 @@ export function useOnboardingFlow(
       return
     }
     startedTrackedRef.current = true
-    // Why: `resumed_from_step` is the step the user finished (1..3), not the
+    // Why: `resumed_from_step` is the step the user finished, not the
     // step we resume into.
     const lastCompleted = onboarding.lastCompletedStep
     track(
       'onboarding_started',
-      lastCompleted >= 1 && lastCompleted <= 3
+      lastCompleted >= 1 && lastCompleted < ONBOARDING_FINAL_STEP
         ? { resumed_from_step: lastCompleted as StepNumber }
         : {}
     )
@@ -263,12 +283,53 @@ export function useOnboardingFlow(
   const stepStartedAtRef = useRef<number>(Date.now())
   useEffect(() => {
     stepStartedAtRef.current = Date.now()
-    track('onboarding_step_viewed', { step: currentStep.stepNumber })
-  }, [currentStep.stepNumber])
+    track('onboarding_step_viewed', {
+      step: currentStep.stepNumber,
+      value_kind: currentStep.valueKind
+    })
+    if (currentStep.id === 'tour') {
+      markOnboardingTourIntroReached(tourOutcomeTrackerRef.current, stepStartedAtRef.current)
+    }
+  }, [currentStep.id, currentStep.stepNumber, currentStep.valueKind])
 
   const consumeStepDurationMs = useCallback((): number => {
     return Math.max(0, Date.now() - stepStartedAtRef.current)
   }, [])
+
+  const emitTourOutcome = useCallback(
+    (
+      outcome: EventProps<'onboarding_tour_outcome'>['outcome'],
+      advancedVia?: NonNullable<EventProps<'onboarding_tour_outcome'>['advanced_via']>
+    ): void => {
+      const payload = resolveOnboardingTourOutcome(
+        tourOutcomeTrackerRef.current,
+        outcome,
+        Date.now(),
+        advancedVia
+      )
+      if (payload) {
+        track('onboarding_tour_outcome', payload)
+      }
+    },
+    []
+  )
+
+  const emitPendingTourOutcome = useCallback((): void => {
+    const payload = resolvePendingOnboardingTourOutcome(tourOutcomeTrackerRef.current, Date.now())
+    if (payload) {
+      track('onboarding_tour_outcome', payload)
+    }
+  }, [])
+
+  const recordTourDepthSummary = useCallback((summary: FeatureWallTourDepthSummary): void => {
+    recordOnboardingTourDepthSummary(tourOutcomeTrackerRef.current, summary)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      emitPendingTourOutcome()
+    }
+  }, [emitPendingTourOutcome])
 
   const trackTaskSourcesSnapshot = useCallback(
     (
@@ -340,6 +401,7 @@ export function useOnboardingFlow(
       if (!closed) {
         return
       }
+      emitPendingTourOutcome()
       // Why: the repo step has no keyboard-vs-button advance — Cmd+Enter
       // routes to `openFolder()` which collapses both into the path-clicked
       // path. Emit `duration_ms` only; `advanced_via` is intentionally absent
@@ -350,21 +412,28 @@ export function useOnboardingFlow(
         duration_ms: consumeStepDurationMs()
       })
       if (isGit) {
-        openModal('new-workspace-composer', {
-          initialRepoId: repoId,
-          prefilledName: 'onboarding',
+        openModal('project-added', {
+          repoId,
+          defaultWorktreeName: 'orca-worktree-1',
           telemetrySource: 'onboarding'
         })
       }
     },
-    [closeWith, consumeStepDurationMs, fetchRepos, fetchWorktrees, openModal, settings]
+    [
+      closeWith,
+      consumeStepDurationMs,
+      emitPendingTourOutcome,
+      fetchRepos,
+      fetchWorktrees,
+      openModal,
+      settings
+    ]
   )
 
   const persistCurrentStep = usePersistCurrentStep({
     currentStepId: currentStep.id,
     selectedAgent,
     theme,
-    notifications,
     featureSetupSelection,
     settings,
     updateSettings,
@@ -396,30 +465,30 @@ export function useOnboardingFlow(
   // the first call's setStepIndex has run, advancing twice and skipping a
   // step. A ref flips synchronously so re-entries bail immediately.
   const nextInFlightRef = useRef(false)
-  const notificationsStepCompletedTrackedRef = useRef(false)
+  const featureSetupStepCompletedTrackedRef = useRef(false)
   const next = useCallback(
     async (advancedVia: 'button' | 'keyboard' = 'button') => {
       if (nextInFlightRef.current || busyLabel || currentStep.id === 'repo') {
         return
       }
-      if (currentStep.id === 'notifications' && featureSetupTerminalCommand) {
+      if (currentStep.id === 'agentSetup' && featureSetupTerminalCommand) {
         setStepIndex((idx) => Math.min(idx + 1, STEPS.length - 1))
         return
       }
       nextInFlightRef.current = true
-      if (currentStep.id === 'notifications' && hasSelectedFeatureSetup) {
+      if (currentStep.id === 'agentSetup' && hasSelectedFeatureSetup) {
         setBusyLabel('Setting up features…')
       }
       try {
         const trackCurrentStepCompleted = (): void => {
-          if (currentStep.id === 'notifications') {
-            if (notificationsStepCompletedTrackedRef.current) {
+          if (currentStep.id === 'agentSetup') {
+            if (featureSetupStepCompletedTrackedRef.current) {
               return
             }
             // Why: feature setup can keep the user on this already-persisted
             // step to review a terminal command; later checklist edits must
             // not double-count the same step completion.
-            notificationsStepCompletedTrackedRef.current = true
+            featureSetupStepCompletedTrackedRef.current = true
           }
           const durationMs = consumeStepDurationMs()
           track('onboarding_step_completed', {
@@ -434,7 +503,7 @@ export function useOnboardingFlow(
         }
         const result = await persistCurrentStep()
         const nextCommand = result.featureSetupResult?.skillInstallCommand ?? null
-        if (currentStep.id === 'notifications' && nextCommand) {
+        if (currentStep.id === 'agentSetup' && nextCommand) {
           trackCurrentStepCompleted()
           setFeatureSetupTerminalSelection(featureSetupSelection)
           setFeatureSetupTerminalCommand(nextCommand)
@@ -445,7 +514,7 @@ export function useOnboardingFlow(
           setStepIndex((idx) => Math.min(idx + 1, STEPS.length - 1))
         }
       } finally {
-        if (currentStep.id === 'notifications') {
+        if (currentStep.id === 'agentSetup') {
           setBusyLabel(null)
         }
         nextInFlightRef.current = false
@@ -601,6 +670,35 @@ export function useOnboardingFlow(
     }
   }, [busyLabel, cloneDestination, cloneUrl, completeRepo, settings])
 
+  const continueWithExistingProject = useCallback(
+    async (advancedVia: 'button' | 'keyboard' = 'button') => {
+      if (busyLabel !== null || currentStep.id !== 'repo' || repos.length === 0) {
+        return
+      }
+      setError(null)
+      setBusyLabel('Finishing...')
+      try {
+        const checklist = repos.some((repo) => isGitRepoKind(repo))
+          ? { addedRepo: true }
+          : { addedFolder: true }
+        const closed = await closeWith('completed', checklist, ONBOARDING_FINAL_STEP)
+        if (!closed) {
+          return
+        }
+        emitPendingTourOutcome()
+        track('onboarding_step_completed', {
+          step: ONBOARDING_FINAL_STEP,
+          value_kind: 'repo',
+          duration_ms: consumeStepDurationMs(),
+          advanced_via: advancedVia
+        })
+      } finally {
+        setBusyLabel(null)
+      }
+    },
+    [busyLabel, closeWith, consumeStepDurationMs, currentStep.id, emitPendingTourOutcome, repos]
+  )
+
   const skipToRepo = useCallback(async () => {
     if (busyLabel) {
       return
@@ -612,11 +710,15 @@ export function useOnboardingFlow(
       return
     }
     const durationMs = consumeStepDurationMs()
-    // Why: theme step previews on the document without persisting. On skip,
-    // revert to the saved theme before advancing so the preview doesn't leak.
-    if (currentStep.id === 'theme' && settings) {
-      setTheme(settings.theme)
-      applyDocumentTheme(settings.theme)
+    // Why: theme tiles save immediately for a stable preview, but skip still
+    // means "do not keep this step's choice."
+    if (currentStep.id === 'theme') {
+      const themeBeforePreview = themeStepEntryThemeRef.current ?? settings?.theme
+      if (themeBeforePreview) {
+        setTheme(themeBeforePreview)
+        applyDocumentTheme(themeBeforePreview)
+        await updateSettings({ theme: themeBeforePreview })
+      }
     }
     // Why: the repo step seeds folder terminals from saved settings. Preserve
     // the visible agent choice when optional preferences are skipped.
@@ -630,6 +732,7 @@ export function useOnboardingFlow(
       // because Orca needs a project before the app has a useful first state.
       track('onboarding_step_skipped', {
         step: currentStep.stepNumber,
+        value_kind: currentStep.valueKind,
         duration_ms: durationMs,
         advanced_via: 'button'
       })
@@ -637,6 +740,7 @@ export function useOnboardingFlow(
         trackTaskSourcesSnapshot('skip_to_project_setup', durationMs, 'button')
       }
       setStepIndex(repoStepIndex)
+      setTourStarted(false)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
@@ -647,6 +751,7 @@ export function useOnboardingFlow(
     consumeStepDurationMs,
     currentStep.id,
     currentStep.stepNumber,
+    currentStep.valueKind,
     onOnboardingChange,
     selectedAgent,
     settings,
@@ -654,19 +759,117 @@ export function useOnboardingFlow(
     updateSettings
   ])
 
+  const startTour = useCallback(() => {
+    if (busyLabel) {
+      return
+    }
+    setError(null)
+    markOnboardingTourStarted(tourOutcomeTrackerRef.current, Date.now())
+    setTourStarted(true)
+  }, [busyLabel])
+
+  const completeTour = useCallback(
+    async (markSuccessfulExit?: () => void): Promise<boolean> => {
+      if (busyLabel || currentStep.id !== 'tour') {
+        return false
+      }
+      setError(null)
+      const repoStepIndex = STEPS.findIndex((step) => step.id === 'repo')
+      const repoStep = STEPS[repoStepIndex]
+      if (!repoStep) {
+        return false
+      }
+      const durationMs = consumeStepDurationMs()
+      setBusyLabel('Saving…')
+      try {
+        const nextState = await persistStep(repoStep.stepNumber - 1)
+        onOnboardingChange(nextState)
+        track('onboarding_step_completed', {
+          step: currentStep.stepNumber,
+          value_kind: currentStep.valueKind,
+          duration_ms: durationMs,
+          advanced_via: 'button'
+        })
+        emitTourOutcome('completed_inline', 'button')
+        markSuccessfulExit?.()
+        setTourStarted(false)
+        setStepIndex(repoStepIndex)
+        return true
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setError(message)
+        toast.error('Could not continue to project setup', { description: message })
+        return false
+      } finally {
+        setBusyLabel(null)
+      }
+    },
+    [
+      busyLabel,
+      consumeStepDurationMs,
+      emitTourOutcome,
+      currentStep.id,
+      currentStep.stepNumber,
+      currentStep.valueKind,
+      onOnboardingChange
+    ]
+  )
+
+  const skipTourToRepo = useCallback(async () => {
+    if (busyLabel || currentStep.id !== 'tour') {
+      return
+    }
+    setError(null)
+    const repoStepIndex = STEPS.findIndex((step) => step.id === 'repo')
+    const repoStep = STEPS[repoStepIndex]
+    if (!repoStep) {
+      return
+    }
+    const durationMs = consumeStepDurationMs()
+    setBusyLabel('Saving…')
+    try {
+      const nextState = await persistStep(repoStep.stepNumber - 1)
+      onOnboardingChange(nextState)
+      track('onboarding_step_skipped', {
+        step: currentStep.stepNumber,
+        value_kind: currentStep.valueKind,
+        duration_ms: durationMs,
+        advanced_via: 'button'
+      })
+      emitTourOutcome('skipped_intro', 'button')
+      setTourStarted(false)
+      setStepIndex(repoStepIndex)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      toast.error('Could not continue to project setup', { description: message })
+    } finally {
+      setBusyLabel(null)
+    }
+  }, [
+    busyLabel,
+    consumeStepDurationMs,
+    currentStep.id,
+    currentStep.stepNumber,
+    currentStep.valueKind,
+    emitTourOutcome,
+    onOnboardingChange
+  ])
+
   const skipAgentSetup = useCallback(async () => {
-    if (busyLabel || currentStep.id !== 'notifications') {
+    if (busyLabel || currentStep.id !== 'agentSetup') {
       return
     }
     setError(null)
     const durationMs = consumeStepDurationMs()
     try {
-      // Why: this step's primary action can request notification permission and
-      // run selected feature setup. Skip is the explicit "not now" path.
+      // Why: this step's primary action can run selected feature setup. Skip is
+      // the explicit "not now" path.
       const nextState = await persistStep(currentStep.stepNumber)
       onOnboardingChange(nextState)
       track('onboarding_step_skipped', {
         step: currentStep.stepNumber,
+        value_kind: currentStep.valueKind,
         duration_ms: durationMs,
         advanced_via: 'button'
       })
@@ -678,7 +881,14 @@ export function useOnboardingFlow(
       setError(message)
       toast.error('Could not skip agent setup', { description: message })
     }
-  }, [busyLabel, consumeStepDurationMs, currentStep.id, currentStep.stepNumber, onOnboardingChange])
+  }, [
+    busyLabel,
+    consumeStepDurationMs,
+    currentStep.id,
+    currentStep.stepNumber,
+    currentStep.valueKind,
+    onOnboardingChange
+  ])
 
   const openSshSettings = useCallback(async () => {
     if (busyLabel || currentStep.id !== 'repo') {
@@ -696,12 +906,11 @@ export function useOnboardingFlow(
     // Why: Settings renders behind the fullscreen onboarding layer; SSH users
     // need a temporary detour without marking required repo setup dismissed.
     onSettingsDetourStart?.()
+    // Why: keep the target in the store before the Settings view mounts. A
+    // timer here can run before the lazy view subscribes and strand users on
+    // the default General pane.
+    openSettingsTarget({ pane: 'ssh', repoId: null, sectionId: 'ssh' })
     openSettingsPage()
-    // Why: Settings consumes navigation targets from its mounted view; defer
-    // until the view switch has committed so the SSH pane scroll is reliable.
-    window.setTimeout(() => {
-      openSettingsTarget({ pane: 'ssh', repoId: null, sectionId: 'ssh' })
-    }, 0)
   }, [
     busyLabel,
     currentStep.id,
@@ -713,10 +922,12 @@ export function useOnboardingFlow(
   ])
 
   const back = useCallback(() => {
+    setTourStarted(false)
     setStepIndex((idx) => Math.max(idx - 1, 0))
   }, [])
 
   const jumpToStep = useCallback((idx: number) => {
+    setTourStarted(false)
     setStepIndex(Math.min(Math.max(idx, 0), STEPS.length - 1))
   }, [])
 
@@ -729,8 +940,6 @@ export function useOnboardingFlow(
     setSelectedAgent: setSelectedAgentInteractive,
     theme,
     setTheme: setThemeInteractive,
-    notifications,
-    setNotifications,
     featureSetupSelection,
     setFeatureSetupSelection: setFeatureSetupSelectionInteractive,
     featureSetupTerminalCommand,
@@ -738,10 +947,12 @@ export function useOnboardingFlow(
     hasSelectedFeatureSetup,
     cloneUrl,
     setCloneUrl,
+    hasExistingProject,
     serverPath,
     setServerPath,
     cloneDestination,
     setCloneDestination,
+    tourStarted,
     busyLabel,
     error,
     detectedSet,
@@ -749,9 +960,14 @@ export function useOnboardingFlow(
     next,
     skipAgentSetup,
     skipToRepo,
+    startTour,
+    completeTour,
+    skipTourToRepo,
+    recordTourDepthSummary,
     back,
     jumpToStep,
     openFolder,
+    continueWithExistingProject,
     openSshSettings,
     clone
   }

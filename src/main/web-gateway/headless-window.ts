@@ -37,7 +37,9 @@ export function patchBrowserWindowLookup(): void {
   }
   const orig = BW.fromWebContents.bind(BW)
   BW.fromWebContents = ((wc: { id?: number } | null): BrowserWindow | null => {
-    if (!wc) return null
+    if (!wc) {
+      return null
+    }
     if (typeof wc.id === 'number' && fakeWindowsByWcId.has(wc.id)) {
       return fakeWindowsByWcId.get(wc.id) ?? null
     }

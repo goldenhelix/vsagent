@@ -40,8 +40,12 @@ export function attachMainWindowServices(
   store: Store,
   runtime: OrcaRuntimeService,
   getSelectedCodexHomePath?: () => string | null,
-  prepareClaudeAuth?: () => Promise<ClaudeRuntimeAuthPreparation>
+  prepareClaudeAuth?: () => Promise<ClaudeRuntimeAuthPreparation>,
+  options?: {
+    onBeforeRendererReload?: (args: { webContentsId: number; ignoreCache: boolean }) => void
+  }
 ): void {
+  registerAppReloadHandler(mainWindow, options?.onBeforeRendererReload)
   registerRepoHandlers(mainWindow, store)
   registerWorktreeHandlers(mainWindow, store, runtime)
   registerWorkspaceCleanupHandlers(store, { runtime, getLocalPtyProvider })
@@ -85,30 +89,30 @@ export function attachMainWindowServices(
   // so we skip it cleanly rather than rely on the unhandled-rejection path.
   if (process.env.ORCA_WEB_HEADLESS !== '1') {
     setupAutoUpdater(mainWindow, {
-    getLastUpdateCheckAt: () => store.getUI().lastUpdateCheckAt,
-    onBeforeQuit: () => store.flush(),
-    setLastUpdateCheckAt: (timestamp) => {
-      store.updateUI({ lastUpdateCheckAt: timestamp })
-    },
-    getPendingUpdateNudgeId: () => store.getUI().pendingUpdateNudgeId ?? null,
-    getDismissedUpdateNudgeId: () => store.getUI().dismissedUpdateNudgeId ?? null,
-    setPendingUpdateNudgeId: (id) => {
-      // Why: the nudge lifecycle is owned by the main process. When applying a
-      // new campaign, persist the pending id AND clear the version dismissal
-      // together so relaunches cannot resurrect the old hidden-card state
-      // between nudge apply and renderer sync. When clearing (id is null),
-      // only touch pendingUpdateNudgeId — clearing dismissedUpdateVersion here
-      // would silently un-dismiss an update if the flow ever changes.
-      if (id) {
-        store.updateUI({ pendingUpdateNudgeId: id, dismissedUpdateVersion: null })
-      } else {
-        store.updateUI({ pendingUpdateNudgeId: null })
+      getLastUpdateCheckAt: () => store.getUI().lastUpdateCheckAt,
+      onBeforeQuit: () => store.flush(),
+      setLastUpdateCheckAt: (timestamp) => {
+        store.updateUI({ lastUpdateCheckAt: timestamp })
+      },
+      getPendingUpdateNudgeId: () => store.getUI().pendingUpdateNudgeId ?? null,
+      getDismissedUpdateNudgeId: () => store.getUI().dismissedUpdateNudgeId ?? null,
+      setPendingUpdateNudgeId: (id) => {
+        // Why: the nudge lifecycle is owned by the main process. When applying a
+        // new campaign, persist the pending id AND clear the version dismissal
+        // together so relaunches cannot resurrect the old hidden-card state
+        // between nudge apply and renderer sync. When clearing (id is null),
+        // only touch pendingUpdateNudgeId — clearing dismissedUpdateVersion here
+        // would silently un-dismiss an update if the flow ever changes.
+        if (id) {
+          store.updateUI({ pendingUpdateNudgeId: id, dismissedUpdateVersion: null })
+        } else {
+          store.updateUI({ pendingUpdateNudgeId: null })
+        }
+      },
+      setDismissedUpdateNudgeId: (id) => {
+        store.updateUI({ dismissedUpdateNudgeId: id })
       }
-    },
-    setDismissedUpdateNudgeId: (id) => {
-      store.updateUI({ dismissedUpdateNudgeId: id })
-    }
-  })
+    })
   }
   registerRuntimeWindowLifecycle(mainWindow, runtime)
 
@@ -217,6 +221,27 @@ export function attachMainWindowServices(
     // close prevents stale tab→webContents ids from leaking across app relaunch
     // or hot-reload cycles.
     browserManager.unregisterAll()
+  })
+}
+
+function registerAppReloadHandler(
+  mainWindow: BrowserWindow,
+  onBeforeRendererReload?: (args: { webContentsId: number; ignoreCache: boolean }) => void
+): void {
+  // Why: the process-global IPC handler can outlive the BrowserWindow, so keep
+  // the registered WebContents and guard both lifetimes before using it.
+  const mainWebContents = mainWindow.webContents
+  ipcMain.removeHandler('app:reload')
+  ipcMain.handle('app:reload', (event) => {
+    if (
+      mainWindow.isDestroyed() ||
+      mainWebContents.isDestroyed() ||
+      event.sender !== mainWebContents
+    ) {
+      return
+    }
+    onBeforeRendererReload?.({ webContentsId: mainWebContents.id, ignoreCache: false })
+    mainWebContents.reload()
   })
 }
 

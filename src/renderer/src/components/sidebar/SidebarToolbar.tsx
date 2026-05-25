@@ -39,9 +39,6 @@ const GITHUB_ISSUES_URL = 'https://github.com/stablyai/orca/issues/'
 const DISCORD_URL = 'https://discord.gg/fzjDKHxv8Q'
 const X_URL = 'https://x.com/orca_build'
 const DOCS_URL = 'https://www.onorca.dev/docs'
-// Why: the sidebar resize handle intentionally keeps a wide right-edge hit
-// target, but the bottom Settings action should remain clickable over it.
-const SETTINGS_ACTION_HIT_TARGET_CLASS = 'relative z-20'
 
 type SubmitIdentity = {
   githubLogin: string | null
@@ -257,9 +254,9 @@ function FeedbackDialog({
 const SidebarToolbar = React.memo(function SidebarToolbar() {
   const openModal = useAppStore((s) => s.openModal)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
-  const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const openSkillsPage = useAppStore((s) => s.openSkillsPage)
   const openSpacePage = useAppStore((s) => s.openSpacePage)
+  const openMobilePage = useAppStore((s) => s.openMobilePage)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const lastShowOnboardingAtRef = React.useRef(0)
 
@@ -270,11 +267,6 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
     }
     lastShowOnboardingAtRef.current = now
     void showOnboardingFromRenderer()
-  }
-
-  const openMobileSettings = (): void => {
-    openSettingsTarget({ pane: 'mobile', repoId: null })
-    openSettingsPage()
   }
 
   return (
@@ -318,10 +310,6 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
                 </TooltipContent>
               </Tooltip>
               <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-44">
-                <DropdownMenuItem onSelect={openMobileSettings}>
-                  <Smartphone className="size-3.5" />
-                  Orca Mobile
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={openSkillsPage}>
                   <BookOpen className="size-3.5" />
                   Skills
@@ -329,6 +317,10 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
                 <DropdownMenuItem onSelect={openSpacePage}>
                   <HardDrive className="size-3.5" />
                   Space Analyzer
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={openMobilePage}>
+                  <Smartphone className="size-3.5" />
+                  Orca Mobile
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -377,7 +369,7 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
                 variant="ghost"
                 size="icon-xs"
                 onClick={openSettingsPage}
-                className={`${SETTINGS_ACTION_HIT_TARGET_CLASS} text-muted-foreground`}
+                className="text-muted-foreground"
               >
                 <Settings className="size-3.5" />
               </Button>

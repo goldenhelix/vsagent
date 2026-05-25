@@ -87,7 +87,7 @@ async function expectSkillSetupTerminalReady(page: Page): Promise<void> {
     timeout: 10_000
   })
   await expect(
-    page.getByText(/Press Enter to run the command and confirm npm if asked/i)
+    page.getByText(/Press Enter to run the command and confirm npx if asked/i)
   ).toBeVisible()
   await expect
     .poll(
@@ -125,10 +125,17 @@ async function setupOnboardingFeatures(page: Page): Promise<void> {
 async function continueFromFeatureSetupToRepo(page: Page): Promise<void> {
   await continueOnboarding(page)
   await expect(page.getByRole('heading', { name: TASK_SOURCES_HEADING })).toBeVisible()
-  await expect(page.getByText('4 of 5')).toBeVisible()
+  await expect(page.getByText('5 of 7')).toBeVisible()
   await continueOnboarding(page)
+  await expect(page.getByText('6 of 7')).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: /Interested in Orca's advanced features/i })
+  ).toBeVisible()
+  await onboardingFooterButton(page, /^Skip the tour\b/).click()
+  await expect(page.getByText('You can take the tour anytime')).toHaveCount(0)
+  await expect(page.getByText('Open Help > Explore Orca when you want the tour.')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: REPO_STEP_HEADING })).toBeVisible()
-  await expect(page.getByText('5 of 5')).toBeVisible()
+  await expect(page.getByText('7 of 7')).toBeVisible()
 }
 
 test.describe('Onboarding flow', () => {
@@ -148,7 +155,7 @@ test.describe('Onboarding flow', () => {
     await expect(orcaPage.getByRole('heading', { name: /Pick your default agent/i })).toBeVisible({
       timeout: 15_000
     })
-    await expect(orcaPage.getByText('1 of 5')).toBeVisible()
+    await expect(orcaPage.getByText('1 of 7')).toBeVisible()
     await expect(onboardingFooterButton(orcaPage, /^Continue\b/)).toBeVisible()
     await expect(onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON)).toBeVisible()
     // Why: Back is not rendered on the first step (was previously rendered-but-
@@ -196,7 +203,7 @@ test.describe('Onboarding flow', () => {
 
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Make it feel like home/i })).toBeVisible()
-    await expect(orcaPage.getByText('2 of 5')).toBeVisible()
+    await expect(orcaPage.getByText('2 of 7')).toBeVisible()
     await expect
       .poll(async () => (await getOnboardingState(orcaPage)).lastCompletedStep, {
         timeout: 5_000,
@@ -230,8 +237,8 @@ test.describe('Onboarding flow', () => {
       .toBe(oppositeTheme)
 
     await continueOnboarding(orcaPage)
-    await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
-    await expect(orcaPage.getByText('3 of 5')).toBeVisible()
+    await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
+    await expect(orcaPage.getByText('3 of 7')).toBeVisible()
     await expect
       .poll(async () => (await getOnboardingState(orcaPage)).lastCompletedStep, {
         timeout: 5_000,
@@ -243,14 +250,24 @@ test.describe('Onboarding flow', () => {
       .toBe(oppositeTheme)
 
     // --- Step 3: notifications ---
-    // Why: the wizard force-defaults every toggle ON (use-onboarding-flow.ts),
-    // which intentionally diverges from the app defaults (terminalBell=false,
-    // suppressWhenFocused=true). Use the default setup action without touching
-    // the toggles; the assertions prove the wizard wrote its opt-in defaults
-    // through IPC, including the inverted suppressWhenFocused.
-    // Why: the feature checklist also defaults ON; inject safe deps so this
-    // E2E validates persistence without registering the real CLI or opening
-    // OS permission prompts.
+    await expect(orcaPage.getByRole('button', { name: /System Default/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await expect(orcaPage.getByRole('button', { name: /Send Test Notification/i })).toBeVisible()
+    await expect(orcaPage.getByText(/Advanced sound file/i)).toBeVisible()
+    await continueOnboarding(orcaPage)
+    await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
+    await expect(orcaPage.getByText('4 of 7')).toBeVisible()
+    await expect
+      .poll(async () => (await getOnboardingState(orcaPage)).lastCompletedStep, {
+        timeout: 5_000,
+        message: 'lastCompletedStep did not advance to 3 after notifications Continue'
+      })
+      .toBe(3)
+
+    // Why: the feature checklist defaults ON; inject safe deps so this E2E
+    // validates setup without registering the real CLI or opening OS prompts.
     await installSafeOnboardingFeatureSetupDeps(orcaPage)
     const browserUse = orcaPage.getByRole('checkbox', { name: /Agent Browser Use/i })
     const computerUse = orcaPage.getByRole('checkbox', { name: /Computer Use/i })
@@ -263,17 +280,18 @@ test.describe('Onboarding flow', () => {
     await expectSkillSetupTerminalReady(orcaPage)
     await expect(onboardingFooterButton(orcaPage, /^Continue\b/)).toBeVisible()
     await continueFromFeatureSetupToRepo(orcaPage)
-    await expect(orcaPage.getByRole('button', { name: 'Continue' })).toHaveCount(0)
     await expect(orcaPage.getByRole('button', { name: /Open a folder/i })).toBeVisible()
     await expect
       .poll(async () => (await getOnboardingState(orcaPage)).lastCompletedStep, {
         timeout: 5_000
       })
-      .toBe(4)
+      .toBe(6)
+    // Why: the E2E fixture starts with a seeded project, so the repo step can
+    // complete onboarding through its existing-project Continue action.
+    await expect(onboardingFooterButton(orcaPage, /^Continue\b/)).toBeVisible()
 
-    // Verify all three notification fields landed in settings, including the
-    // inverted suppressWhenFocused boundary (UI: notifyWhenFocused=true →
-    // persisted: suppressWhenFocused=false).
+    // Verify the source defaults land without asking users to configure each
+    // source in the onboarding UI.
     await expect
       .poll(
         async () => {
@@ -281,8 +299,8 @@ test.describe('Onboarding flow', () => {
           return {
             agentTaskComplete: s.notifications.agentTaskComplete,
             terminalBell: s.notifications.terminalBell,
-            suppressWhenFocused: s.notifications.suppressWhenFocused,
-            enabled: s.notifications.enabled
+            enabled: s.notifications.enabled,
+            customSoundId: s.notifications.customSoundId
           }
         },
         { timeout: 5_000 }
@@ -290,8 +308,8 @@ test.describe('Onboarding flow', () => {
       .toEqual({
         agentTaskComplete: true,
         terminalBell: true,
-        suppressWhenFocused: false,
-        enabled: true
+        enabled: true,
+        customSoundId: 'system'
       })
 
     await expect
@@ -310,6 +328,28 @@ test.describe('Onboarding flow', () => {
         { timeout: 5_000 }
       )
       .toEqual({ orchestration: '1', browserUse: '1' })
+
+    await continueOnboarding(orcaPage)
+    await expect(orcaPage.getByRole('heading', { name: REPO_STEP_HEADING })).toHaveCount(0)
+    await expect
+      .poll(
+        async () => {
+          const state = await getOnboardingState(orcaPage)
+          return {
+            closedAt: state.closedAt === null ? null : 'set',
+            outcome: state.outcome,
+            addedRepo: state.checklist.addedRepo,
+            lastCompletedStep: state.lastCompletedStep
+          }
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual({
+        closedAt: 'set',
+        outcome: 'completed',
+        addedRepo: true,
+        lastCompletedStep: 7
+      })
   })
 
   test('Cmd/Ctrl+Enter advances steps like Continue', async ({ orcaPage }) => {
@@ -355,7 +395,7 @@ test.describe('Onboarding flow', () => {
     await onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON).click()
 
     await expect(orcaPage.getByRole('heading', { name: REPO_STEP_HEADING })).toBeVisible()
-    await expect(orcaPage.getByText('5 of 5')).toBeVisible()
+    await expect(orcaPage.getByText('7 of 7')).toBeVisible()
     await expect(onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON)).toHaveCount(0)
     await expect(onboardingFooterButton(orcaPage, /Skip all onboarding/i)).toHaveCount(0)
     await expect(orcaPage.getByRole('button', { name: /Open a folder/i })).toBeVisible()
@@ -380,7 +420,7 @@ test.describe('Onboarding flow', () => {
         closedAt: null,
         outcome: null,
         dismissed: false,
-        lastCompletedStep: 4
+        lastCompletedStep: 6
       })
     await expect
       .poll(async () => (await getSettings(orcaPage)).defaultTuiAgent, { timeout: 5_000 })
@@ -389,7 +429,7 @@ test.describe('Onboarding flow', () => {
     await orcaPage.reload()
     await waitForSessionReady(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: REPO_STEP_HEADING })).toBeVisible()
-    await expect(orcaPage.getByText('5 of 5')).toBeVisible()
+    await expect(orcaPage.getByText('7 of 7')).toBeVisible()
     await expect(onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON)).toHaveCount(0)
     expect((await getOnboardingState(orcaPage)).closedAt).toBeNull()
   })
@@ -408,7 +448,7 @@ test.describe('Onboarding flow', () => {
     await expect(
       orcaPage
         .locator('[data-settings-section="ssh"]')
-        .getByRole('heading', { name: 'SSH', exact: true })
+        .getByRole('heading', { name: 'SSH Hosts', exact: true })
     ).toBeInViewport({ timeout: 10_000 })
     await expect(
       orcaPage.locator('[data-settings-section="ssh"]').getByRole('button', { name: /Add Target/i })
@@ -430,17 +470,15 @@ test.describe('Onboarding flow', () => {
         closedAt: null,
         outcome: null,
         dismissed: false,
-        lastCompletedStep: 4
+        lastCompletedStep: 6
       })
 
     await orcaPage.keyboard.press('Escape')
     await expect(orcaPage.getByRole('heading', { name: REPO_STEP_HEADING })).toBeVisible()
-    await expect(orcaPage.getByText('5 of 5')).toBeVisible()
+    await expect(orcaPage.getByText('7 of 7')).toBeVisible()
   })
 
-  test('Skip from theme reverts preview without saving the skipped choice', async ({
-    orcaPage
-  }) => {
+  test('Skip from theme restores the entry theme choice', async ({ orcaPage }) => {
     await expect(orcaPage.getByRole('heading', { name: /Pick your default agent/i })).toBeVisible({
       timeout: 15_000
     })
@@ -452,7 +490,7 @@ test.describe('Onboarding flow', () => {
         document.documentElement.classList.contains('dark') ||
         document.documentElement.classList.contains('light')
     )
-    const initialThemeSetting = (await getSettings(orcaPage)).theme
+    const entryTheme = (await getSettings(orcaPage)).theme
     const startingTheme = await getDocumentThemeClass(orcaPage)
     const oppositeTheme: 'dark' | 'light' = startingTheme === 'dark' ? 'light' : 'dark'
     const oppositeTileName = oppositeTheme === 'light' ? /Bright & crisp/ : /Easy on the eyes/
@@ -466,7 +504,7 @@ test.describe('Onboarding flow', () => {
     await expect(orcaPage.getByRole('heading', { name: REPO_STEP_HEADING })).toBeVisible()
     await expect
       .poll(async () => (await getSettings(orcaPage)).theme, { timeout: 5_000 })
-      .toBe(initialThemeSetting)
+      .toBe(entryTheme)
     await expect
       .poll(async () => getDocumentThemeClass(orcaPage), { timeout: 5_000 })
       .toBe(startingTheme)
@@ -502,7 +540,7 @@ test.describe('Onboarding flow', () => {
     expect((await getOnboardingState(orcaPage)).closedAt).toBeNull()
   })
 
-  test('Skip from notifications does not persist notification or feature setup', async ({
+  test('Skip from notifications does not request permission or run feature setup', async ({
     orcaPage
   }) => {
     await expect(orcaPage.getByRole('heading', { name: /Pick your default agent/i })).toBeVisible({
@@ -511,9 +549,8 @@ test.describe('Onboarding flow', () => {
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Make it feel like home/i })).toBeVisible()
     await continueOnboarding(orcaPage)
-    await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
+    await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
 
-    const beforeNotifications = (await getSettings(orcaPage)).notifications
     await orcaPage.evaluate(() => {
       localStorage.removeItem('orca.e2e.notificationPermissionRequested')
       window.api.notifications.requestPermission = async () => {
@@ -521,33 +558,14 @@ test.describe('Onboarding flow', () => {
         return { supported: true, platform: 'darwin', requested: true }
       }
     })
-    const bellSwitch = orcaPage.getByRole('switch', { name: /Terminal bell/i })
-    await expect(bellSwitch).toHaveAttribute('aria-checked', 'true')
-    await bellSwitch.click()
-    await expect(bellSwitch).toHaveAttribute('aria-checked', 'false')
+    await expect(orcaPage.getByRole('button', { name: /System Default/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
 
     await onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON).click()
 
     await expect(orcaPage.getByRole('heading', { name: REPO_STEP_HEADING })).toBeVisible()
-    await expect
-      .poll(
-        async () => {
-          const s = await getSettings(orcaPage)
-          return {
-            agentTaskComplete: s.notifications.agentTaskComplete,
-            terminalBell: s.notifications.terminalBell,
-            suppressWhenFocused: s.notifications.suppressWhenFocused,
-            enabled: s.notifications.enabled
-          }
-        },
-        { timeout: 5_000 }
-      )
-      .toEqual({
-        agentTaskComplete: beforeNotifications.agentTaskComplete,
-        terminalBell: beforeNotifications.terminalBell,
-        suppressWhenFocused: beforeNotifications.suppressWhenFocused,
-        enabled: beforeNotifications.enabled
-      })
     await expect
       .poll(
         async () =>
@@ -593,23 +611,21 @@ test.describe('Onboarding flow', () => {
     await expect(codexButton).toHaveAttribute('aria-pressed', 'true')
   })
 
-  test('notification toggles flip independently and persist on Continue', async ({ orcaPage }) => {
+  test('notification sound choice persists on Continue', async ({ orcaPage }) => {
     await expect(orcaPage.getByRole('heading', { name: /Pick your default agent/i })).toBeVisible({
       timeout: 15_000
     })
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Make it feel like home/i })).toBeVisible()
     await continueOnboarding(orcaPage)
+    await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
+
+    const dingSound = orcaPage.getByRole('button', { name: /^Ding\b/i })
+    await dingSound.click()
+    await expect(dingSound).toHaveAttribute('aria-pressed', 'true')
+
+    await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
-
-    // Why: NotificationStep buttons expose role="switch" + aria-checked. Flip
-    // terminalBell off and verify the toggle reflects + persists. The other
-    // two toggles stay at their wizard-default ON state.
-    const bellSwitch = orcaPage.getByRole('switch', { name: /Terminal bell/i })
-    await expect(bellSwitch).toHaveAttribute('aria-checked', 'true')
-    await bellSwitch.click()
-    await expect(bellSwitch).toHaveAttribute('aria-checked', 'false')
-
     await installSafeOnboardingFeatureSetupDeps(orcaPage)
     await setupOnboardingFeatures(orcaPage)
     await expect(orcaPage.getByRole('region', { name: /Skill setup command/i })).toBeVisible()
@@ -621,12 +637,13 @@ test.describe('Onboarding flow', () => {
           const s = await getSettings(orcaPage)
           return {
             agentTaskComplete: s.notifications.agentTaskComplete,
-            terminalBell: s.notifications.terminalBell
+            terminalBell: s.notifications.terminalBell,
+            customSoundId: s.notifications.customSoundId
           }
         },
         { timeout: 5_000 }
       )
-      .toEqual({ agentTaskComplete: true, terminalBell: false })
+      .toEqual({ agentTaskComplete: true, terminalBell: true, customSoundId: 'ding' })
   })
 
   test('can opt into orchestration setup without enabling browser or computer use', async ({
@@ -637,6 +654,8 @@ test.describe('Onboarding flow', () => {
     })
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Make it feel like home/i })).toBeVisible()
+    await continueOnboarding(orcaPage)
+    await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
 
@@ -696,7 +715,7 @@ test.describe('Onboarding flow', () => {
       .poll(async () => (await getOnboardingState(orcaPage)).lastCompletedStep, {
         timeout: 5_000
       })
-      .toBe(4)
+      .toBe(6)
     await expect
       .poll(
         async () =>
@@ -722,6 +741,7 @@ test.describe('Onboarding flow', () => {
       timeout: 15_000
     })
     // Advance to the repo step.
+    await continueOnboarding(orcaPage)
     await continueOnboarding(orcaPage)
     await continueOnboarding(orcaPage)
     await installSafeOnboardingFeatureSetupDeps(orcaPage)
@@ -763,7 +783,7 @@ test.describe('Onboarding flow', () => {
     // would otherwise match this regex.
     await orcaPage.getByRole('button', { name: 'Back', exact: true }).click()
     await expect(orcaPage.getByRole('heading', { name: /Pick your default agent/i })).toBeVisible()
-    await expect(orcaPage.getByText('1 of 5')).toBeVisible()
+    await expect(orcaPage.getByText('1 of 7')).toBeVisible()
 
     // Why: "without losing progress" means persisted lastCompletedStep stays
     // at 1 — Back rewinds the visible step but must not roll persistence back.
@@ -780,10 +800,12 @@ test.describe('Onboarding flow', () => {
       timeout: 15_000
     })
 
-    // Advance through the first four steps. The repo step is required setup,
+    // Advance through the optional setup and tour steps. The repo step is required setup,
     // so the footer must not offer a dismiss action there.
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Make it feel like home/i })).toBeVisible()
+    await continueOnboarding(orcaPage)
+    await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
     await installSafeOnboardingFeatureSetupDeps(orcaPage)
@@ -797,6 +819,6 @@ test.describe('Onboarding flow', () => {
     expect(final.closedAt).toBeNull()
     expect(final.outcome).toBeNull()
     expect(final.checklist.dismissed).toBe(false)
-    expect(final.lastCompletedStep).toBe(4)
+    expect(final.lastCompletedStep).toBe(6)
   })
 })

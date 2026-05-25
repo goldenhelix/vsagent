@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: webpreview proxy keeps HTTP forwarding, header rewriting, and cookie scoping in one file so the request-mutation contract is visible at a glance. */
 // HTTP proxy for the in-app browser feature. Mounted under
 // `/__orca/webpreview/<sessionId>/<rest>` on the gateway. Forwards GET
 // requests to `<targetOrigin>/<rest>`, rewrites Set-Cookie + Location
@@ -68,14 +69,13 @@ const HOP_BY_HOP_RESPONSE = new Set([
 ])
 
 export function isWebPreviewPath(reqUrl: string | undefined): boolean {
-  if (!reqUrl) return false
-  return reqUrl === PROXY_PREFIX || reqUrl.startsWith(PROXY_PREFIX + '/')
+  if (!reqUrl) {
+    return false
+  }
+  return reqUrl === PROXY_PREFIX || reqUrl.startsWith(`${PROXY_PREFIX}/`)
 }
 
-export async function handleWebPreview(
-  req: IncomingMessage,
-  res: ServerResponse
-): Promise<void> {
+export async function handleWebPreview(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!req.url) {
     res.statusCode = 400
     res.end('webpreview: empty url')
@@ -93,10 +93,10 @@ export async function handleWebPreview(
   if (firstSlash === -1) {
     sessionId = trimmed.split('?')[0]
     const query = trimmed.includes('?') ? trimmed.slice(trimmed.indexOf('?')) : ''
-    restPath = '/' + query
+    restPath = `/${query}`
   } else {
     sessionId = trimmed.slice(0, firstSlash)
-    restPath = '/' + trimmed.slice(firstSlash + 1)
+    restPath = `/${trimmed.slice(firstSlash + 1)}`
   }
   if (!sessionId) {
     res.statusCode = 400
@@ -196,13 +196,18 @@ function doUpstreamRequest(
     const requester = isHttps ? httpsRequest : httpRequest
     const upstreamHeaders: Record<string, string | string[]> = {}
     for (const [name, value] of Object.entries(reqHeaders)) {
-      if (value === undefined) continue
-      if (HOP_BY_HOP_REQUEST.has(name.toLowerCase())) continue
+      if (value === undefined) {
+        continue
+      }
+      if (HOP_BY_HOP_REQUEST.has(name.toLowerCase())) {
+        continue
+      }
       upstreamHeaders[name] = value as string | string[]
     }
     upstreamHeaders['host'] = target.host
     upstreamHeaders['origin'] = `${target.protocol}//${target.host}`
-    upstreamHeaders['referer'] = `${target.protocol}//${target.host}${target.pathname}${target.search}`
+    upstreamHeaders['referer'] =
+      `${target.protocol}//${target.host}${target.pathname}${target.search}`
     upstreamHeaders['accept-encoding'] = 'identity'
     const upstreamReq = requester({
       method,
@@ -225,9 +230,7 @@ function doUpstreamRequest(
 
 async function forwardRequest(args: ForwardArgs): Promise<void> {
   const { req, res, sessionId } = args
-  const dbg =
-    process.env.VSAGENT_PROXY_DEBUG === '1' ||
-    process.env.ORCA_WEBPREVIEW_DEBUG === '1'
+  const dbg = process.env.VSAGENT_PROXY_DEBUG === '1' || process.env.ORCA_WEBPREVIEW_DEBUG === '1'
   const isTopLevelNav =
     req.headers['sec-fetch-dest'] === 'document' ||
     String(req.headers['accept'] || '').includes('text/html')
@@ -254,9 +257,11 @@ async function forwardRequest(args: ForwardArgs): Promise<void> {
     const status = upstreamRes.statusCode ?? 0
     if (dbg) {
       console.log(
-        `[webpreview] ${req.method} ${currentTarget.toString()} -> ${status}` +
-          (isRedirectStatus(status) ? ` location=${String(upstreamRes.headers['location'] ?? '')}` : '') +
-          ` depth=${depth} topNav=${isTopLevelNav} followCO=${args.followCrossOriginRedirect}`
+        `[webpreview] ${req.method} ${currentTarget.toString()} -> ${status}${
+          isRedirectStatus(status)
+            ? ` location=${String(upstreamRes.headers['location'] ?? '')}`
+            : ''
+        } depth=${depth} topNav=${isTopLevelNav} followCO=${args.followCrossOriginRedirect}`
       )
     }
     // Should we follow this redirect server-side?
@@ -309,9 +314,13 @@ function streamResponseToClient(
   return new Promise((resolve) => {
     const proxyPathPrefix = `${PROXY_PREFIX}/${sessionId}`
     for (const [name, value] of Object.entries(upstreamRes.headers)) {
-      if (value === undefined) continue
+      if (value === undefined) {
+        continue
+      }
       const lower = name.toLowerCase()
-      if (HOP_BY_HOP_RESPONSE.has(lower)) continue
+      if (HOP_BY_HOP_RESPONSE.has(lower)) {
+        continue
+      }
       if (lower === 'location' && typeof value === 'string') {
         // Why: same-origin (relative to finalTarget) -> proxy-relative.
         // We only reach here for non-followed redirects; cross-origin
@@ -341,11 +350,11 @@ function streamResponseToClient(
     res.statusCode = upstreamRes.statusCode ?? 502
     const contentType = String(upstreamRes.headers['content-type'] || '')
     const isHtml = args.injectHtml && args.targetOrigin && contentType.includes('text/html')
-    const isJs = args.injectHtml && (
-      contentType.includes('javascript') ||
-      contentType.includes('application/x-javascript') ||
-      contentType.includes('text/jsx')
-    )
+    const isJs =
+      args.injectHtml &&
+      (contentType.includes('javascript') ||
+        contentType.includes('application/x-javascript') ||
+        contentType.includes('text/jsx'))
     if (!isHtml && !isJs) {
       upstreamRes.pipe(res)
       upstreamRes.on('end', () => resolve())
@@ -389,10 +398,16 @@ function streamRedirectThroughExt(
   return new Promise((resolve) => {
     const proxyPathPrefix = `${PROXY_PREFIX}/${sessionId}`
     for (const [name, value] of Object.entries(upstreamRes.headers)) {
-      if (value === undefined) continue
+      if (value === undefined) {
+        continue
+      }
       const lower = name.toLowerCase()
-      if (HOP_BY_HOP_RESPONSE.has(lower)) continue
-      if (lower === 'location') continue
+      if (HOP_BY_HOP_RESPONSE.has(lower)) {
+        continue
+      }
+      if (lower === 'location') {
+        continue
+      }
       if (lower === 'set-cookie') {
         const cookies = Array.isArray(value) ? value : [value]
         const rescoped = cookies.map((c) =>
@@ -414,11 +429,7 @@ function streamRedirectThroughExt(
   })
 }
 
-function sendLoopError(
-  req: IncomingMessage,
-  res: ServerResponse,
-  hops: string[]
-): Promise<void> {
+function sendLoopError(req: IncomingMessage, res: ServerResponse, hops: string[]): Promise<void> {
   const isHtmlRequest = String(req.headers['accept'] || '').includes('text/html')
   const summary = hops.slice(0, 6).join(' →\n  ') + (hops.length > 6 ? ' →\n  …' : '')
   const ct = isHtmlRequest ? 'text/html; charset=utf-8' : 'text/plain'
@@ -452,9 +463,7 @@ function sendUpstreamError(
 ): Promise<void> {
   const code = err.code
   const msg = err.message || String(err)
-  console.warn(
-    `[webpreview] upstream error for ${target.toString()}: code=${code} msg=${msg}`
-  )
+  console.warn(`[webpreview] upstream error for ${target.toString()}: code=${code} msg=${msg}`)
   const reason =
     code === 'ECONNREFUSED'
       ? `Nothing is listening on ${target.host}. Is your dev server running?`
@@ -492,7 +501,6 @@ function sendUpstreamError(
   return Promise.resolve()
 }
 
-
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -502,11 +510,7 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
-
-function injectRewriteScript(
-  html: string,
-  opts: { prefix: string; targetOrigin: string }
-): string {
+function injectRewriteScript(html: string, opts: { prefix: string; targetOrigin: string }): string {
   const script = `<script>${buildRewriteScript(opts)}</script>`
   // Try to insert as the very first <head> child so the rewriter runs
   // before any inline scripts make network calls. If there's no <head>,

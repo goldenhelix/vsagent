@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: default persisted settings live in one schema-shaped object so migrations and tests compare against one source of truth. */
 import type {
   GlobalSettings,
   NotificationSettings,
@@ -18,17 +19,18 @@ import { DEFAULT_WORKTREE_CARD_PROPERTIES } from './worktree-card-properties'
 
 export { DEFAULT_STATUS_BAR_ITEMS } from './status-bar-defaults'
 export {
-  ALWAYS_VISIBLE_WORKTREE_CARD_PROPERTIES,
   DEFAULT_WORKTREE_CARD_PROPERTIES,
   normalizeWorktreeCardProperties
 } from './worktree-card-properties'
 
 export const SCHEMA_VERSION = 1
 export const DEFAULT_APP_FONT_FAMILY = 'Geist'
+export const DEFAULT_SHOW_SLEEPING_WORKSPACES = true
+export const DEFAULT_HIDE_SLEEPING_WORKSPACES = false
 
 // Why: the onboarding wizard's last step index. Centralized so backfill,
 // clamps, and UI step references all agree on the same upper bound.
-export const ONBOARDING_FINAL_STEP = 5
+export const ONBOARDING_FINAL_STEP = 7
 
 export const ORCA_BROWSER_PARTITION = 'persist:orca-browser'
 // Why: blank browser tabs must start from an inert guest URL that does not
@@ -69,7 +71,8 @@ function defaultTerminalFontFamily(): string {
 
 export const getDefaultPrimarySelectionMiddleClickPaste = (
   platform = typeof process !== 'undefined' ? process.platform : ''
-): boolean => platform === 'linux'
+): boolean => platform === 'linux' || platform === 'darwin'
+
 /**
  * Why: ProseMirror builds an in-memory tree for the entire document, so large
  * markdown files cause noticeable typing lag in the rich editor. Files above
@@ -93,7 +96,7 @@ export const STAR_NAG_INITIAL_THRESHOLD = 35
  *  the collector and the status-bar popover agree on the sentinel. */
 export const ORPHAN_WORKTREE_ID = '__orphan__'
 
-// Why: the floating terminal is a local synthetic workspace, so persistence
+// Why: the floating workspace is a local synthetic workspace, so persistence
 // pruning must classify it without consulting the repo catalog.
 export const FLOATING_TERMINAL_WORKTREE_ID = 'global-floating-terminal'
 
@@ -116,7 +119,9 @@ export function getDefaultNotificationSettings(): NotificationSettings {
     agentTaskComplete: true,
     terminalBell: false,
     suppressWhenFocused: true,
-    customSoundPath: null
+    customSoundId: 'system',
+    customSoundPath: null,
+    customSoundVolume: 100
   }
 }
 
@@ -150,6 +155,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     // installation via the `VSAGENT_WORKSPACE_DIR` env var (see persistence.ts).
     workspaceDir: homedir,
     nestWorkspaces: true,
+    workspaceDirHistory: [],
     refreshLocalBaseRefOnWorktreeCreate: false,
     branchPrefix: 'git-username',
     branchPrefixCustom: '',
@@ -164,6 +170,10 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     editorMinimapEnabled: false,
     markdownReviewToolsEnabled: true,
     primarySelectionMiddleClickPaste: getDefaultPrimarySelectionMiddleClickPaste(),
+    primarySelectionMiddleClickPasteDefaultedForLinux:
+      typeof process !== 'undefined' && process.platform === 'linux',
+    primarySelectionMiddleClickPasteDefaultedForTerminalDefaults:
+      getDefaultPrimarySelectionMiddleClickPaste(),
     terminalFontSize: 14,
     terminalFontFamily: defaultTerminalFontFamily(),
     terminalFontWeight: DEFAULT_TERMINAL_FONT_WEIGHT,
@@ -214,10 +224,16 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     sourceControlViewMode: 'list',
     showTitlebarAppName: true,
     showTasksButton: true,
+    showMobileButton: true,
     ctrlTabOrderMode: 'mru',
+    // Why: switching worktrees and opening command surfaces from a focused
+    // terminal is a core Orca workflow; users who prefer TUI ownership opt in.
+    terminalShortcutPolicy: 'orca-first',
     floatingTerminalEnabled: true,
     floatingTerminalDefaultedForAllUsers: true,
     floatingTerminalCwd: '~',
+    floatingTerminalTrustedCwds: [],
+    floatingTerminalCwdMigratedToAppWorkspace: true,
     floatingTerminalTriggerLocation: 'floating-button',
     notifications: getDefaultNotificationSettings(),
     diffDefaultView: 'inline',
@@ -282,6 +298,9 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
       enabled: true,
       agentId: null,
       selectedModelByAgent: {},
+      discoveredModelsByAgent: {},
+      selectedModelByAgentByHost: {},
+      discoveredModelsByAgentByHost: {},
       selectedThinkingByModel: {},
       customPrompt: '',
       customAgentCommand: ''
@@ -306,7 +325,6 @@ export function getDefaultRepoHookSettings(): RepoHookSettings {
   return {
     mode: 'auto',
     setupRunPolicy: 'run-by-default',
-    commandSourcePolicy: 'shared-only',
     scripts: {
       setup: '',
       archive: ''
@@ -344,6 +362,8 @@ export function getDefaultUIState(): PersistedUIState {
     groupBy: 'repo',
     sortBy: 'recent',
     showActiveOnly: false,
+    hideSleepingWorkspaces: DEFAULT_HIDE_SLEEPING_WORKSPACES,
+    showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
     hideDefaultBranchWorkspace: false,
     filterRepoIds: [],
     collapsedGroups: [],
@@ -362,6 +382,7 @@ export function getDefaultUIState(): PersistedUIState {
     dismissedUpdateVersion: null,
     lastUpdateCheckAt: null,
     trustedOrcaHooks: {},
+    setupScriptPromptDismissedRepoIds: [],
     acknowledgedAgentsByPaneKey: {},
     workspaceCleanup: { dismissals: {} },
     featureTipsSeenIds: []

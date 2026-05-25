@@ -37,8 +37,12 @@ function isPathAllowed(absPath: string): boolean {
 // Why: expand a leading `~` so users can type tilde paths like a shell. Any
 // other tilde (`~bob`) is not expanded — too easy to leak intent across users.
 function expandTilde(input: string): string {
-  if (input === '~') return HOME
-  if (input.startsWith('~/')) return join(HOME, input.slice(2))
+  if (input === '~') {
+    return HOME
+  }
+  if (input.startsWith('~/')) {
+    return join(HOME, input.slice(2))
+  }
   return input
 }
 
@@ -130,7 +134,9 @@ export function registerFolderPickerHandlers(): void {
         // Why: hide dotfiles by default unless the user explicitly typed a
         // leading dot. Matches shell tab-completion ergonomics.
         .filter((e) => {
-          if (e.name.startsWith('.') && !prefix.startsWith('.')) return false
+          if (e.name.startsWith('.') && !prefix.startsWith('.')) {
+            return false
+          }
           return e.name.toLowerCase().startsWith(lowerPrefix)
         })
         .map((e) => e.name)
@@ -177,7 +183,9 @@ export function registerFolderPickerHandlers(): void {
         // Why: same alphabetical-with-dirs-first ordering as fs:readDir so
         // the picker matches the rest of the app's filesystem UX.
         .sort((a, b) => {
-          if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+          if (a.isDirectory !== b.isDirectory) {
+            return a.isDirectory ? -1 : 1
+          }
           return a.name.localeCompare(b.name)
         })
       return { resolvedPath: resolved, entries }

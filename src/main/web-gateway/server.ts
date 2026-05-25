@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: web-gateway colocates HTTP serving, WS handshake, IPC interception, broadcast queue, and production telemetry so the wire contract stays auditable in one place. */
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { readFile, stat } from 'fs/promises'
 import { extname, join, normalize, resolve } from 'path'
@@ -164,7 +165,9 @@ export class WebGateway {
     this.eventQueue = []
     this.coalesceIndices.clear()
     if (this.wss) {
-      for (const client of this.wss.clients) client.terminate()
+      for (const client of this.wss.clients) {
+        client.terminate()
+      }
       await new Promise<void>((r) => this.wss!.close(() => r()))
       this.wss = null
     }
@@ -175,7 +178,9 @@ export class WebGateway {
   }
 
   private checkAuth(req: IncomingMessage): boolean {
-    if (!SHARED_TOKEN) return true
+    if (!SHARED_TOKEN) {
+      return true
+    }
     const u = new URL(req.url!, 'http://localhost')
     const t = u.searchParams.get('token') ?? req.headers['x-orca-token']
     return t === SHARED_TOKEN
@@ -278,17 +283,16 @@ export class WebGateway {
           // that was in flight (or the immediately prior one). Default mode
           // only logs slow (>200ms) and failed invokes to keep noise down.
           const trace = process.env.ORCA_WEB_TRACE === '1'
-          if (trace) console.log(`[web-gateway] → invoke "${msg.channel}"`)
+          if (trace) {
+            console.log(`[web-gateway] → invoke "${msg.channel}"`)
+          }
           try {
-            const value = await dispatchInvoke(
-              msg.channel,
-              this.getHostWebContents(),
-              msg.args
-            )
+            const value = await dispatchInvoke(msg.channel, this.getHostWebContents(), msg.args)
             this.sendMessage(ws, { kind: 'invoke-ok', id: msg.id, value })
             const dur = Date.now() - startedAt
-            if (trace) console.log(`[web-gateway] ← invoke "${msg.channel}" ok ${dur}ms`)
-            else if (dur > 200) {
+            if (trace) {
+              console.log(`[web-gateway] ← invoke "${msg.channel}" ok ${dur}ms`)
+            } else if (dur > 200) {
               console.log(`[web-gateway] invoke "${msg.channel}" ok in ${dur}ms`)
             }
           } catch (err) {
@@ -349,7 +353,9 @@ export class WebGateway {
 
   broadcastEvent(channel: string, args: unknown[]): void {
     const set = this.subscribersByChannel.get(channel)
-    if (!set || set.size === 0) return
+    if (!set || set.size === 0) {
+      return
+    }
     this.telemetry.enqueued += 1
     incrementMap(this.telemetry.perChannelCount, channel)
     if (WebGateway.COALESCABLE_CHANNELS.has(channel)) {
@@ -380,13 +386,17 @@ export class WebGateway {
     const perChannelDrainBytes = new Map<string, number>()
     for (const { channel, args } of queue) {
       const set = this.subscribersByChannel.get(channel)
-      if (!set || set.size === 0) continue
+      if (!set || set.size === 0) {
+        continue
+      }
       const payload = JSON.stringify({ kind: 'event', channel, args } satisfies WireOut)
       const byteLen = Buffer.byteLength(payload)
       addToMap(this.telemetry.perChannelBytes, channel, byteLen)
       addToMap(perChannelDrainBytes, channel, byteLen)
       for (const ws of set) {
-        if (ws.readyState !== WebSocket.OPEN) continue
+        if (ws.readyState !== WebSocket.OPEN) {
+          continue
+        }
         try {
           ws.send(payload)
         } catch (err) {
@@ -397,8 +407,12 @@ export class WebGateway {
     const durationMs = Date.now() - startedAt
     this.telemetry.drains += 1
     this.telemetry.totalDrainMs += durationMs
-    if (durationMs > this.telemetry.maxDrainMs) this.telemetry.maxDrainMs = durationMs
-    if (queue.length > this.telemetry.maxQueueSize) this.telemetry.maxQueueSize = queue.length
+    if (durationMs > this.telemetry.maxDrainMs) {
+      this.telemetry.maxDrainMs = durationMs
+    }
+    if (queue.length > this.telemetry.maxQueueSize) {
+      this.telemetry.maxQueueSize = queue.length
+    }
     if (durationMs >= WebGateway.SLOW_DRAIN_MS) {
       const breakdown = formatTopByBytes(perChannelDrainBytes, 5)
       console.warn(
@@ -408,9 +422,16 @@ export class WebGateway {
   }
 
   private startTelemetryTimer(): void {
-    if (this.telemetryTimer) return
-    this.telemetryTimer = setInterval(() => this.logTelemetrySummary(), WebGateway.TELEMETRY_INTERVAL_MS)
-    if (typeof this.telemetryTimer.unref === 'function') this.telemetryTimer.unref()
+    if (this.telemetryTimer) {
+      return
+    }
+    this.telemetryTimer = setInterval(
+      () => this.logTelemetrySummary(),
+      WebGateway.TELEMETRY_INTERVAL_MS
+    )
+    if (typeof this.telemetryTimer.unref === 'function') {
+      this.telemetryTimer.unref()
+    }
   }
 
   private stopTelemetryTimer(): void {
@@ -422,7 +443,9 @@ export class WebGateway {
 
   private logTelemetrySummary(): void {
     const t = this.telemetry
-    if (t.enqueued === 0) return
+    if (t.enqueued === 0) {
+      return
+    }
     const avgDrainMs = t.drains > 0 ? (t.totalDrainMs / t.drains).toFixed(2) : '0'
     const topBytes = formatTopByBytes(t.perChannelBytes, 5)
     const topCoalesced = formatTopByCount(t.perChannelCoalesced, 3)
@@ -472,7 +495,11 @@ function formatTopByCount(m: Map<string, number>, n: number): string {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  if (bytes < 1024) {
+    return `${bytes}B`
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)}KB`
+  }
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }

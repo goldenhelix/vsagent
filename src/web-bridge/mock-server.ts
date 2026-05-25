@@ -180,7 +180,9 @@ const stubInvokes: Record<string, (...args: unknown[]) => unknown> = {
 
 function dispatchInvoke(channel: string, args: unknown[]): unknown {
   const stub = stubInvokes[channel]
-  if (stub) return stub(...args)
+  if (stub) {
+    return stub(...args)
+  }
   // Why: many channels expect arrays. Anything that ends in `:list` or
   // starts with `list…` defaults to `[]`. Others fall through to `null`.
   // Real handlers replace this with strict behavior.

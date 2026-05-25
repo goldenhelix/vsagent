@@ -62,6 +62,8 @@ import {
   normalizeExternalBrowserUrl,
   redactKagiSessionToken
 } from '../../../../shared/browser-url'
+import { keybindingMatchesAction } from '../../../../shared/keybindings'
+import { getScreenSubmitModifierLabel, isScreenSubmitShortcut } from '@/lib/screen-submit-shortcut'
 import {
   browserViewportPresetToOverride,
   getBrowserViewportPreset
@@ -75,6 +77,7 @@ import {
   destroyPersistentWebview,
   getHiddenContainer,
   MAX_PARKED_WEBVIEWS,
+  moveFocusToRendererBeforeWebviewDetach,
   parkedAtByTabId,
   registerPersistentWebview,
   registeredWebContentsIds,
@@ -100,10 +103,12 @@ import { useGrabMode } from './useGrabMode'
 import { formatGrabPayloadAsText } from './GrabConfirmationSheet'
 import { formatBrowserAnnotationsAsMarkdown } from './browser-annotation-output'
 import { isEditableKeyboardTarget } from './browser-keyboard'
+import { getBrowserPagesForWorkspace } from './browser-pane-page-selection'
 import BrowserAddressBar from './BrowserAddressBar'
 import { BrowserToolbarMenu } from './BrowserToolbarMenu'
 import BrowserFind from './BrowserFind'
 import { BrowserMobileDriverOverlay } from './BrowserMobileDriverOverlay'
+import { getShortcutPlatform, useShortcutLabel } from '@/hooks/useShortcutLabel'
 import { getRemoteBrowserFrameStyle } from './remote-browser-frame-style'
 import {
   consumeBrowserFocusRequest,
@@ -145,6 +150,7 @@ import {
   onBrowserDriverChange,
   type BrowserDriverState
 } from '@/lib/pane-manager/browser-mobile-driver-state'
+import { shouldPollChromiumErrorPage } from './chromium-error-page-polling'
 
 type BrowserTabPageState = Partial<
   Pick<
@@ -240,7 +246,6 @@ type PendingRemoteBrowserWheel = {
   dy: number
 }
 
-const EMPTY_BROWSER_PAGES: BrowserPageState[] = []
 const EMPTY_BROWSER_ANNOTATIONS: BrowserPageAnnotation[] = []
 const PENDING_ANNOTATION_CARD_HEIGHT = 330
 const WHEEL_DELTA_LINE = 1
@@ -318,7 +323,7 @@ function PendingBrowserAnnotationCard({
   const [comment, setComment] = useState('')
   const [intent, setIntent] = useState<BrowserAnnotationIntent>('change')
   const trimmed = comment.trim()
-  const isMac = navigator.userAgent.includes('Mac')
+  const submitModifierLabel = getScreenSubmitModifierLabel()
 
   return (
     <Popover
@@ -377,16 +382,7 @@ function PendingBrowserAnnotationCard({
               onCancel()
               return
             }
-            const hasSubmitModifier = isMac
-              ? event.metaKey && !event.ctrlKey
-              : event.ctrlKey && !event.metaKey
-            if (
-              event.key === 'Enter' &&
-              hasSubmitModifier &&
-              !event.altKey &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
+            if (isScreenSubmitShortcut(event)) {
               event.preventDefault()
               event.stopPropagation()
               if (trimmed) {
@@ -439,7 +435,7 @@ function PendingBrowserAnnotationCard({
             <MessageSquarePlus className="size-3.5" />
             Add
             <span className="ml-1 inline-flex items-center gap-0.5 rounded border border-white/20 px-1.5 py-0.5 text-[10px] font-medium leading-none text-current/80">
-              <span>{isMac ? '⌘' : 'Ctrl'}</span>
+              <span>{submitModifierLabel}</span>
               <CornerDownLeft className="size-3" />
             </span>
           </Button>
@@ -779,8 +775,9 @@ export default function BrowserPane({
   const activeRuntimeEnvironmentId = useAppStore(
     (s) => s.settings?.activeRuntimeEnvironmentId ?? null
   )
-  const browserPagesByWorkspace = useAppStore((s) => s.browserPagesByWorkspace)
-  const browserPages = browserPagesByWorkspace[browserTab.id] ?? EMPTY_BROWSER_PAGES
+  const browserPages = useAppStore((s) =>
+    getBrowserPagesForWorkspace(s.browserPagesByWorkspace, browserTab.id)
+  )
   const activeBrowserPage =
     browserPages.find((page) => page.id === browserTab.activePageId) ?? browserPages[0] ?? null
   const updateBrowserPageState = useAppStore((s) => s.updateBrowserPageState)
@@ -2525,6 +2522,8 @@ function BrowserPagePane({
   browserTabIdRef.current = browserTab.id
   const inputLockedRef = useRef(inputLocked)
   inputLockedRef.current = inputLocked
+  const keybindings = useAppStore((state) => state.keybindings)
+  const grabElementShortcut = useShortcutLabel('browser.grabElement')
   const faviconUrlRef = useRef<string | null>(browserTab.faviconUrl)
   const initialBrowserUrlRef = useRef(browserTab.url)
   const browserTabUrlRef = useRef(browserTab.url)
@@ -3110,9 +3109,9 @@ function BrowserPagePane({
     if (!isActive) {
       return
     }
+    const shortcutPlatform = getShortcutPlatform()
     const handleKeyDown = (e: KeyboardEvent): void => {
-      const isMod = navigator.userAgent.includes('Mac') ? e.metaKey : e.ctrlKey
-      if (!isMod || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'f') {
+      if (!keybindingMatchesAction('browser.find', e, shortcutPlatform, keybindings)) {
         return
       }
       e.preventDefault()
@@ -3121,7 +3120,7 @@ function BrowserPagePane({
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [isActive])
+  }, [isActive, keybindings])
 
   // Cmd/Ctrl+F — find in page (IPC path: focus inside webview guest)
   // Why: a focused webview guest is a separate Chromium process so the renderer
@@ -3152,9 +3151,16 @@ function BrowserPagePane({
     if (!isActive) {
       return
     }
+    const shortcutPlatform = getShortcutPlatform()
     const handleKeyDown = (e: KeyboardEvent): void => {
-      const isMod = navigator.userAgent.includes('Mac') ? e.metaKey : e.ctrlKey
-      if (!isMod || e.altKey || e.key.toLowerCase() !== 'r') {
+      const isHardReload = keybindingMatchesAction(
+        'browser.hardReload',
+        e,
+        shortcutPlatform,
+        keybindings
+      )
+      const isReload = keybindingMatchesAction('browser.reload', e, shortcutPlatform, keybindings)
+      if (!isHardReload && !isReload) {
         return
       }
       if (isEditableKeyboardTarget(e.target)) {
@@ -3162,7 +3168,7 @@ function BrowserPagePane({
       }
       e.preventDefault()
       e.stopPropagation()
-      if (e.shiftKey) {
+      if (isHardReload) {
         webviewRef.current?.reloadIgnoringCache()
       } else {
         webviewRef.current?.reload()
@@ -3170,7 +3176,7 @@ function BrowserPagePane({
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [isActive])
+  }, [isActive, keybindings])
 
   // Cmd/Ctrl+R — reload (IPC path: focus inside webview guest)
   // Why: a focused webview guest is a separate Chromium process so the renderer
@@ -3571,6 +3577,7 @@ function BrowserPagePane({
       }
 
       if (webviewRegistry.get(browserTab.id) === webview) {
+        moveFocusToRendererBeforeWebviewDetach(webview)
         getHiddenContainer().appendChild(webview)
         parkedAtByTabId.set(browserTab.id, Date.now())
         evictParkedWebviews(browserTab.id)
@@ -3656,7 +3663,7 @@ function BrowserPagePane({
   }, [browserTab.url, focusWebviewNow])
 
   useEffect(() => {
-    if (!browserTab.loading) {
+    if (!shouldPollChromiumErrorPage({ isActive, loading: browserTab.loading })) {
       return
     }
 
@@ -3689,12 +3696,13 @@ function BrowserPagePane({
 
     // Why: some Electron builds paint Chromium's internal chrome-error page
     // without delivering a timely did-fail-load event to the renderer webview.
-    // Polling only while the tab is "loading" gives Orca a last-resort path to
-    // swap the black guest surface for the explicit unreachable-page overlay.
+    // Polling only while the active tab is "loading" gives Orca a last-resort
+    // path to swap the black guest surface without waking every retained
+    // inactive browser pane on a 250ms loop.
     detectChromiumErrorPage()
     const intervalId = window.setInterval(detectChromiumErrorPage, 250)
     return () => window.clearInterval(intervalId)
-  }, [browserTab.id, browserTab.loading])
+  }, [browserTab.id, browserTab.loading, isActive])
 
   const startGrabIntent = useCallback(
     (nextIntent: GrabIntent): void => {
@@ -3724,6 +3732,7 @@ function BrowserPagePane({
     if (!isActive) {
       return
     }
+    const shortcutPlatform = getShortcutPlatform()
     const handleKeyDown = (e: KeyboardEvent): void => {
       // Why: let native Cmd+C work in text inputs (address bar, search fields,
       // contentEditable regions). Only intercept when focus is on a non-input
@@ -3731,23 +3740,22 @@ function BrowserPagePane({
       if (isEditableKeyboardTarget(e.target)) {
         return
       }
-      const isMod = navigator.userAgent.includes('Mac') ? e.metaKey : e.ctrlKey
-      if (isMod && !e.shiftKey && e.key.toLowerCase() === 'c') {
+      if (keybindingMatchesAction('browser.grabElement', e, shortcutPlatform, keybindings)) {
         e.preventDefault()
         startGrabIntent('copy')
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isActive, startGrabIntent])
+  }, [isActive, keybindings, startGrabIntent])
 
   useEffect(() => {
     if (!isActive) {
       return
     }
+    const shortcutPlatform = getShortcutPlatform()
     const handleKeyDown = (e: KeyboardEvent): void => {
-      const isMod = navigator.userAgent.includes('Mac') ? e.metaKey : e.ctrlKey
-      if (!isMod || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'l') {
+      if (!keybindingMatchesAction('browser.focusAddressBar', e, shortcutPlatform, keybindings)) {
         return
       }
       // Why: Cmd/Ctrl+L is a browser-local focus command. Capture it before
@@ -3759,7 +3767,7 @@ function BrowserPagePane({
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [focusAddressBarNow, isActive])
+  }, [focusAddressBarNow, isActive, keybindings])
 
   // Why: a focused webview guest receives Cmd/Ctrl+C inside Chromium, not the
   // host renderer window. Main forwards the chord back only when the page
@@ -4366,7 +4374,7 @@ function BrowserPagePane({
             </span>
           </TooltipTrigger>
           <TooltipContent side="bottom" sideOffset={4}>
-            {`Grab page element (${navigator.userAgent.includes('Mac') ? '⌘C' : 'Ctrl+C'})`}
+            {`Grab page element (${grabElementShortcut})`}
           </TooltipContent>
         </Tooltip>
 
@@ -4543,7 +4551,7 @@ function BrowserPagePane({
                     groupId={activeGroupId ?? worktreeId}
                     onFocusTerminal={focusTerminalTabSurface}
                     prompt={browserAnnotationsPrompt}
-                    promptDelivery="draft"
+                    promptDelivery="submit-after-ready"
                     launchSource="notes_send"
                   />
                 </DropdownMenuContent>
@@ -4729,7 +4737,7 @@ function BrowserPagePane({
                     groupId={activeGroupId ?? worktreeId}
                     onFocusTerminal={focusTerminalTabSurface}
                     prompt={browserAnnotationsPrompt}
-                    promptDelivery="draft"
+                    promptDelivery="submit-after-ready"
                     launchSource="notes_send"
                   />
                 </DropdownMenuContent>

@@ -46,7 +46,7 @@ describe.skipIf(process.platform === 'win32')('RuntimeClient timeout policy', ()
     servers.add(server)
     await new Promise<void>((resolve) => server.listen(endpoint, resolve))
     writeFileSync(
-      join(userDataPath, 'orca-runtime.json'),
+      join(userDataPath, 'vsagent-runtime.json'),
       JSON.stringify({
         runtimeId: 'runtime-1',
         pid: process.pid,

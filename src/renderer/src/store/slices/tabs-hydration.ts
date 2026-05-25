@@ -291,11 +291,15 @@ function mergeLocalOnlyTabs(
   const localTabGroups = local.tabGroups ?? {}
 
   for (const [worktreeId, localTabs] of Object.entries(localUnifiedTabs)) {
-    if (!validWorktreeIds.has(worktreeId)) continue
+    if (!validWorktreeIds.has(worktreeId)) {
+      continue
+    }
     const hydratedTabs = mergedTabs[worktreeId] ?? []
     const hydratedIds = new Set(hydratedTabs.map((t) => t.id))
     const toAdd = localTabs.filter((t) => !hydratedIds.has(t.id) && t.createdAt > cutoff)
-    if (toAdd.length === 0) continue
+    if (toAdd.length === 0) {
+      continue
+    }
 
     // Re-sort so newly merged local tabs land in createdAt order at the end.
     mergedTabs[worktreeId] = [...hydratedTabs, ...toAdd].sort(

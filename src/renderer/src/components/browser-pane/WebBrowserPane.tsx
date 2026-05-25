@@ -16,14 +16,7 @@
 //     find, but it's blocked by sandbox attributes in some configs).
 //   - Cookie inspection.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Copy,
-  ExternalLink,
-  MoreHorizontal,
-  RotateCcw
-} from 'lucide-react'
+import { ArrowLeft, ArrowRight, Copy, ExternalLink, MoreHorizontal, RotateCcw } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,7 +41,9 @@ type Session = { id: string; targetOrigin: string; proxyPath: string }
 
 function deriveOriginFromInput(input: string): string {
   const trimmed = input.trim()
-  if (!trimmed) return ''
+  if (!trimmed) {
+    return ''
+  }
   if (/^https?:\/\//i.test(trimmed)) {
     try {
       return new URL(trimmed).origin
@@ -84,18 +79,29 @@ export function WebBrowserPane({
   // this selector fires → local iframe navigates. Local nav also pushes
   // back into the store so OTHER browsers see it.
   const storeUrl = useAppStore((s) => {
-    if (!workspaceId) return undefined
+    if (!workspaceId) {
+      return undefined
+    }
     for (const list of Object.values(s.browserTabsByWorktree)) {
-      for (const ws of list) if (ws.id === workspaceId) return ws.url
+      for (const ws of list) {
+        if (ws.id === workspaceId) {
+          return ws.url
+        }
+      }
     }
     return undefined
   })
   const setBrowserPageUrl = useAppStore((s) => s.setBrowserPageUrl)
   const activePageId = useAppStore((s) => {
-    if (!workspaceId) return null
+    if (!workspaceId) {
+      return null
+    }
     for (const list of Object.values(s.browserTabsByWorktree)) {
-      for (const ws of list)
-        if (ws.id === workspaceId) return ws.activePageId ?? ws.pageIds?.[0] ?? null
+      for (const ws of list) {
+        if (ws.id === workspaceId) {
+          return ws.activePageId ?? ws.pageIds?.[0] ?? null
+        }
+      }
     }
     return null
   })
@@ -141,7 +147,9 @@ export function WebBrowserPane({
         // Why: replace the entry rather than push when the new URL equals
         // the current one — happens when the proxy posts a nav event with
         // the same path the user just typed.
-        if (historyIdx >= 0 && prev[historyIdx] === upstreamUrl) return prev
+        if (historyIdx >= 0 && prev[historyIdx] === upstreamUrl) {
+          return prev
+        }
         const truncated = historyIdx + 1 >= prev.length ? prev : prev.slice(0, historyIdx + 1)
         const next = [...truncated, upstreamUrl]
         // Trim to a max — unbounded would leak memory on chatty sites.
@@ -178,7 +186,9 @@ export function WebBrowserPane({
         } else {
           s = await window.api.webPreview.create({ targetOrigin: origin })
         }
-        if (seq !== navSeq.current) return
+        if (seq !== navSeq.current) {
+          return
+        }
         setSession(s)
         const nextIframeSrc = s.proxyPath + path
         // Why: when nextIframeSrc equals the current iframe src, React
@@ -213,7 +223,9 @@ export function WebBrowserPane({
         const display = origin + path
         setDisplayedUrl(display)
         setUrlInput(display)
-        if (!opts?.fromHistory) pushHistory(display)
+        if (!opts?.fromHistory) {
+          pushHistory(display)
+        }
         // Why: push the new URL into the workspace's store entry so the
         // backend's session-set broadcaster carries it to other browsers.
         // Record the URL in lastPushedUrlRef so the storeUrl→pane echo
@@ -223,7 +235,9 @@ export function WebBrowserPane({
           setBrowserPageUrl(activePageId, display)
         }
       } catch (err) {
-        if (seq !== navSeq.current) return
+        if (seq !== navSeq.current) {
+          return
+        }
         setStatus('error')
         setError(err instanceof Error ? err.message : String(err))
       }
@@ -236,9 +250,15 @@ export function WebBrowserPane({
   useEffect(() => {
     const handler = (e: MessageEvent): void => {
       const data = e.data
-      if (!data || typeof data !== 'object') return
-      if (data.type !== 'orca-webpreview-nav') return
-      if (typeof data.upstreamUrl !== 'string') return
+      if (!data || typeof data !== 'object') {
+        return
+      }
+      if (data.type !== 'orca-webpreview-nav') {
+        return
+      }
+      if (typeof data.upstreamUrl !== 'string') {
+        return
+      }
       const next = data.upstreamUrl
       setDisplayedUrl(next)
       // Don't overwrite the user's typing if the address bar is focused.
@@ -251,8 +271,12 @@ export function WebBrowserPane({
         // declaration for the rationale.
         expectingLoadEchoRef.current = false
         setHistoryStack((prev) => {
-          if (prev.length === 0) return [next]
-          if (prev[historyIdx] === next) return prev
+          if (prev.length === 0) {
+            return [next]
+          }
+          if (prev[historyIdx] === next) {
+            return prev
+          }
           const copy = [...prev]
           copy[historyIdx] = next
           return copy
@@ -286,12 +310,20 @@ export function WebBrowserPane({
   // We also compare against displayedUrl to skip when the iframe is
   // already pointing at the same URL (e.g. on initial hydrate).
   useEffect(() => {
-    if (!storeUrl || !workspaceId) return
-    if (storeUrl === lastPushedUrlRef.current) return
-    if (storeUrl === displayedUrl) return
+    if (!storeUrl || !workspaceId) {
+      return
+    }
+    if (storeUrl === lastPushedUrlRef.current) {
+      return
+    }
+    if (storeUrl === displayedUrl) {
+      return
+    }
     // Don't yank the user out of an in-progress edit — only navigate
     // when the address bar isn't focused.
-    if (document.activeElement === addressInputRef.current) return
+    if (document.activeElement === addressInputRef.current) {
+      return
+    }
     lastPushedUrlRef.current = storeUrl
     void navigate(storeUrl, { fromHistory: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -322,7 +354,9 @@ export function WebBrowserPane({
 
   const reload = useCallback(() => {
     const ifr = iframeRef.current
-    if (!ifr) return
+    if (!ifr) {
+      return
+    }
     // Why: try iframe-history reload first (preserves scroll on same-origin
     // proxy responses). Fall back to forcing the src round-trip.
     try {
@@ -342,19 +376,27 @@ export function WebBrowserPane({
   const canGoForward = historyIdx >= 0 && historyIdx < historyStack.length - 1
 
   const goBack = useCallback(() => {
-    if (!canGoBack) return
+    if (!canGoBack) {
+      return
+    }
     const nextIdx = historyIdx - 1
     setHistoryIdx(nextIdx)
     const target = historyStack[nextIdx]
-    if (target) void navigate(target, { fromHistory: true })
+    if (target) {
+      void navigate(target, { fromHistory: true })
+    }
   }, [canGoBack, historyIdx, historyStack, navigate])
 
   const goForward = useCallback(() => {
-    if (!canGoForward) return
+    if (!canGoForward) {
+      return
+    }
     const nextIdx = historyIdx + 1
     setHistoryIdx(nextIdx)
     const target = historyStack[nextIdx]
-    if (target) void navigate(target, { fromHistory: true })
+    if (target) {
+      void navigate(target, { fromHistory: true })
+    }
   }, [canGoForward, historyIdx, historyStack, navigate])
 
   const onSubmit = useCallback(
@@ -444,10 +486,7 @@ export function WebBrowserPane({
         />
         {status === 'loading' && <span className="text-xs text-muted-foreground px-1">…</span>}
         {status === 'error' && error && (
-          <span
-            className="text-xs text-destructive truncate max-w-[200px]"
-            title={error}
-          >
+          <span className="text-xs text-destructive truncate max-w-[200px]" title={error}>
             {error}
           </span>
         )}
@@ -472,19 +511,13 @@ export function WebBrowserPane({
               Open in browser tab
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => void navigate('http://localhost:3000')}
-            >
+            <DropdownMenuItem onSelect={() => void navigate('http://localhost:3000')}>
               Go to <span className="font-mono ml-2">localhost:3000</span>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => void navigate('http://localhost:5173')}
-            >
+            <DropdownMenuItem onSelect={() => void navigate('http://localhost:5173')}>
               Go to <span className="font-mono ml-2">localhost:5173</span>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => void navigate('http://localhost:8080')}
-            >
+            <DropdownMenuItem onSelect={() => void navigate('http://localhost:8080')}>
               Go to <span className="font-mono ml-2">localhost:8080</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

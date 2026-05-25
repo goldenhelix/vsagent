@@ -19,14 +19,12 @@ const RemoteFolderPickerDialog = React.memo(function RemoteFolderPickerDialog() 
   // Why: callers that need custom completion (onboarding, settings, etc.)
   // pass a function via modalData.onPick. zustand state holds the function
   // in-memory (no serialization round-trip), so this is safe.
-  const onPick = typeof modalData.onPick === 'function'
-    ? (modalData.onPick as (path: string) => void)
-    : null
+  const onPick =
+    typeof modalData.onPick === 'function' ? (modalData.onPick as (path: string) => void) : null
   const title = typeof modalData.title === 'string' ? modalData.title : 'Pick a folder'
   const initialValue = typeof modalData.initialValue === 'string' ? modalData.initialValue : '~'
-  const placeholder = typeof modalData.placeholder === 'string'
-    ? modalData.placeholder
-    : '~/path/to/repo'
+  const placeholder =
+    typeof modalData.placeholder === 'string' ? modalData.placeholder : '~/path/to/repo'
 
   const handlePick = useCallback(
     (path: string) => {
@@ -48,7 +46,9 @@ const RemoteFolderPickerDialog = React.memo(function RemoteFolderPickerDialog() 
     <Dialog
       open={isOpen}
       onOpenChange={(open) => {
-        if (!open) closeModal()
+        if (!open) {
+          closeModal()
+        }
       }}
     >
       <DialogContent

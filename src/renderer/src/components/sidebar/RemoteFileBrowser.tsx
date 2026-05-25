@@ -57,7 +57,9 @@ export function RemoteFileBrowser({
   // change. The default falls back to the SSH browseDir for backwards
   // compatibility with the existing remote-project flow.
   const browseDirFn = useMemo<BrowseDirFn>(() => {
-    if (browseDir) return browseDir
+    if (browseDir) {
+      return browseDir
+    }
     if (targetId) {
       return (dirPath: string) => window.api.ssh.browseDir({ targetId, dirPath })
     }

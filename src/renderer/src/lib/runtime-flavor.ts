@@ -12,8 +12,12 @@ let cached: { web: boolean; platform: string } | null = null
 let inflight: Promise<{ web: boolean; platform: string }> | null = null
 
 export async function loadRuntimeFlavor(): Promise<{ web: boolean; platform: string }> {
-  if (cached) return cached
-  if (inflight) return inflight
+  if (cached) {
+    return cached
+  }
+  if (inflight) {
+    return inflight
+  }
   inflight = (async () => {
     try {
       const value = await window.api.app.getRuntimeFlavor()
@@ -48,11 +52,15 @@ export function getRuntimeFlavor(): { web: boolean; platform: string } | null {
 // backend should NOT see PowerShell / CMD shell options. These helpers
 // route to whichever side is authoritative for the current runtime.
 export function shellHostIsWindows(): boolean {
-  if (cached?.web) return cached.platform === 'win32'
+  if (cached?.web) {
+    return cached.platform === 'win32'
+  }
   return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
 }
 
 export function shellHostIsMac(): boolean {
-  if (cached?.web) return cached.platform === 'darwin'
+  if (cached?.web) {
+    return cached.platform === 'darwin'
+  }
   return typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
 }

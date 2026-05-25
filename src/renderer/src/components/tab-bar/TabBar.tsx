@@ -5,7 +5,7 @@
  * more clarity than the ~5 lines of bloat is worth. */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { SortableContext } from '@dnd-kit/sortable'
-import { FilePlus, Globe, Plus, TerminalSquare } from 'lucide-react'
+import { FilePlus, FileText, Globe, Plus, TerminalSquare } from 'lucide-react'
 import type {
   BrowserTab as BrowserTabState,
   TerminalTab,
@@ -27,6 +27,8 @@ import { ShellIcon } from './shell-icons'
 import { resolveWindowsShellLaunchTarget } from './windows-shell-launch'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { shellHostIsWindows } from '@/lib/runtime-flavor'
+import { useWindowsTerminalCapabilities } from '@/lib/windows-terminal-capabilities'
+import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,16 +38,11 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 
-// Why: keyboard shortcut LABELS use navigator UA — the user presses keys in
-// their local browser regardless of where the backend runs. The shell host
-// (Windows/CMD/PowerShell affordances) uses `shellHostIsWindows()` which
-// reads the BACKEND platform in web mode. Otherwise a Windows user
-// browsing into a Linux backend sees PowerShell/CMD options that try to
-// spawn nonexistent binaries.
-const isMac = navigator.userAgent.includes('Mac')
-const NEW_TERMINAL_SHORTCUT = isMac ? '⌘T' : 'Ctrl+T'
-const NEW_BROWSER_SHORTCUT = isMac ? '⌘⇧B' : 'Ctrl+Shift+B'
-const NEW_FILE_SHORTCUT = isMac ? '⌘⇧M' : 'Ctrl+Shift+M'
+// Why: shell-host checks use shellHostIsWindows() (backend platform) so web
+// clients into a Linux backend don't see PowerShell/CMD affordances that
+// can't be spawned. Shortcut labels come from useShortcutLabel().
+type GitStatusEntries = ReturnType<typeof useAppStore.getState>['gitStatusByWorktree'][string]
+const EMPTY_GIT_STATUS_ENTRIES: GitStatusEntries = []
 
 type TabBarProps = {
   tabs: (TerminalTab & { unifiedTabId?: string })[]
@@ -64,9 +61,7 @@ type TabBarProps = {
   terminalOnly?: boolean
   showAgentLaunchItems?: boolean
   onNewFileTab?: () => void
-  /** Whether WSL is installed on this Windows machine. When true, the "+"
-   *  dropdown shows a WSL option under the terminal submenu. */
-  wslAvailable?: boolean
+  onOpenFileTab?: () => void
   onSetCustomTitle: (tabId: string, title: string | null) => void
   onSetTabColor: (tabId: string, color: string | null) => void
   onTogglePaneExpand: (tabId: string) => void
@@ -131,6 +126,7 @@ function TabBarInner({
   terminalOnly = false,
   showAgentLaunchItems = true,
   onNewFileTab,
+  onOpenFileTab,
   onSetCustomTitle,
   onSetTabColor,
   onTogglePaneExpand,
@@ -148,35 +144,28 @@ function TabBarInner({
   onPinFile,
   tabBarOrder,
   onCreateSplitGroup,
-  hoveredTabInsertion,
-  wslAvailable
+  hoveredTabInsertion
 }: TabBarProps): React.JSX.Element {
-  const gitStatusByWorktree = useAppStore((s) => s.gitStatusByWorktree)
-  // Why: read this inside the component so it picks up the backend platform
-  // populated by `loadRuntimeFlavor()` at boot. A module-level const would
-  // evaluate before the flavor IPC has resolved.
+  // Why: read shellHostIsWindows() inside the component so it picks up the
+  // backend platform populated by `loadRuntimeFlavor()` at boot. A
+  // module-level const would evaluate before the flavor IPC has resolved.
   const isWindows = shellHostIsWindows()
+  const newTerminalShortcut = useShortcutLabel('tab.newTerminal')
+  const newBrowserShortcut = useShortcutLabel('tab.newBrowser')
+  const newFileShortcut = useShortcutLabel('tab.newMarkdown')
+  const gitStatusEntries = useAppStore(
+    (s) => s.gitStatusByWorktree[worktreeId] ?? EMPTY_GIT_STATUS_ENTRIES
+  )
   const defaultWindowsShell = useAppStore(
     (s) => s.settings?.terminalWindowsShell ?? 'powershell.exe'
   )
   const defaultWindowsPowerShellImplementation = useAppStore(
     (s) => s.settings?.terminalWindowsPowerShellImplementation ?? 'auto'
   )
-  const [pwshAvailable, setPwshAvailable] = useState(false)
-  useEffect(() => {
-    if (!isWindows) {
-      setPwshAvailable(false)
-      return
-    }
-
-    void window.api.pwsh.isAvailable().then(setPwshAvailable)
-  }, [isWindows])
+  const windowsTerminalCapabilities = useWindowsTerminalCapabilities(isWindows)
   const resolvedGroupId = groupId ?? worktreeId
 
-  const statusByRelativePath = useMemo(
-    () => buildStatusMap(gitStatusByWorktree[worktreeId] ?? []),
-    [worktreeId, gitStatusByWorktree]
-  )
+  const statusByRelativePath = useMemo(() => buildStatusMap(gitStatusEntries), [gitStatusEntries])
 
   // Why: Electron <webview> elements run in a separate process, so clicking
   // inside one never dispatches a pointerdown on the renderer document.
@@ -507,7 +496,9 @@ function TabBarInner({
               }[] = [
                 { label: 'PowerShell', shell: 'powershell.exe' },
                 { label: 'CMD Prompt', shell: 'cmd.exe' },
-                ...(wslAvailable ? ([{ label: 'WSL', shell: 'wsl.exe' }] as const) : [])
+                ...(windowsTerminalCapabilities.wslAvailable
+                  ? ([{ label: 'WSL', shell: 'wsl.exe' }] as const)
+                  : [])
               ]
               const defaultEntry =
                 allShells.find((s) => s.shell === defaultWindowsShell) ?? allShells[0]
@@ -530,7 +521,7 @@ function TabBarInner({
                         resolveWindowsShellLaunchTarget(
                           entry.shell,
                           defaultWindowsPowerShellImplementation,
-                          pwshAvailable
+                          windowsTerminalCapabilities.pwshAvailable
                         )
                       )
                     }}
@@ -539,7 +530,7 @@ function TabBarInner({
                     <ShellIcon shell={entry.shell} size={14} />
                     <span className="flex-1">New Terminal: {entry.label}</span>
                     {isDefault ? (
-                      <DropdownMenuShortcut>{NEW_TERMINAL_SHORTCUT}</DropdownMenuShortcut>
+                      <DropdownMenuShortcut>{newTerminalShortcut}</DropdownMenuShortcut>
                     ) : null}
                   </DropdownMenuItem>
                 )
@@ -554,7 +545,7 @@ function TabBarInner({
             >
               <TerminalSquare className="size-4 text-muted-foreground" />
               New Terminal
-              <DropdownMenuShortcut>{NEW_TERMINAL_SHORTCUT}</DropdownMenuShortcut>
+              <DropdownMenuShortcut>{newTerminalShortcut}</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
           {!terminalOnly && (
@@ -564,7 +555,7 @@ function TabBarInner({
             >
               <Globe className="size-4 text-muted-foreground" />
               New Browser Tab
-              <DropdownMenuShortcut>{NEW_BROWSER_SHORTCUT}</DropdownMenuShortcut>
+              <DropdownMenuShortcut>{newBrowserShortcut}</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
           {!terminalOnly && onNewFileTab && (
@@ -574,7 +565,16 @@ function TabBarInner({
             >
               <FilePlus className="size-4 text-muted-foreground" />
               New Markdown
-              <DropdownMenuShortcut>{NEW_FILE_SHORTCUT}</DropdownMenuShortcut>
+              <DropdownMenuShortcut>{newFileShortcut}</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {!terminalOnly && onOpenFileTab && (
+            <DropdownMenuItem
+              onSelect={onOpenFileTab}
+              className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+            >
+              <FileText className="size-4 text-muted-foreground" />
+              Open Markdown...
             </DropdownMenuItem>
           )}
           {showAgentLaunchItems ? (

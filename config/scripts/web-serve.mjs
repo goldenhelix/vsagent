@@ -53,7 +53,7 @@ mkdirSync(userDataPath, { recursive: true })
 // files that make Electron fail-and-shutdown immediately on the next boot
 // (FATAL: Failed to shutdown / SIGTRAP). Sweep them before launch so the
 // operator doesn't have to reach into the data dir after a crash.
-const staleFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'orca-runtime.json']
+const staleFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'vsagent-runtime.json']
 for (const name of staleFiles) {
   const p = path.join(userDataPath, name)
   if (existsSync(p)) {
@@ -144,7 +144,7 @@ const prevLogPath = path.join(logDir, 'web-serve.prev.log')
 try {
   if (existsSync(logPath)) {
     const size = statSync(logPath).size
-    if (size > 0) renameSync(logPath, prevLogPath)
+    if (size > 0) {renameSync(logPath, prevLogPath)}
   }
 } catch {
   // Why: a rotate failure should not block startup; the log just appends.
@@ -172,12 +172,12 @@ child.stderr?.on('data', teeStderr)
 child.on('exit', (code, signal) => {
   const msg = `[web-serve] backend exited code=${code} signal=${signal}`
   console.log(msg)
-  logStream.write(msg + '\n')
+  logStream.write(`${msg  }\n`)
   logStream.end(() => process.exit(code ?? 0))
 })
 
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => {
-    if (!child.killed) child.kill(sig)
+    if (!child.killed) {child.kill(sig)}
   })
 }

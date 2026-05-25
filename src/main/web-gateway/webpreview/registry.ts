@@ -44,7 +44,9 @@ export function getSession(id: string): WebPreviewSession | undefined {
 
 export function updateSessionOrigin(id: string, targetOrigin: string): WebPreviewSession | null {
   const existing = sessions.get(id)
-  if (!existing) return null
+  if (!existing) {
+    return null
+  }
   existing.targetOrigin = normalizeOrigin(targetOrigin)
   // Why: reset the follow counter — this is a fresh navigate from the
   // renderer, not an upstream-driven retarget.
@@ -58,8 +60,12 @@ export function updateSessionOrigin(id: string, targetOrigin: string): WebPrevie
 const MAX_FOLLOWS_PER_NAV = 4
 export function followSessionOrigin(id: string, targetOrigin: string): WebPreviewSession | null {
   const existing = sessions.get(id)
-  if (!existing) return null
-  if (existing.followsSinceLastSetOrigin >= MAX_FOLLOWS_PER_NAV) return null
+  if (!existing) {
+    return null
+  }
+  if (existing.followsSinceLastSetOrigin >= MAX_FOLLOWS_PER_NAV) {
+    return null
+  }
   existing.targetOrigin = normalizeOrigin(targetOrigin)
   existing.followsSinceLastSetOrigin += 1
   return existing
@@ -75,7 +81,9 @@ export function listSessions(): WebPreviewSession[] {
 
 function normalizeOrigin(input: string): string {
   const trimmed = input.trim()
-  if (!trimmed) throw new Error('webpreview: target origin is empty')
+  if (!trimmed) {
+    throw new Error('webpreview: target origin is empty')
+  }
   // If no scheme, assume http (the common dev-server case is localhost:3000).
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
   const url = new URL(withScheme)
