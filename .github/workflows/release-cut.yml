@@ -41,12 +41,11 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    # Why: GitHub scheduled workflows are not guaranteed to start exactly on
-    # time and can be delayed or dropped around high-load periods. We retry
-    # across the full target hour and dedupe per PT slot. Cron is UTC, so run
-    # during both PST and PDT equivalents and let the PT-hour gate decide.
-    - cron: '*/5 10,11,22,23 * * *'
+  # Why: scheduled auto-RC is disabled on the VSAgent fork. The schedule path
+  # was failing intermittently (no auto-RC consumers downstream) and the
+  # workflow_dispatch path remains the canonical way to cut releases here.
+  # Schedule-conditional steps below are left in place so re-enabling is a
+  # one-line revert.
 
 permissions:
   contents: write
