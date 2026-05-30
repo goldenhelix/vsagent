@@ -75,6 +75,36 @@ for (const rel of ['out/main/index.js', 'out/web/index.html', 'config/scripts/we
 log('pnpm install --prod --no-frozen-lockfile (fetches electron binary + rebuilds native deps)')
 run('pnpm', ['install', '--prod', '--no-frozen-lockfile'], { cwd: appDir })
 
+// pnpm 10 gates a dependency's install script behind onlyBuiltDependencies, and
+// a "cold" store/cache (e.g. a fresh CI runner that never downloaded electron's
+// binary) can leave electron's install.js a no-op, so `require('electron')`
+// resolves to a binary that isn't there. require('electron') returns the binary
+// path; verify it exists and, if not, force a clean download before booting.
+function resolveElectron() {
+  const r = spawnSync(
+    'node',
+    ['-e', 'const p=require("electron");process.stdout.write(JSON.stringify({path:p,exists:require("fs").existsSync(p)}))'],
+    { cwd: appDir, encoding: 'utf8' }
+  )
+  try {
+    return JSON.parse(r.stdout)
+  } catch {
+    return { path: null, exists: false, err: (r.stderr || '').trim() }
+  }
+}
+let electron = resolveElectron()
+log(`electron: ${JSON.stringify(electron)}`)
+if (!electron.exists) {
+  log('electron binary missing after install — forcing a clean download')
+  run('node', ['install.js'], {
+    cwd: path.join(appDir, 'node_modules/electron'),
+    env: { ...process.env, ELECTRON_CACHE: path.join(work, 'electron-cache'), force_no_cache: 'true' }
+  })
+  electron = resolveElectron()
+  log(`electron after repair: ${JSON.stringify(electron)}`)
+  if (!electron.exists) {die(`electron binary still missing after forced install: ${JSON.stringify(electron)}`)}
+}
+
 // Boot the gateway headless. web-serve.mjs already pins the Ozone headless
 // backend, so this works on a display-less CI runner without xvfb.
 log(`booting web-serve.mjs on ${HOST}:${PORT}`)
