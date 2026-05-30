@@ -183,6 +183,19 @@ writeFileSync(path.join(stageDir, 'VERSION'), `${version}\n`, 'utf8')
 // is not shipped, so we replace it with a noop that still rebuilds
 // electron's chromium binary (the only thing strictly required at
 // runtime).
+// Why: pnpm 10 only runs a dependency's install/build script when it's listed
+// in onlyBuiltDependencies. electron's script downloads its prebuilt binary;
+// without it `require('electron')` throws "failed to install correctly" on a
+// fresh `pnpm install --prod`, crash-looping the backend before it ever binds.
+// `pnpm rebuild electron` does NOT bypass this gate, so add electron to the
+// allowlist for the shipped manifest.
+const stagedPnpm = {
+  ...pkg.pnpm,
+  onlyBuiltDependencies: Array.from(
+    new Set([...(pkg.pnpm?.onlyBuiltDependencies ?? []), 'electron'])
+  )
+}
+
 const stagedPkg = {
   name: pkg.name,
   version,
@@ -195,16 +208,18 @@ const stagedPkg = {
   bin: { vsagent: './out/cli/index.js' },
   scripts: {
     'web:serve': 'node config/scripts/web-serve.mjs',
-    // Why: on `pnpm install --prod` the project's normal postinstall
-    // (`pnpm rebuild electron && rebuild-native-deps.mjs`) needs the
-    // rebuild-native-deps helper we deliberately don't ship. Reduce it
-    // to just rebuilding electron, which pnpm already wired up.
-    postinstall: 'pnpm rebuild electron better-sqlite3 node-pty || true'
+    // Why: belt-and-suspenders native rebuild against the host ABI. The real
+    // binary download for electron now happens at install time via
+    // onlyBuiltDependencies below — `pnpm rebuild electron` alone is NOT
+    // enough because pnpm 10's rebuild also honors the allowlist and would
+    // skip electron (the bug that crash-looped fresh installs with "Electron
+    // failed to install correctly").
+    postinstall: 'pnpm rebuild better-sqlite3 node-pty || true'
   },
   dependencies: pkg.dependencies,
   engines: pkg.engines,
   packageManager: pkg.packageManager,
-  pnpm: pkg.pnpm
+  pnpm: stagedPnpm
 }
 writeFileSync(
   path.join(stageDir, 'package.json'),
