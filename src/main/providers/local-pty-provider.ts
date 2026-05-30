@@ -31,6 +31,7 @@ import {
   STARTUP_COMMAND_READY_MAX_WAIT_MS
 } from './local-pty-shell-ready'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
+import { removeInheritedNodeEnv } from '../pty/terminal-node-env'
 import { isHostCodexHomeForWsl } from '../pty/codex-home-wsl-env'
 
 const PANE_IDENTITY_ENV_KEYS = ['ORCA_PANE_KEY', 'ORCA_TAB_ID', 'ORCA_WORKTREE_ID'] as const
@@ -266,6 +267,7 @@ export class LocalPtyProvider implements IPtyProvider {
     // identity belongs to the child PTY, not the parent shell that spawned app.
     removeUnspecifiedPaneIdentityEnv(spawnEnv, args.env)
     removeInheritedNoColor(spawnEnv)
+    removeInheritedNodeEnv(spawnEnv)
     for (const key of args.envToDelete ?? []) {
       delete spawnEnv[key]
     }
