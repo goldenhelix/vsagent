@@ -19,7 +19,12 @@ import { getNotificationSoundOptions } from '@/components/notification-sound-opt
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { useAppStore } from '@/store'
 import { isWebMode } from '@/lib/runtime-flavor'
-import { notificationsSupported, requestNotificationPermission } from '@/lib/web-notifications'
+import {
+  notificationPermissionGranted,
+  notificationsSupported,
+  requestNotificationPermission,
+  showWebNotification
+} from '@/lib/web-notifications'
 export { NOTIFICATIONS_PANE_SEARCH_ENTRIES } from './notifications-search'
 
 type NotificationsPaneProps = {
@@ -64,12 +69,63 @@ function getSystemNotificationSettingsCopy(
   return null
 }
 
+// Why: web-only. The deployed web stack's headless main can't show OS
+// notifications, so the test falls back to the browser's Notification API +
+// the bridge sound. A test is user-initiated, so it bypasses focus/cooldown
+// gating, but the browser still requires its own Notification permission.
+// Returns true once the test path has fully handled the click (so the caller
+// must not fall through to the desktop failure toasts).
+async function deliverWebTestNotification(
+  notificationSettings: GlobalSettings['notifications'],
+  volumeDraft: number
+): Promise<boolean> {
+  if (!notificationsSupported()) {
+    toast.error('Browser notifications are not supported here', {
+      description: 'This browser or connection (insecure context) cannot show notifications.'
+    })
+    return true
+  }
+  // Why: runs from the button's click gesture, so requesting permission inline
+  // still prompts the user rather than silently resolving the current value.
+  if (!notificationPermissionGranted()) {
+    await requestNotificationPermission()
+    if (!notificationPermissionGranted()) {
+      toast.error('Enable browser notifications to test', {
+        description: 'Allow notifications for this site, then use the Enable button above.'
+      })
+      return true
+    }
+  }
+  const shown = showWebNotification({ source: 'test' })
+  if (!shown) {
+    toast.error('Test notification was not delivered')
+    return true
+  }
+  // Why: force so the test always rings even within the per-worktree cooldown
+  // window; sound plays over the bridge for both built-in and custom sounds.
+  if (notificationSettings.customSoundId !== 'system') {
+    const soundResult = await window.api.notifications.playSound({
+      force: true,
+      volume: volumeDraft
+    })
+    if (soundResult && !soundResult.played) {
+      toast.error('Custom notification sound could not be played')
+      return true
+    }
+  }
+  toast.success('Test notification sent')
+  return true
+}
+
 export async function sendNotificationSettingsTestNotification(
   notificationSettings: GlobalSettings['notifications'],
   volumeDraft: number
 ): Promise<void> {
   const permissionStatus = await window.api.notifications.getPermissionStatus()
-  if (!permissionStatus.supported) {
+  // Why: in web mode the headless main may report notifications as unsupported,
+  // but the browser owns delivery there — let the web path decide instead of
+  // blocking the test on main's (irrelevant) support check.
+  if (!permissionStatus.supported && !isWebMode()) {
     toast.error('Notifications are not supported on this system')
     return
   }
@@ -109,6 +165,14 @@ export async function sendNotificationSettingsTestNotification(
       return
     }
     toast.success('Test notification sent')
+    return
+  }
+
+  // Why: web mode's headless main returns delivered:false ('not-supported')
+  // before any enabled/source checks; the browser shows the toast + plays the
+  // bridge sound client-side instead of surfacing the desktop failure copy.
+  if (isWebMode()) {
+    await deliverWebTestNotification(notificationSettings, volumeDraft)
     return
   }
 

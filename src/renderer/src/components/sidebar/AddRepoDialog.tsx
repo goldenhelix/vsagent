@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NestedRepoTreePreview } from '@/components/repo/NestedRepoTreePreview'
+import { RemoteFolderPicker } from '@/components/RemoteFolderPicker'
 import { track } from '@/lib/telemetry'
 import { RemoteStep, CloneStep, useRemoteRepo } from './AddRepoSteps'
 import { CreateStep, useCreateRepo } from './AddRepoCreateStep'
@@ -73,9 +74,9 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
   const setHideDefaultBranchWorkspace = useAppStore((s) => s.setHideDefaultBranchWorkspace)
   const settings = useAppStore((s) => s.settings)
 
-  const [step, setStep] = useState<'add' | 'clone' | 'remote' | 'create' | 'nested' | 'setup'>(
-    'add'
-  )
+  const [step, setStep] = useState<
+    'add' | 'clone' | 'remote' | 'remote-folder' | 'create' | 'nested' | 'setup'
+  >('add')
   const [addedRepo, setAddedRepo] = useState<Repo | null>(null)
   const [existingWorkspaceSource, setExistingWorkspaceSource] =
     useState<AddRepoExistingWorkspaceSource | null>(null)
@@ -289,6 +290,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
     step === 'add' ||
     step === 'clone' ||
     step === 'remote' ||
+    step === 'remote-folder' ||
     step === 'create' ||
     step === 'nested'
 
@@ -364,17 +366,14 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
   }, [droppedLocalPath, handleAddLocalPath, isOpen])
 
   const handleBrowse = useCallback(async () => {
-    // Why: in web mode the Electron open-dialog isn't available, so swap the
-    // native picker for the fork's RemoteFolderPicker modal. Its onPick routes
-    // the chosen server path back through handleAddLocalPath so the nested-repo
-    // scan still runs. Desktop/SSH keep the native folder picker below.
+    // Why: in web mode the Electron open-dialog isn't available, so render the
+    // fork's RemoteFolderPicker inline as a dialog step instead of swapping to
+    // the separate single-modal 'remote-folder-picker'. Keeping AddRepoDialog
+    // mounted is what lets the pick flow into handleAddLocalPath's
+    // setStep('nested'/'setup') — a modal swap would unmount this dialog and the
+    // next step would never render. Desktop/SSH keep the native picker below.
     if (isWebMode()) {
-      openModal('remote-folder-picker', {
-        mode: 'add-repo',
-        onPick: (path: string) => {
-          void handleAddLocalPath(path, 'local_folder_picker')
-        }
-      })
+      setStep('remote-folder')
       return
     }
     const gen = ++localAddGenRef.current
@@ -390,7 +389,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
         setIsAdding(false)
       }
     }
-  }, [handleAddLocalPath, openModal])
+  }, [handleAddLocalPath])
 
   const handleImportNestedRepos = useCallback(
     async (mode: 'group' | 'separate') => {
@@ -835,7 +834,10 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
       >
         {/* Step indicator row — back button (step 2 only), dots, X is rendered by DialogContent */}
         <div className="flex items-center justify-center -mt-1">
-          {(step === 'clone' || step === 'remote' || step === 'create') && (
+          {(step === 'clone' ||
+            step === 'remote' ||
+            step === 'remote-folder' ||
+            step === 'create') && (
             <button
               className="absolute left-6 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               onClick={handleBack}
@@ -1043,6 +1045,25 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
             }}
             onConnectTarget={handleConnectTarget}
           />
+        ) : step === 'remote-folder' ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Browse for a folder</DialogTitle>
+              <DialogDescription>
+                Pick a local Git project or folder on the server to add as a project.
+              </DialogDescription>
+            </DialogHeader>
+            {/* Why: inline picker keeps AddRepoDialog mounted so onPick can flow
+                into handleAddLocalPath -> setStep('nested'/'setup'). onCancel
+                returns to the add step rather than closing the whole dialog. */}
+            <RemoteFolderPicker
+              placeholder="~/path/to/repo"
+              onPick={(path) => {
+                void handleAddLocalPath(path, 'local_folder_picker')
+              }}
+              onCancel={() => setStep('add')}
+            />
+          </>
         ) : step === 'clone' ? (
           <CloneStep
             cloneUrl={cloneUrl}
