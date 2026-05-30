@@ -69,8 +69,11 @@ for (const rel of ['out/main/index.js', 'out/web/index.html', 'config/scripts/we
 
 // Rehydrate node_modules exactly as the install host does: this fetches the
 // Electron binary and rebuilds native deps (better-sqlite3, node-pty).
-log('pnpm install --prod (fetches electron binary + rebuilds native deps)')
-run('pnpm', ['install', '--prod'], { cwd: appDir })
+// --no-frozen-lockfile mirrors install.sh: the staged package.json is slimmed
+// to runtime deps only, so it won't match the full (dev-inclusive) lockfile,
+// and CI otherwise defaults --frozen-lockfile=true and would reject it.
+log('pnpm install --prod --no-frozen-lockfile (fetches electron binary + rebuilds native deps)')
+run('pnpm', ['install', '--prod', '--no-frozen-lockfile'], { cwd: appDir })
 
 // Boot the gateway headless. web-serve.mjs already pins the Ozone headless
 // backend, so this works on a display-less CI runner without xvfb.
