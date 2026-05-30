@@ -93,9 +93,16 @@ console.log(`[release-tarball] repoRoot=${repoRoot}`)
 if (skipBuild) {
   console.log('[release-tarball] --skip-build passed; assuming out/ is fresh')
 } else {
-  run('pnpm', ['run', 'build:electron-vite'])
-  run('pnpm', ['run', 'web:build'])
+  // Why: build:cli runs tsc with --outDir out over src, which EMITS unbundled
+  // out/main/**.js (each with bare `require('../../shared/...')` to out/shared,
+  // which we do not stage). build:electron-vite must run LAST so its clean +
+  // bundled out/main overwrites that tsc clobber — matching the canonical
+  // `build` script order (build:cli then build:electron-vite). Running
+  // electron-vite first (as before) let tsc clobber the bundle, shipping a
+  // dangling `require('../../shared/string-utils')` that crash-looped 0.5.0.
   run('pnpm', ['run', 'build:cli'])
+  run('pnpm', ['run', 'web:build'])
+  run('pnpm', ['run', 'build:electron-vite'])
 }
 
 // Verify the build outputs we expect to ship.
