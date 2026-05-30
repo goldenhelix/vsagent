@@ -199,6 +199,38 @@ export class WebGateway {
       res.end(JSON.stringify({ ok: true, ts: Date.now() }))
       return
     }
+    // Why: notification-sound bytes are binary. The WS bridge serializes invoke
+    // results as JSON, which mangles a Uint8Array into a plain object, so the
+    // web client fetches the sound over HTTP instead. We reuse the existing
+    // 'notifications:loadSound' handler IN-PROCESS — dispatchInvoke returns the
+    // real object (with the live Uint8Array, no serialization) — and stream the
+    // bytes. Routed among the other /__orca/* routes so the SPA fallback (and
+    // the SHARED_TOKEN gate below) never catches it.
+    if (
+      req.url === '/__orca/notification-sound' ||
+      req.url.startsWith('/__orca/notification-sound?')
+    ) {
+      try {
+        const r = (await dispatchInvoke(
+          'notifications:loadSound',
+          this.getHostWebContents(),
+          []
+        )) as
+          | { ok: true; data: Uint8Array; mimeType: string; path: string }
+          | { ok: false; reason: string }
+        if (r.ok) {
+          res.writeHead(200, { 'Content-Type': r.mimeType, 'Cache-Control': 'no-store' })
+          res.end(Buffer.from(r.data))
+        } else {
+          res.writeHead(404, { 'Content-Type': 'text/plain' })
+          res.end(r.reason)
+        }
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' })
+        res.end((err as Error)?.message ?? String(err))
+      }
+      return
+    }
     // Why: the webpreview HTTP proxy serves an iframe-backed in-app browser.
     // Routed BEFORE the SPA static-file lookup so /__orca/webpreview/...
     // never gets caught by the SPA fallback.

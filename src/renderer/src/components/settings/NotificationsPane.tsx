@@ -22,6 +22,7 @@ import { isWebMode } from '@/lib/runtime-flavor'
 import {
   notificationPermissionGranted,
   notificationsSupported,
+  playWebNotificationSound,
   requestNotificationPermission,
   showWebNotification
 } from '@/lib/web-notifications'
@@ -101,14 +102,11 @@ async function deliverWebTestNotification(
     toast.error('Test notification was not delivered')
     return true
   }
-  // Why: force so the test always rings even within the per-worktree cooldown
-  // window; sound plays over the bridge for both built-in and custom sounds.
+  // Why: 'system' means no Orca sound (the OS chime, which web can't trigger) —
+  // treat it as a success no-op. Otherwise fetch + play the sound over HTTP.
   if (notificationSettings.customSoundId !== 'system') {
-    const soundResult = await window.api.notifications.playSound({
-      force: true,
-      volume: volumeDraft
-    })
-    if (soundResult && !soundResult.played) {
+    const played = await playWebNotificationSound(volumeDraft)
+    if (!played) {
       toast.error('Custom notification sound could not be played')
       return true
     }
@@ -303,6 +301,14 @@ export function NotificationsPane({
     customSoundId: GlobalSettings['notifications']['customSoundId']
   ): Promise<void> => {
     if (customSoundId === 'system') {
+      return
+    }
+    if (isWebMode()) {
+      // Why: web sound rides HTTP, not the WS bridge (binary can't serialize).
+      const played = await playWebNotificationSound(volumeDraft)
+      if (!played) {
+        toast.error('Notification sound could not be played')
+      }
       return
     }
     const result = await window.api.notifications.playSound({

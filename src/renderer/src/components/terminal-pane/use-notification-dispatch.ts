@@ -7,6 +7,7 @@ import { isWebMode } from '@/lib/runtime-flavor'
 import {
   isWebTabForeground,
   notificationPermissionGranted,
+  playWebNotificationSound,
   showWebNotification
 } from '@/lib/web-notifications'
 import { AGENT_STATUS_STALE_AFTER_MS } from '../../../../shared/agent-status-types'
@@ -347,7 +348,10 @@ export function dispatchTerminalNotification(
         void playDesktopNotificationSound(customSoundId, customSoundVolume)
       } else if (isWebMode() && shouldShowWebNotification(state, dispatchArgs)) {
         if (showWebNotification(dispatchArgs)) {
-          void playDesktopNotificationSound(customSoundId, customSoundVolume)
+          // Why: web sound rides HTTP from the gateway, not the WS bridge (binary
+          // can't survive JSON serialization). 'system' has no Orca sound, so
+          // playWebNotificationSound's 404 simply resolves false (no-op).
+          void playWebNotificationSound(customSoundVolume ?? undefined)
         }
       }
     })

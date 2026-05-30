@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- Why: the add-project dialog centralizes step routing, clone/remote/create state, and reset semantics across five steps so the modal flow stays in one place. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { FolderOpen, ArrowLeft, Globe, Monitor, FolderTree, Lightbulb } from 'lucide-react'
+import { FolderOpen, ArrowLeft, Globe, Monitor, FolderTree, Lightbulb, Loader2 } from 'lucide-react'
 import { useAppStore } from '@/store'
 import {
   Dialog,
@@ -1053,16 +1053,27 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
                 Pick a local Git project or folder on the server to add as a project.
               </DialogDescription>
             </DialogHeader>
-            {/* Why: inline picker keeps AddRepoDialog mounted so onPick can flow
-                into handleAddLocalPath -> setStep('nested'/'setup'). onCancel
-                returns to the add step rather than closing the whole dialog. */}
-            <RemoteFolderPicker
-              placeholder="~/path/to/repo"
-              onPick={(path) => {
-                void handleAddLocalPath(path, 'local_folder_picker')
-              }}
-              onCancel={() => setStep('add')}
-            />
+            {/* Why: the server-side nested-repo scan + repo add runs over the
+                bridge after a pick and can take a beat, so swap the picker for a
+                spinner while isAdding to give feedback instead of looking frozen.
+                Web-only via the 'remote-folder' step gating. */}
+            {isAdding ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Scanning folder…
+              </div>
+            ) : (
+              /* Why: inline picker keeps AddRepoDialog mounted so onPick can flow
+                 into handleAddLocalPath -> setStep('nested'/'setup'). onCancel
+                 returns to the add step rather than closing the whole dialog. */
+              <RemoteFolderPicker
+                placeholder="~/path/to/repo"
+                onPick={(path) => {
+                  void handleAddLocalPath(path, 'local_folder_picker')
+                }}
+                onCancel={() => setStep('add')}
+              />
+            )}
           </>
         ) : step === 'clone' ? (
           <CloneStep

@@ -1,17 +1,23 @@
 // Browser-side notification runtime for the web client (`pnpm web:serve`).
 // Desktop/SSH show notifications from the Electron main process; in the browser
 // the main process is headless (no notification daemon), so the toast has to be
-// shown client-side here. Sound is NOT handled here — it plays through
-// `window.api.notifications.playSound`, which works over the WS bridge (Web
-// Audio + main-resolved sound bytes) for both built-in and custom sounds.
+// shown client-side here. Sound is handled here too: the bytes can't ride the
+// WS bridge (JSON serialization mangles the Uint8Array), so the sound is fetched
+// over HTTP from the gateway's /__orca/notification-sound route and played with
+// the Web Audio <Audio> element.
 import type { NotificationDispatchRequest } from '../../../shared/types'
 import { buildNotificationOptions } from '../../../shared/notification-options'
 
 // Why: browsers gate audio playback behind a prior user gesture. We arm a
 // one-shot pointer/key listener so the page records user activation early,
-// letting the bridge's event-driven `playSound()` calls (which carry no gesture
-// of their own) succeed once the user has interacted with Orca at all.
+// letting event-driven sound plays (which carry no gesture of their own)
+// succeed once the user has interacted with Orca at all.
 let audioUnlockArmed = false
+
+// Why: the gateway streams the *currently selected* sound from one stable URL.
+// A changed selection would otherwise be masked by the HTTP cache, so we append
+// a per-call cache-busting counter to force a fresh fetch each time.
+let soundFetchCounter = 0
 
 export function notificationsSupported(): boolean {
   // Why: secure-context only; Notification is undefined on plain http (except
@@ -87,4 +93,31 @@ export function showWebNotification(args: NotificationDispatchRequest): boolean 
     notification.close()
   }
   return true
+}
+
+// Why: web-only sound playback. Fetches the gateway-resolved sound over HTTP
+// (binary can't ride the JSON WS bridge) and plays it. Resolves false on
+// autoplay rejection / 404 (no/invalid sound) / network error so callers can
+// decide whether to surface an error. Event-driven plays succeed once the user
+// has interacted with Orca at all (browser audio activation), which the
+// audio-unlock listeners arm.
+export async function playWebNotificationSound(volumePercent?: number): Promise<boolean> {
+  if (typeof Audio === 'undefined') {
+    return false
+  }
+  ensureAudioUnlockListeners()
+  soundFetchCounter += 1
+  const url = `/__orca/notification-sound?v=${soundFetchCounter}`
+  try {
+    const audio = new Audio(url)
+    if (volumePercent !== undefined) {
+      audio.volume = Math.min(1, Math.max(0, volumePercent / 100))
+    }
+    await audio.play()
+    return true
+  } catch {
+    // Autoplay policy rejection, a 404 (missing/invalid/too-large sound), or a
+    // network error all reject here — the caller treats it as "not played".
+    return false
+  }
 }
