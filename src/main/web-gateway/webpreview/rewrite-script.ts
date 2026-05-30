@@ -295,10 +295,24 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
   window.addEventListener('hashchange', postNav);
   window.addEventListener('popstate', postNav);
   // history.pushState / replaceState don't fire popstate — patch them.
-  var origPush = history.pushState;
-  history.pushState = function () { var r2 = origPush.apply(this, arguments); postNav(); return r2; };
-  var origReplace = history.replaceState;
-  history.replaceState = function () { var r2 = origReplace.apply(this, arguments); postNav(); return r2; };
+  // Why: SPA routers (VitePress, etc.) push BASE-RELATIVE urls like
+  // "/foo" that omit our proxy prefix. r() governs every other URL the page
+  // builds, but NOT the History API — so without rewriting the url arg here
+  // the live location drops to a bare gateway path, and the next reload /
+  // document fetch misses /__orca/webpreview/<id> and the gateway's SPA
+  // fallback serves the renderer INTO this iframe (page-in-page recursion).
+  // Re-prefix the url (r() is idempotent on already-prefixed urls).
+  function patchHistory(orig) {
+    return function (state, title, url) {
+      var args = [].slice.call(arguments);
+      if (typeof url === 'string') args[2] = r(url);
+      var ret = orig.apply(this, args);
+      postNav();
+      return ret;
+    };
+  }
+  history.pushState = patchHistory(history.pushState);
+  history.replaceState = patchHistory(history.replaceState);
 })();
 `
 }
