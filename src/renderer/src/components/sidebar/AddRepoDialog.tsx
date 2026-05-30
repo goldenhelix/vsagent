@@ -19,6 +19,7 @@ import { CreateStep, useCreateRepo } from './AddRepoCreateStep'
 import { getProjectAddedPrimaryBranchName, SetupStep } from './AddRepoSetupStep'
 import { getDefaultCloneParent } from './clone-defaults'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { isWebMode } from '@/lib/runtime-flavor'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import {
@@ -363,6 +364,19 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
   }, [droppedLocalPath, handleAddLocalPath, isOpen])
 
   const handleBrowse = useCallback(async () => {
+    // Why: in web mode the Electron open-dialog isn't available, so swap the
+    // native picker for the fork's RemoteFolderPicker modal. Its onPick routes
+    // the chosen server path back through handleAddLocalPath so the nested-repo
+    // scan still runs. Desktop/SSH keep the native folder picker below.
+    if (isWebMode()) {
+      openModal('remote-folder-picker', {
+        mode: 'add-repo',
+        onPick: (path: string) => {
+          void handleAddLocalPath(path, 'local_folder_picker')
+        }
+      })
+      return
+    }
     const gen = ++localAddGenRef.current
     setIsAdding(true)
     try {
@@ -376,7 +390,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
         setIsAdding(false)
       }
     }
-  }, [handleAddLocalPath])
+  }, [handleAddLocalPath, openModal])
 
   const handleImportNestedRepos = useCallback(
     async (mode: 'group' | 'separate') => {

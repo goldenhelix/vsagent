@@ -77,6 +77,7 @@ import {
 } from '@/components/terminal-quick-commands/TerminalQuickCommandDialog'
 import { keybindingMatchesAction } from '../../../../shared/keybindings'
 import { pasteTerminalClipboard } from './terminal-clipboard-paste'
+import { isWebMode } from '@/lib/runtime-flavor'
 
 // Why: registry lives in a leaf module so the store slice can import it
 // without re-entering the `slice → TerminalPane → store → slice` cycle
@@ -1176,6 +1177,14 @@ export default function TerminalPane({
         }
         return
       }
+      // Why (web mode): the Electron clipboard isn't available and
+      // navigator.clipboard.readText() is permission-gated/unreliable. Let the
+      // keydown fall through so the browser fires a native `paste` event whose
+      // synchronous clipboardData we read in onPaste — the same reliable path
+      // Monaco uses. Desktop/SSH keep the Electron clipboard + image-paste path.
+      if (isWebMode()) {
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       const manager = managerRef.current
@@ -1204,6 +1213,31 @@ export default function TerminalPane({
         }
         e.preventDefault()
         e.stopPropagation()
+        return
+      }
+      // Why (web mode): read the clipboard text synchronously from the native
+      // paste event (the only reliable browser clipboard source here) and feed
+      // it through the bracketed-paste path. We still consume the event so
+      // xterm's own textarea paste handler doesn't double-paste. Image-only
+      // clipboards have no text/plain and are skipped — web has no Electron
+      // image-temp-file path anyway. Desktop/SSH fall through to the Electron
+      // clipboard + image path below.
+      if (isWebMode()) {
+        const text = e.clipboardData?.getData('text/plain') ?? ''
+        if (!text) {
+          return
+        }
+        e.preventDefault()
+        e.stopPropagation()
+        const manager = managerRef.current
+        if (!manager) {
+          return
+        }
+        const pane = manager.getActivePane() ?? manager.getPanes()[0]
+        if (!pane) {
+          return
+        }
+        pasteTerminalText(pane.terminal, text)
         return
       }
       e.preventDefault()
