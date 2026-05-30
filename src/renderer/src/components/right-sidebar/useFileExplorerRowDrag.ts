@@ -1,5 +1,5 @@
-import React, { useCallback, useRef } from 'react'
-import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
+import React, { useCallback, useEffect, useRef } from 'react'
+import { getWorkspaceFileDragPaths, WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
 
 const DRAG_EXPAND_DELAY_MS = 500
 
@@ -51,6 +51,13 @@ export function useFileExplorerRowDrag({
       nativeExpandTimerRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    return () => {
+      clearExpandTimer()
+      clearNativeExpandTimer()
+    }
+  }, [clearExpandTimer, clearNativeExpandTimer])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     const isInternal = e.dataTransfer.types.includes(WORKSPACE_FILE_PATH_MIME)
@@ -148,8 +155,7 @@ export function useFileExplorerRowDrag({
       clearNativeExpandTimer()
       onDragTargetChange(null)
       onNativeDragTargetChange(null)
-      const sourcePath = e.dataTransfer.getData(WORKSPACE_FILE_PATH_MIME)
-      if (sourcePath) {
+      for (const sourcePath of getWorkspaceFileDragPaths(e.dataTransfer)) {
         onMoveDrop(sourcePath, rowDropDir)
       }
       // Why: native Files drops are handled by the preload-relayed IPC event,

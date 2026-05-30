@@ -252,7 +252,11 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     const worktreePath = result.worktree.path
 
     const detectedIds = new Set(await detectedAgentsPromise)
-    effectiveAgent = pickTuiAgent(settings?.defaultTuiAgent, detectedIds)
+    effectiveAgent = pickTuiAgent(
+      settings?.defaultTuiAgent,
+      detectedIds,
+      settings?.disabledTuiAgents
+    )
     if (effectiveAgent) {
       // Why: direct task launch creates and starts the workspace in separate
       // steps so agent detection can overlap git worktree creation. Persist
@@ -320,6 +324,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     }
 
     const activation = activateAndRevealWorktree(worktreeId, {
+      sidebarRevealBehavior: 'auto',
       setup: result.setup,
       ...buildStartupOpts(effectiveAgent, startupPlan, launchSource)
     })
@@ -337,10 +342,6 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   }
 
   store.setSidebarOpen(true)
-  if (settings?.rightSidebarOpenByDefault) {
-    store.setRightSidebarTab('explorer')
-    store.setRightSidebarOpen(true)
-  }
 
   // Why: at this point the workspace is live and the agent (if any) has
   // been queued on `primaryTabId`. The post-launch paste step below only

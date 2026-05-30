@@ -22,12 +22,14 @@ import {
   GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
   GENERAL_CLI_SEARCH_ENTRIES,
   GENERAL_EDITOR_SEARCH_ENTRIES,
+  GENERAL_NAVIGATION_SEARCH_ENTRIES,
   GENERAL_PANE_SEARCH_ENTRIES,
   GENERAL_SUPPORT_SEARCH_ENTRIES,
   GENERAL_UPDATE_SEARCH_ENTRIES,
   GENERAL_WORKSPACE_SEARCH_ENTRIES
 } from './general-search'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { RecentTabOrderControl } from './RecentTabOrderControl'
 import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch } from './settings-search'
 import {
@@ -36,6 +38,7 @@ import {
   SettingsSwitch,
   SettingsSwitchRow
 } from './SettingsFormControls'
+import { useMountedRef } from '@/hooks/useMountedRef'
 
 function createOpenInApplication(): OpenInApplication {
   return {
@@ -81,6 +84,7 @@ type GeneralPaneProps = {
 export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): React.JSX.Element {
   const searchQuery = useAppStore((s) => s.settingsSearchQuery)
   const updateStatus = useAppStore((s) => s.updateStatus)
+  const mountedRef = useMountedRef()
   // Why: the 'error' variant of UpdateStatus does not carry a `version` field.
   // The main process emits `{ state: 'error' }` for both check failures (no
   // version known yet) and download/install failures (version was known from
@@ -126,7 +130,15 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
   >('loading')
 
   useEffect(() => {
-    window.api.updater.getVersion().then(setAppVersion)
+    let cancelled = false
+    void window.api.updater.getVersion().then((version) => {
+      if (!cancelled) {
+        setAppVersion(version)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -151,12 +163,16 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
       return
     }
     setStarState('starring')
-    const ok = await window.api.gh.starOrca()
+    const ok = await window.api.gh.starOrca('settings')
     if (!ok) {
-      setStarState('error')
+      if (mountedRef.current) {
+        setStarState('error')
+      }
       return
     }
-    setStarState('starred')
+    if (mountedRef.current) {
+      setStarState('starred')
+    }
     // Why: clicking star anywhere should also permanently mute the
     // threshold-based nag so the user isn't re-prompted via the popup.
     await window.api.starNag.complete()
@@ -234,6 +250,20 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
   }
 
   const visibleSections = [
+    matchesSettingsSearch(searchQuery, GENERAL_NAVIGATION_SEARCH_ENTRIES) ? (
+      <section key="navigation" className="space-y-4">
+        <SettingsSubsectionHeader title="Navigation" />
+        <RecentTabOrderControl
+          ctrlTabOrderMode={settings.ctrlTabOrderMode ?? 'mru'}
+          keywords={GENERAL_NAVIGATION_SEARCH_ENTRIES.flatMap((entry) => [
+            entry.title,
+            entry.description ?? '',
+            ...(entry.keywords ?? [])
+          ])}
+          updateSettings={updateSettings}
+        />
+      </section>
+    ) : null,
     matchesSettingsSearch(searchQuery, GENERAL_WORKSPACE_SEARCH_ENTRIES) ? (
       <section key="workspace" className="space-y-4">
         <SettingsSubsectionHeader

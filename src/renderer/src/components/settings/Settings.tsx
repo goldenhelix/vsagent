@@ -1,5 +1,6 @@
 /* eslint-disable max-lines */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { toast } from 'sonner'
 import { Info } from 'lucide-react'
 import type { OrcaHooks } from '../../../../shared/types'
 import { isFolderRepo } from '../../../../shared/repo-kind'
@@ -43,6 +44,8 @@ import { PrivacyPane } from './PrivacyPane'
 import { SettingsSidebar } from './SettingsSidebar'
 import { ActiveSettingsSectionProvider, SettingsSection } from './SettingsSection'
 import { matchesSettingsSearch } from './settings-search'
+import { cn } from '@/lib/utils'
+import { isIntentionalAppRestartInProgress } from '@/lib/updater-beforeunload'
 import { checkRuntimeHooks } from '@/runtime/runtime-hooks-client'
 import { useWindowsTerminalCapabilities } from '@/lib/windows-terminal-capabilities'
 import { getShortcutPlatform } from '@/lib/shortcut-platform'
@@ -64,14 +67,17 @@ import {
 } from './settings-load-performance'
 
 const SETTINGS_NAV_GROUPS = [
+  { id: 'capabilities', title: 'AI Capabilities' },
   { id: 'setup', title: 'Set Up' },
   { id: 'workflows', title: 'Workflows' },
   { id: 'interface', title: 'Interface' },
-  { id: 'capabilities', title: 'AI Capabilities' },
   { id: 'remote', title: 'Remote Access' },
   { id: 'safety', title: 'Safety' },
   { id: 'experimental', title: 'Experimental' }
 ] as const
+
+const SHORTCUTS_ESCAPE_CONFIRM_TOAST_ID = 'shortcuts-escape-confirm'
+const SHORTCUTS_ESCAPE_CONFIRM_WINDOW_MS = 2200
 
 function getSettingsSectionId(pane: SettingsNavTarget, repoId: string | null): string {
   if (pane === 'repo' && repoId) {
@@ -124,6 +130,15 @@ function scrollSubsectionIntoView(targetId: string, container?: HTMLElement | nu
   container.scrollTo({ top: Math.min(Math.max(0, targetTop - 16), maxScrollTop) })
 }
 
+function cancelPendingSettingsSubsectionScrollFrame(
+  frameRef: MutableRefObject<number | null>
+): void {
+  if (frameRef.current !== null) {
+    cancelAnimationFrame(frameRef.current)
+    frameRef.current = null
+  }
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false
@@ -145,7 +160,7 @@ function Settings(): React.JSX.Element {
   const closeSettingsPage = useAppStore((s) => s.closeSettingsPage)
   const repos = useAppStore((s) => s.repos)
   const updateRepo = useAppStore((s) => s.updateRepo)
-  const removeRepo = useAppStore((s) => s.removeRepo)
+  const removeProject = useAppStore((s) => s.removeProject)
   const settingsNavigationTarget = useAppStore((s) => s.settingsNavigationTarget)
   const clearSettingsTarget = useAppStore((s) => s.clearSettingsTarget)
   const settingsSearchInputQuery = useAppStore((s) => s.settingsSearchInputQuery)
@@ -193,16 +208,30 @@ function Settings(): React.JSX.Element {
   const terminalFontsLoadedRef = useRef(false)
   const pendingNavSectionRef = useRef<string | null>(null)
   const pendingScrollTargetRef = useRef<string | null>(null)
+  const pendingSubsectionScrollFrameRef = useRef<number | null>(null)
   const repoHooksRequestSeqRef = useRef(0)
   const repoHooksRuntimeIdentityRef = useRef<string>('local')
+  const shortcutsEscapeConfirmUntilRef = useRef(0)
+
+  const setSettingsRootNode = useCallback(
+    (node: HTMLDivElement | null): void => {
+      if (node) {
+        return
+      }
+      // Why: the settings search is a transient in-page filter. Leaving it behind makes the next
+      // visit look partially broken because whole sections stay hidden before the user types again.
+      setSettingsSearchQuery('')
+    },
+    [setSettingsSearchQuery]
+  )
 
   const confirmDiscardCommitPromptChanges = useCallback(async (): Promise<boolean> => {
     if (!hasUnsavedCommitPromptChanges) {
       return true
     }
     const shouldDiscard = await confirm({
-      title: 'Discard unsaved commit prompt changes?',
-      description: 'You have unsaved AI commit prompt changes. Leaving will discard them.',
+      title: 'Discard unsaved Source Control AI prompt changes?',
+      description: 'You have unsaved Source Control AI prompt changes. Leaving will discard them.',
       confirmLabel: 'Discard',
       confirmVariant: 'destructive'
     })
@@ -251,7 +280,7 @@ function Settings(): React.JSX.Element {
         return
       }
       // Why: nested dialogs and menus own Escape before Settings page-level
-      // navigation, including the unsaved commit prompt confirmation dialog.
+      // navigation, including the unsaved Source Control AI prompt confirmation dialog.
       if (hasVisibleOverlay()) {
         return
       }
@@ -263,15 +292,35 @@ function Settings(): React.JSX.Element {
       if (isEditableTarget(event.target)) {
         return
       }
+      if (activeSectionId === 'shortcuts') {
+        event.preventDefault()
+        const now = Date.now()
+        if (now <= shortcutsEscapeConfirmUntilRef.current) {
+          shortcutsEscapeConfirmUntilRef.current = 0
+          toast.dismiss(SHORTCUTS_ESCAPE_CONFIRM_TOAST_ID)
+          void closeSettingsPageWithPromptGuard()
+          return
+        }
+        shortcutsEscapeConfirmUntilRef.current = now + SHORTCUTS_ESCAPE_CONFIRM_WINDOW_MS
+        toast.info('Press ESC again to exit settings', {
+          id: SHORTCUTS_ESCAPE_CONFIRM_TOAST_ID,
+          duration: SHORTCUTS_ESCAPE_CONFIRM_WINDOW_MS,
+          className: 'whitespace-nowrap'
+        })
+        return
+      }
       void closeSettingsPageWithPromptGuard()
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [closeSettingsPageWithPromptGuard])
+  }, [activeSectionId, closeSettingsPageWithPromptGuard])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (isIntentionalAppRestartInProgress()) {
+        return
+      }
       if (!hasUnsavedCommitPromptChanges) {
         return
       }
@@ -301,15 +350,6 @@ function Settings(): React.JSX.Element {
     document.addEventListener('keydown', handleFindShortcut)
     return () => document.removeEventListener('keydown', handleFindShortcut)
   }, [keybindings])
-
-  useEffect(
-    () => () => {
-      // Why: the settings search is a transient in-page filter. Leaving it behind makes the next
-      // visit look partially broken because whole sections stay hidden before the user types again.
-      setSettingsSearchQuery('')
-    },
-    [setSettingsSearchQuery]
-  )
 
   useEffect(() => {
     if (!settings || !settingsNavigationTarget) {
@@ -393,7 +433,11 @@ function Settings(): React.JSX.Element {
     [activeSectionId, mountedSectionIds, navSections, settingsSearchQuery, visibleSectionIds]
   )
   const windowsTerminalCapabilities = useWindowsTerminalCapabilities(
-    isWindows && neededSectionIds.has('terminal')
+    isWindows &&
+      (neededSectionIds.has('terminal') ||
+        neededSectionIds.has('accounts') ||
+        neededSectionIds.has('agents')),
+    true
   )
 
   useEffect(() => {
@@ -532,6 +576,10 @@ function Settings(): React.JSX.Element {
   }, [neededRepoIds, repos, runtimeTargetIdentity])
 
   useEffect(() => {
+    return () => cancelPendingSettingsSubsectionScrollFrame(pendingSubsectionScrollFrameRef)
+  }, [])
+
+  useEffect(() => {
     const scrollTargetId = pendingScrollTargetRef.current
     const pendingNavSectionId = pendingNavSectionRef.current
 
@@ -564,7 +612,19 @@ function Settings(): React.JSX.Element {
           scrollSubsectionIntoView(scrollTargetId, contentScrollRef.current)
         }
         scrollToSubsection()
-        requestAnimationFrame(scrollToSubsection)
+        cancelPendingSettingsSubsectionScrollFrame(pendingSubsectionScrollFrameRef)
+        let completed = false
+        let frameId: number | undefined
+        frameId = requestAnimationFrame(() => {
+          completed = true
+          if (pendingSubsectionScrollFrameRef.current === frameId) {
+            pendingSubsectionScrollFrameRef.current = null
+          }
+          scrollToSubsection()
+        })
+        if (!completed) {
+          pendingSubsectionScrollFrameRef.current = frameId
+        }
       }
       setActiveSectionId(pendingNavSectionId)
       pendingNavSectionRef.current = null
@@ -637,8 +697,13 @@ function Settings(): React.JSX.Element {
 
   if (!settings) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground">
-        Loading settings...
+      <div
+        ref={setSettingsRootNode}
+        className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background"
+      >
+        <div className="flex flex-1 items-center justify-center text-muted-foreground">
+          Loading settings...
+        </div>
       </div>
     )
   }
@@ -652,12 +717,22 @@ function Settings(): React.JSX.Element {
     .filter((section) => section.id.startsWith('repo-'))
     .map((section) => {
       const repo = repos.find((entry) => entry.id === section.id.replace('repo-', ''))
-      return { ...section, badgeColor: repo?.badgeColor, isRemote: !!repo?.connectionId }
+      return {
+        ...section,
+        badgeColor: repo?.badgeColor,
+        isRemote: !!repo?.connectionId,
+        repoIcon: repo?.repoIcon
+      }
     })
   const isSectionMounted = (sectionId: string): boolean => neededSectionIds.has(sectionId)
+  const isFocusedShortcutsPane =
+    activeSectionId === 'shortcuts' && settingsSearchQuery.trim() === ''
 
   return (
-    <div className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background">
+    <div
+      ref={setSettingsRootNode}
+      className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background"
+    >
       <SettingsSidebar
         activeSectionId={activeSectionId}
         generalGroups={generalNavGroups}
@@ -671,8 +746,19 @@ function Settings(): React.JSX.Element {
       />
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div ref={contentScrollRef} className="min-h-0 flex-1 overflow-y-auto scrollbar-sleek">
-          <div className="flex w-full max-w-4xl flex-col gap-10 px-8 pb-24 pt-10">
+        <div
+          ref={contentScrollRef}
+          className={cn(
+            'min-h-0 flex-1',
+            isFocusedShortcutsPane ? 'overflow-hidden' : 'overflow-y-auto scrollbar-sleek'
+          )}
+        >
+          <div
+            className={cn(
+              'mx-auto flex w-full max-w-4xl flex-col gap-10 px-8 pt-10',
+              isFocusedShortcutsPane ? 'h-full pb-6' : 'pb-24'
+            )}
+          >
             {visibleNavSections.length === 0 ? (
               <div className="flex min-h-[24rem] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/30 text-sm text-muted-foreground">
                 No settings found for &quot;{settingsSearchQuery.trim()}&quot;
@@ -680,24 +766,19 @@ function Settings(): React.JSX.Element {
             ) : (
               <ActiveSettingsSectionProvider value={activeSectionId}>
                 <SettingsSection
-                  id="general"
-                  title="General"
-                  description="Workspace defaults, app setup, and maintenance."
-                  searchEntries={getSectionSearchEntries('general')}
-                >
-                  {isSectionMounted('general') ? (
-                    <GeneralPane settings={settings} updateSettings={updateSettings} />
-                  ) : null}
-                </SettingsSection>
-
-                <SettingsSection
                   id="agents"
                   title="Agents"
                   description="Manage AI agents, set a default, and customize commands."
                   searchEntries={getSectionSearchEntries('agents')}
                 >
                   {isSectionMounted('agents') ? (
-                    <AgentsPane settings={settings} updateSettings={updateSettings} />
+                    <AgentsPane
+                      settings={settings}
+                      updateSettings={updateSettings}
+                      wslAvailable={windowsTerminalCapabilities.wslAvailable}
+                      wslDistros={windowsTerminalCapabilities.wslDistros}
+                      wslCapabilitiesLoading={windowsTerminalCapabilities.isLoading}
+                    />
                   ) : null}
                 </SettingsSection>
 
@@ -709,7 +790,82 @@ function Settings(): React.JSX.Element {
                   searchEntries={getSectionSearchEntries('accounts')}
                 >
                   {isSectionMounted('accounts') ? (
-                    <AccountsPane settings={settings} updateSettings={updateSettings} />
+                    <AccountsPane
+                      settings={settings}
+                      updateSettings={updateSettings}
+                      wslAvailable={windowsTerminalCapabilities.wslAvailable}
+                      wslDistros={windowsTerminalCapabilities.wslDistros}
+                      wslCapabilitiesLoading={windowsTerminalCapabilities.isLoading}
+                    />
+                  ) : null}
+                </SettingsSection>
+
+                <SettingsSection
+                  id="orchestration"
+                  title="Orchestration"
+                  description="Coordinate multiple coding agents through Orca."
+                  searchEntries={getSectionSearchEntries('orchestration')}
+                >
+                  {isSectionMounted('orchestration') ? <OrchestrationPane /> : null}
+                </SettingsSection>
+
+                {showDesktopOnlySettings ? (
+                  <>
+                    <SettingsSection
+                      id="computer-use"
+                      title="Computer Use"
+                      badge="Beta"
+                      badgeAccessory={
+                        showComputerUsePreviewTooltip ? (
+                          <TooltipProvider delayDuration={250}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground transition-colors hover:text-foreground"
+                                  aria-label={`${computerUsePlatform} Computer Use preview details`}
+                                >
+                                  <Info className="size-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" sideOffset={6} className="max-w-72">
+                                <span>
+                                  {computerUsePlatform} Computer Use is an early preview. Some apps
+                                  and desktop environments may behave inconsistently.
+                                </span>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : null
+                      }
+                      description="Enable agents to control any app on your computer."
+                      searchEntries={getSectionSearchEntries('computer-use')}
+                    >
+                      {isSectionMounted('computer-use') ? <ComputerUsePane /> : null}
+                    </SettingsSection>
+
+                    <SettingsSection
+                      id="voice"
+                      title="Voice"
+                      badge="Beta"
+                      description="Local speech-to-text dictation with on-device models."
+                      searchEntries={getSectionSearchEntries('voice')}
+                    >
+                      {isSectionMounted('voice') ? (
+                        <VoicePane settings={settings} updateSettings={updateSettings} />
+                      ) : null}
+                    </SettingsSection>
+                  </>
+                ) : null}
+
+                <SettingsSection
+                  id="general"
+                  title="General"
+                  description="Workspace defaults, app setup, and maintenance."
+                  searchEntries={getSectionSearchEntries('general')}
+                >
+                  {isSectionMounted('general') ? (
+                    <GeneralPane settings={settings} updateSettings={updateSettings} />
                   ) : null}
                 </SettingsSection>
 
@@ -725,7 +881,7 @@ function Settings(): React.JSX.Element {
                 <SettingsSection
                   id="git"
                   title="Git & Source Control"
-                  description="Branch naming, base refs, attribution, and AI commit messages."
+                  description="Branch naming, base refs, attribution, and Source Control AI."
                   searchEntries={getSectionSearchEntries('git')}
                   forceVisible={hasUnsavedCommitPromptChanges}
                 >
@@ -797,6 +953,8 @@ function Settings(): React.JSX.Element {
                       setScrollbackMode={setScrollbackMode}
                       ghostty={ghostty}
                       wslAvailable={windowsTerminalCapabilities.wslAvailable}
+                      wslDistros={windowsTerminalCapabilities.wslDistros}
+                      wslCapabilitiesLoading={windowsTerminalCapabilities.isLoading}
                       pwshAvailable={windowsTerminalCapabilities.pwshAvailable}
                     />
                   ) : null}
@@ -877,6 +1035,14 @@ function Settings(): React.JSX.Element {
                   title="Shortcuts"
                   description="Keyboard shortcuts for common actions."
                   searchEntries={getSectionSearchEntries('shortcuts')}
+                  className={
+                    isFocusedShortcutsPane
+                      ? 'flex min-h-0 flex-1 flex-col space-y-0 gap-6'
+                      : undefined
+                  }
+                  bodyClassName={
+                    isFocusedShortcutsPane ? 'min-h-0 flex-1 overflow-hidden' : undefined
+                  }
                 >
                   {isSectionMounted('shortcuts') ? <ShortcutsPane /> : null}
                 </SettingsSection>
@@ -889,64 +1055,6 @@ function Settings(): React.JSX.Element {
                 >
                   {isSectionMounted('stats') ? <StatsPane /> : null}
                 </SettingsSection>
-
-                <SettingsSection
-                  id="orchestration"
-                  title="Orchestration"
-                  description="Coordinate multiple coding agents through Orca."
-                  searchEntries={getSectionSearchEntries('orchestration')}
-                >
-                  {isSectionMounted('orchestration') ? <OrchestrationPane /> : null}
-                </SettingsSection>
-
-                {showDesktopOnlySettings ? (
-                  <>
-                    <SettingsSection
-                      id="computer-use"
-                      title="Computer Use"
-                      badge="Beta"
-                      badgeAccessory={
-                        showComputerUsePreviewTooltip ? (
-                          <TooltipProvider delayDuration={250}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  type="button"
-                                  className="text-muted-foreground transition-colors hover:text-foreground"
-                                  aria-label={`${computerUsePlatform} Computer Use preview details`}
-                                >
-                                  <Info className="size-3.5" />
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top" sideOffset={6} className="max-w-72">
-                                <span>
-                                  {computerUsePlatform} Computer Use is an early preview. Some apps
-                                  and desktop environments may behave inconsistently.
-                                </span>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : null
-                      }
-                      description="Enable agents to control any app on your computer."
-                      searchEntries={getSectionSearchEntries('computer-use')}
-                    >
-                      {isSectionMounted('computer-use') ? <ComputerUsePane /> : null}
-                    </SettingsSection>
-
-                    <SettingsSection
-                      id="voice"
-                      title="Voice"
-                      badge="Beta"
-                      description="Local speech-to-text dictation with on-device models."
-                      searchEntries={getSectionSearchEntries('voice')}
-                    >
-                      {isSectionMounted('voice') ? (
-                        <VoicePane settings={settings} updateSettings={updateSettings} />
-                      ) : null}
-                    </SettingsSection>
-                  </>
-                ) : null}
 
                 <SettingsSection
                   id="servers"
@@ -1051,7 +1159,7 @@ function Settings(): React.JSX.Element {
                           hooksInspectionReady={Boolean(repoHooksState)}
                           mayNeedUpdate={repoHooksState?.mayNeedUpdate ?? false}
                           updateRepo={updateRepo}
-                          removeRepo={removeRepo}
+                          removeProject={removeProject}
                         />
                       ) : null}
                     </SettingsSection>

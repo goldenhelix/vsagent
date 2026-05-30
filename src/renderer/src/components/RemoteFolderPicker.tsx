@@ -226,7 +226,7 @@ export function RemoteFolderPicker({
         // below. A typical dialog has plenty of vertical room; the inline
         // list also makes it obvious the suggestions and the Submit button
         // are separate affordances.
-        <div className="max-h-60 overflow-auto rounded-md border border-border bg-popover text-popover-foreground shadow-sm">
+        <div className="max-h-60 overflow-auto scrollbar-sleek rounded-md border border-border bg-popover text-popover-foreground shadow-sm">
           <div className="sticky top-0 border-b border-border/60 bg-popover/95 px-2.5 py-1 text-[10px] text-muted-foreground">
             ↑/↓ to navigate · Tab to drill in · Enter to pick the current path
           </div>

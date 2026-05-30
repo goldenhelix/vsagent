@@ -20,6 +20,7 @@ import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
 import { getScreenSubmitModifierLabel } from '@/lib/screen-submit-shortcut'
+import { filterEnabledTuiAgents } from '../../../shared/tui-agent-selection'
 import type {
   GitHubWorkItem,
   GitLabWorkItem,
@@ -249,7 +250,9 @@ export default function NewWorkspaceComposerCard({
   const { isFileDragOver, dragHandlers } = useComposerFileDragOver()
   const openModal = useAppStore((s) => s.openModal)
   const defaultTuiAgent = useAppStore((s) => s.settings?.defaultTuiAgent ?? null)
+  const disabledTuiAgents = useAppStore((s) => s.settings?.disabledTuiAgents ?? [])
   const updateSettings = useAppStore((s) => s.updateSettings)
+  const nameInputFocusFrameRef = React.useRef<number | null>(null)
   const submitShortcutModifierLabel = getScreenSubmitModifierLabel()
   const selectedRepoName = React.useMemo(() => {
     const repo = eligibleRepos.find((candidate) => candidate.id === repoId)
@@ -270,20 +273,39 @@ export default function NewWorkspaceComposerCard({
     [updateSettings]
   )
 
+  const cancelNameInputFocusFrame = React.useCallback((): void => {
+    if (nameInputFocusFrameRef.current === null) {
+      return
+    }
+    cancelAnimationFrame(nameInputFocusFrameRef.current)
+    nameInputFocusFrameRef.current = null
+  }, [])
+
+  React.useEffect(() => cancelNameInputFocusFrame, [cancelNameInputFocusFrame])
+
   const focusNameInput = React.useCallback(() => {
     // Why: after the repo picker commits a choice, moving focus to the name
     // field keeps the keyboard flow progressing through the form instead of
     // trapping the user in the repo popover interaction.
-    requestAnimationFrame(() => {
+    cancelNameInputFocusFrame()
+    nameInputFocusFrameRef.current = requestAnimationFrame(() => {
+      nameInputFocusFrameRef.current = null
       nameInputRef?.current?.focus()
     })
-  }, [nameInputRef])
+  }, [cancelNameInputFocusFrame, nameInputRef])
 
-  const visibleQuickAgents = React.useMemo(
-    () =>
-      AGENT_CATALOG.filter((agent) => detectedAgentIds === null || detectedAgentIds.has(agent.id)),
-    [detectedAgentIds]
-  )
+  const visibleQuickAgents = React.useMemo(() => {
+    const enabledIds = new Set(
+      filterEnabledTuiAgents(
+        AGENT_CATALOG.map((agent) => agent.id),
+        disabledTuiAgents
+      )
+    )
+    return AGENT_CATALOG.filter(
+      (agent) =>
+        enabledIds.has(agent.id) && (detectedAgentIds === null || detectedAgentIds.has(agent.id))
+    )
+  }, [detectedAgentIds, disabledTuiAgents])
 
   const handleAddRepo = React.useCallback((): void => {
     openModal('add-repo')

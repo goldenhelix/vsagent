@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { copyFile, chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +12,7 @@ const itRunsUnixShell = process.platform === 'win32' ? it.skip : it
 const builderConfig = require('../../../config/electron-builder.config.cjs') as {
   asarUnpack?: string[]
 }
-const linuxLauncherAsset = new URL('../../../resources/linux/bin/orca', import.meta.url)
+const linuxLauncherAsset = new URL('../../../resources/linux/bin/orca-ide', import.meta.url)
 
 describe('packaged CLI assets', () => {
   it('unpacks runtime dependencies used before Electron asar integration is available', () => {
@@ -20,9 +20,15 @@ describe('packaged CLI assets', () => {
       expect.arrayContaining([
         'node_modules/ws/**',
         'node_modules/tweetnacl/**',
-        'node_modules/zod/**'
+        'node_modules/zod/**',
+        'node_modules/yaml/**'
       ])
     )
+  })
+
+  itRunsUnixShell('keeps the Linux launcher executable in packaged resources', async () => {
+    const launcherStats = await stat(linuxLauncherAsset)
+    expect(launcherStats.mode & 0o111).not.toBe(0)
   })
 
   itRunsUnixShell(
@@ -34,7 +40,7 @@ describe('packaged CLI assets', () => {
         const resourcesDir = join(appDir, 'resources')
         const launcherDir = join(resourcesDir, 'bin')
         const cliDir = join(resourcesDir, 'app.asar.unpacked', 'out', 'cli')
-        const launcherPath = join(launcherDir, 'orca')
+        const launcherPath = join(launcherDir, 'orca-ide')
         const electronPath = join(appDir, 'orca-ide')
         const cliPath = join(cliDir, 'index.js')
 
@@ -61,7 +67,7 @@ printf 'arg=%s\\n' "$@"
 
         const homeDir = join(root, 'home')
         const commandDir = join(homeDir, '.local', 'bin')
-        const commandPath = join(commandDir, 'orca')
+        const commandPath = join(commandDir, 'orca-ide')
         await mkdir(commandDir, { recursive: true })
         await mkdir(join(homeDir, 'orca'), { recursive: true })
         await symlink(launcherPath, commandPath)

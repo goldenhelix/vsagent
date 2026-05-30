@@ -24,6 +24,11 @@ import { startSpan } from './observability/tracer'
 import { registerMobileHandlers } from './ipc/mobile'
 import { initTelemetry, shutdownTelemetry, trackAppOpenedOnce } from './telemetry/client'
 import { runManagedHookInstallers } from './agent-hooks/install-telemetry'
+import {
+  isAgentStatusHooksEnabled,
+  MANAGED_AGENT_HOOK_INSTALLERS,
+  removeManagedAgentHooks
+} from './agent-hooks/managed-agent-hook-controls'
 import { initCohortClassifier } from './telemetry/cohort-classifier'
 import { initOnboardingCohortClassifier } from './telemetry/onboarding-cohort-classifier'
 import { resolveConsent } from './telemetry/consent'
@@ -44,31 +49,35 @@ import {
   installDevParentDisconnectQuit,
   installDevParentWatchdog,
   installUncaughtPipeErrorGuard,
-  patchPackagedProcessPath
+  patchPackagedProcessPath,
+  shouldInstallManagedHooks
 } from './startup/configure-process'
 import { startFirstWindowStartupServices } from './startup/first-window-startup-services'
 import { getDevInstanceIdentity } from './startup/dev-instance-identity'
 import { hydrateShellPath, mergePathSegments } from './startup/hydrate-shell-path'
-import { acquireSingleInstanceLock } from './startup/single-instance-lock'
+import {
+  acquireSingleInstanceLock,
+  logSingleInstanceLockFailure
+} from './startup/single-instance-lock'
 import { RateLimitService } from './rate-limits/service'
+import { getInitialClaudeRateLimitTarget } from './rate-limits/claude-rate-limit-target'
+import { getInitialCodexRateLimitTarget } from './rate-limits/codex-rate-limit-target'
 import { attachMainWindowServices } from './window/attach-main-window-services'
 import { createMainWindow, loadMainWindow } from './window/createMainWindow'
 import { CodexAccountService } from './codex-accounts/service'
 import { CodexRuntimeHomeService } from './codex-accounts/runtime-home-service'
+import {
+  normalizeCodexRuntimeSelection,
+  type CodexAccountSelectionTarget
+} from './codex-accounts/runtime-selection'
+import { normalizeClaudeRuntimeSelection } from './claude-accounts/runtime-selection'
+import { codexHookService } from './codex/hook-service'
 import { ClaudeAccountService } from './claude-accounts/service'
 import { ClaudeRuntimeAuthService } from './claude-accounts/runtime-auth-service'
 import { StarNagService } from './star-nag/service'
 import { agentHookServer } from './agent-hooks/server'
+import { maybeAutoRenameBranchOnFirstWork } from './agent-hooks/first-work-branch-rename'
 import { setMigrationUnsupportedPtyListener } from './agent-hooks/migration-unsupported-pty-state'
-import { claudeHookService } from './claude/hook-service'
-import { codexHookService } from './codex/hook-service'
-import { geminiHookService } from './gemini/hook-service'
-import { antigravityHookService } from './antigravity/hook-service'
-import { cursorHookService } from './cursor/hook-service'
-import { droidHookService } from './droid/hook-service'
-import { grokHookService } from './grok/hook-service'
-import { copilotHookService } from './copilot/hook-service'
-import { hermesHookService } from './hermes/hook-service'
 import {
   getPtyIdForPaneKey,
   registerPaneKeyTeardownListener,
@@ -133,6 +142,51 @@ let automations: AutomationService | null = null
 let keybindings: KeybindingService | null = null
 let expectedRendererReload: { webContentsId: number; until: number } | null = null
 const isServeMode = process.argv.includes('--serve')
+
+// Why: the store/runtime singletons live here in index.ts; injecting them keeps
+// the rename orchestrator free of module-level state and unit-testable.
+function maybeAutoRenameBranchOnFirstWorkFromHook(event: {
+  paneKey: string
+  tabId: string | undefined
+  worktreeId: string | undefined
+  payload: { state: string; prompt?: string; lastAssistantMessage?: string }
+  isReplay: boolean | undefined
+}): void {
+  const currentStore = store
+  const currentRuntime = runtime
+  if (!currentStore || !currentRuntime) {
+    return
+  }
+  void maybeAutoRenameBranchOnFirstWork(
+    {
+      paneKey: event.paneKey,
+      tabId: event.tabId,
+      worktreeId: event.worktreeId,
+      state: event.payload.state,
+      prompt: event.payload.prompt,
+      assistantMessage: event.payload.lastAssistantMessage,
+      isReplay: event.isReplay
+    },
+    {
+      getSettings: () => currentStore.getSettings(),
+      getRepo: (repoId) => currentStore.getRepo(repoId),
+      getAgentEnvResolvers: () => currentRuntime.getCommitMessageAgentEnvironmentResolvers(),
+      getCurrentDisplayName: (worktreeId) => currentStore.getWorktreeMeta(worktreeId)?.displayName,
+      canRenameOrcaCreatedBranch: (worktreeId) => {
+        const meta = currentStore.getWorktreeMeta(worktreeId)
+        // Why: a user/imported branch can coincidentally be named after a creature.
+        // Only worktrees Orca stamped at creation are safe to auto-rename.
+        return !!meta?.orcaCreationSource && meta.preserveBranchOnDelete !== true
+      },
+      setDisplayName: (worktreeId, displayName) => {
+        currentStore.setWorktreeMeta(worktreeId, { displayName })
+      },
+      resolveWorktreeIdForTab: (tabId) => currentStore.getWorktreeIdForTab(tabId),
+      onRenamed: (repoId) => currentRuntime.notifyBranchRenamed(repoId)
+    }
+  )
+}
+
 const devInstanceIdentity = getDevInstanceIdentity(is.dev)
 const devAgentHookEndpointNamespace = devInstanceIdentity.isDev
   ? devInstanceIdentity.appUserModelId
@@ -161,6 +215,9 @@ if (app.isPackaged && process.platform !== 'win32') {
   })
 }
 configureDevUserDataPath(is.dev)
+// Why: CLI-shared Codex helpers cannot import Electron. Seed the resolved
+// app userData path once Electron has applied dev/e2e overrides.
+process.env.ORCA_USER_DATA_PATH ??= app.getPath('userData')
 
 function focusExistingWindow(): void {
   // Why: the second-instance event fires on the *primary* Electron process
@@ -235,14 +292,9 @@ const hasSingleInstanceLock =
     ? true
     : acquireSingleInstanceLock(app, focusExistingWindow)
 if (!hasSingleInstanceLock) {
-  if (is.dev) {
-    // Why: packaged runs have no attached console, but dev runs do. Emit a
-    // single line so a `pnpm dev` operator does not mistake a silent exit
-    // for a broken launcher.
-    console.log(
-      '[single-instance] Another Orca instance is already running against this userData path — focusing existing window.'
-    )
-  }
+  // Why: if Electron returns a false negative here, packaged macOS launches
+  // otherwise look like silent crashes. `open --stderr` can capture this line.
+  logSingleInstanceLockFailure()
   app.quit()
 }
 
@@ -274,6 +326,36 @@ if (hasSingleInstanceLock) {
     platform: process.platform
   })
   enableMainProcessGpuFeatures()
+}
+
+function prepareCodexRuntimeHomeForLaunch(target?: CodexAccountSelectionTarget): string | null {
+  const runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target)
+  const hooksEnabled = isAgentStatusHooksEnabled(store?.getSettings())
+  try {
+    // Why: launch prep is reachable after startup via PTY/runtime paths; honor
+    // the persisted off switch so those launches cannot reinstall removed hooks.
+    const status = hooksEnabled
+      ? codexHookService.install()
+      : codexHookService.refreshRuntimeUserHooks()
+    if (status.state === 'error') {
+      console.warn(
+        `[codex-hook-service] failed to ${
+          hooksEnabled ? 'refresh' : 'refresh user'
+        } runtime hooks before launch`,
+        status.detail
+      )
+    }
+  } catch (error) {
+    // Why: hook install/removal is best-effort launch prep. A malformed hooks file
+    // should not block the Codex process from starting with its prepared auth.
+    console.warn(
+      `[codex-hook-service] failed to ${
+        hooksEnabled ? 'refresh' : 'refresh user'
+      } runtime hooks before launch`,
+      error
+    )
+  }
+  return runtimeHomePath
 }
 
 function openMainWindow(): BrowserWindow {
@@ -424,10 +506,7 @@ function openMainWindow(): BrowserWindow {
     rendererWebContentsId,
     automations,
     {
-      prepareForCodexLaunch: () =>
-        store!.getSettings().activeCodexManagedAccountId
-          ? codexRuntimeHome!.prepareForCodexLaunch()
-          : null,
+      prepareForCodexLaunch: prepareCodexRuntimeHomeForLaunch,
       prepareForClaudeLaunch: () => claudeRuntimeAuth!.prepareForClaudeLaunch()
     },
     agentAwakeService ?? undefined,
@@ -445,11 +524,8 @@ function openMainWindow(): BrowserWindow {
     window,
     store,
     runtime,
-    () =>
-      store!.getSettings().activeCodexManagedAccountId
-        ? codexRuntimeHome!.prepareForCodexLaunch()
-        : null,
-    () => claudeRuntimeAuth!.prepareForClaudeLaunch(),
+    prepareCodexRuntimeHomeForLaunch,
+    (target) => claudeRuntimeAuth!.prepareForClaudeLaunch(target),
     {
       onBeforeRendererReload: ({ ignoreCache, webContentsId }) => {
         if (window.webContents.id === webContentsId) {
@@ -486,10 +562,20 @@ function openMainWindow(): BrowserWindow {
   window.on('hide', stopSyntheticTitleSpinnerTimer)
   window.on('minimize', stopSyntheticTitleSpinnerTimer)
   agentHookServer.setListener(
-    ({ paneKey, tabId, worktreeId, connectionId, payload, receivedAt, stateStartedAt }) => {
+    ({
+      paneKey,
+      tabId,
+      worktreeId,
+      connectionId,
+      payload,
+      receivedAt,
+      stateStartedAt,
+      isReplay
+    }) => {
       if (mainWindow?.isDestroyed()) {
         return
       }
+      maybeAutoRenameBranchOnFirstWorkFromHook({ paneKey, tabId, worktreeId, payload, isReplay })
       const orchestration = runtime?.getAgentStatusOrchestrationContextForPaneKey(paneKey)
       mainWindow?.webContents.send('agentStatus:set', {
         ...payload,
@@ -1005,8 +1091,14 @@ app.whenReady().then(async () => {
   codexAccounts = new CodexAccountService(store, rateLimits, codexRuntimeHome)
   claudeRuntimeAuth = new ClaudeRuntimeAuthService(store)
   claudeAccounts = new ClaudeAccountService(store, rateLimits, claudeRuntimeAuth)
-  rateLimits.setCodexHomePathResolver(() => codexRuntimeHome!.prepareForRateLimitFetch())
-  rateLimits.setClaudeAuthPreparationResolver(() => claudeRuntimeAuth!.prepareForRateLimitFetch())
+  rateLimits.setCodexHomePathResolver((target) =>
+    codexRuntimeHome!.prepareForRateLimitFetch(target)
+  )
+  rateLimits.setCodexFetchTarget(getInitialCodexRateLimitTarget(store.getSettings()))
+  rateLimits.setClaudeFetchTarget(getInitialClaudeRateLimitTarget(store.getSettings()))
+  rateLimits.setClaudeAuthPreparationResolver((target) =>
+    claudeRuntimeAuth!.prepareForRateLimitFetch(target)
+  )
   rateLimits.setSettingsResolver(() => store!.getSettings())
   keybindings = new KeybindingService({
     homePath: app.getPath('home'),
@@ -1015,14 +1107,32 @@ app.whenReady().then(async () => {
   browserManager.setSettingsResolver(() => ({ keybindings: keybindings?.getOverrides() }))
   rateLimits.setInactiveClaudeAccountsResolver(() => {
     const settings = store!.getSettings()
+    const activeIds = new Set(
+      [
+        normalizeClaudeRuntimeSelection(settings).host,
+        ...Object.values(normalizeClaudeRuntimeSelection(settings).wsl)
+      ].filter(Boolean)
+    )
     return settings.claudeManagedAccounts
-      .filter((account) => account.id !== settings.activeClaudeManagedAccountId)
-      .map((account) => ({ id: account.id, managedAuthPath: account.managedAuthPath }))
+      .filter((account) => !activeIds.has(account.id))
+      .map((account) => ({
+        id: account.id,
+        managedAuthPath: account.managedAuthPath,
+        managedAuthRuntime: account.managedAuthRuntime,
+        wslDistro: account.wslDistro,
+        wslLinuxAuthPath: account.wslLinuxAuthPath
+      }))
   })
   rateLimits.setInactiveCodexAccountsResolver(() => {
     const settings = store!.getSettings()
+    const activeIds = new Set(
+      [
+        normalizeCodexRuntimeSelection(settings).host,
+        ...Object.values(normalizeCodexRuntimeSelection(settings).wsl)
+      ].filter(Boolean)
+    )
     return settings.codexManagedAccounts
-      .filter((account) => account.id !== settings.activeCodexManagedAccountId)
+      .filter((account) => !activeIds.has(account.id))
       .map((account) => ({ id: account.id, managedHomePath: account.managedHomePath }))
   })
   const runtimeService = new OrcaRuntimeService(store, stats, {
@@ -1038,10 +1148,10 @@ app.whenReady().then(async () => {
   runtimeService.setAutomationService(automations)
   runtimeService.setAccountServices({ claudeAccounts, codexAccounts, rateLimits })
   runtimeService.setCommitMessageAgentEnvironmentResolvers({
-    prepareForCodexLaunch: () =>
-      store!.getSettings().activeCodexManagedAccountId
-        ? codexRuntimeHome!.prepareForCodexLaunch()
-        : null,
+    // Why: local Codex hooks and auth now live in Orca's managed runtime home
+    // even for the system-default path, so every Orca-launched Codex process
+    // must resolve CODEX_HOME through the runtime-home service.
+    prepareForCodexLaunch: prepareCodexRuntimeHomeForLaunch,
     prepareForClaudeLaunch: () => claudeRuntimeAuth!.prepareForClaudeLaunch()
   })
   starNag = new StarNagService(store, stats)
@@ -1053,27 +1163,17 @@ app.whenReady().then(async () => {
     })
   )
   nativeTheme.themeSource = store.getSettings().theme ?? 'system'
-  // Why: managed hook installation mutates user-global agent config. Each
-  // installer runs inside its own try/catch so a malformed local config
-  // (e.g. corrupted ~/.claude/settings.json) cannot brick Orca startup.
-  // The agent label travels with each installer so the catch can attribute
-  // the failure in the `agent_hook_install_failed` telemetry event.
   // Why: managed agent-hook installation modifies user-global config in the
   // operator's home dir. In a shared/server deployment that's the wrong
   // surface to mutate, so skip it in headless mode.
-  if (!isWebHeadless) {
-    const managedHookInstallers = [
-      ['claude', () => claudeHookService.install()],
-      ['codex', () => codexHookService.install()],
-      ['gemini', () => geminiHookService.install()],
-      ['antigravity', () => antigravityHookService.install()],
-      ['cursor', () => cursorHookService.install()],
-      ['droid', () => droidHookService.install()],
-      ['grok', () => grokHookService.install()],
-      ['copilot', () => copilotHookService.install()],
-      ['hermes', () => hermesHookService.install()]
-    ] as const
-    runManagedHookInstallers(managedHookInstallers)
+  if (!isWebHeadless && shouldInstallManagedHooks(is.dev)) {
+    // Why: the persisted off switch must run before any auto-install path so
+    // users who removed Orca-managed hooks do not see them silently reappear on launch.
+    if (isAgentStatusHooksEnabled(store.getSettings())) {
+      runManagedHookInstallers(MANAGED_AGENT_HOOK_INSTALLERS)
+    } else {
+      removeManagedAgentHooks()
+    }
   }
 
   app.on('child-process-gone', (_event, details) => {
@@ -1143,11 +1243,9 @@ app.whenReady().then(async () => {
         // Why: these appearance settings are default-on for older profiles, so
         // a missing persisted value must toggle from visible -> hidden.
         const next = getNextDefaultOnAppearanceSettingValue(current[key])
-        store.updateSettings({ [key]: next })
-        // Why: settings:get returns the current snapshot; renderer tracks
-        // settings through window.api.settings.get(). Push the new value so
-        // the sidebar/titlebar re-render without waiting for a round-trip.
-        mainWindow?.webContents.send('settings:changed', { [key]: next })
+        // Why: notifyListeners pushes the change to renderer windows (settings:changed),
+        // so the sidebar/titlebar re-render without waiting for a settings:get round-trip.
+        store.updateSettings({ [key]: next }, { notifyListeners: true })
         rebuildAppMenu()
       },
       getAppearanceState: () => {
@@ -1228,9 +1326,9 @@ app.whenReady().then(async () => {
   if (serveOptions) {
     registerHeadlessPtyRuntime(
       runtime,
-      () => codexRuntimeHome!.prepareForCodexLaunch(),
+      prepareCodexRuntimeHomeForLaunch,
       () => store!.getSettings(),
-      () => claudeRuntimeAuth!.prepareForClaudeLaunch(),
+      (target) => claudeRuntimeAuth!.prepareForClaudeLaunch(target),
       store
     )
     runtime.syncWindowGraph(0, { tabs: [], leaves: [] })

@@ -30,7 +30,10 @@ function stashWebBuild(): () => void {
     }
   }
 
-  const tempDir = mkdtempSync(join(tmpdir(), 'orca-dev-web-stash-'))
+  // Stash inside out/ (same device as out/web) so renameSync never hits EXDEV
+  // when the repo and the OS tmpdir live on different filesystems.
+  const outDir = resolve('out')
+  const tempDir = mkdtempSync(join(outDir, 'orca-dev-web-stash-'))
   const stashedPath = join(tempDir, 'web')
   renameSync(outWebPath, stashedPath)
   return () => {

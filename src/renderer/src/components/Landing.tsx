@@ -7,6 +7,7 @@ import { ShortcutKeyCombo } from './ShortcutKeyCombo'
 import logo from '../../../../resources/vsagent.svg'
 import { isWebMode } from '@/lib/runtime-flavor'
 import { useShortcutKeys } from '@/hooks/useShortcutLabel'
+import { useMountedRef } from '@/hooks/useMountedRef'
 
 type ShortcutItem = {
   id: string
@@ -65,6 +66,7 @@ function GitHubStarButton({ hasRepos }: { hasRepos: boolean }): React.JSX.Elemen
   const [state, setState] = useState<StarState>('loading')
   const [menuOpen, setMenuOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const mountedRef = useMountedRef()
 
   useEffect(() => {
     let cancelled = false
@@ -105,9 +107,11 @@ function GitHubStarButton({ hasRepos }: { hasRepos: boolean }): React.JSX.Elemen
       return
     }
     setState('starred') // optimistic
-    const ok = await window.api.gh.starOrca()
+    const ok = await window.api.gh.starOrca('landing')
     if (!ok) {
-      setState('not-starred')
+      if (mountedRef.current) {
+        setState('not-starred')
+      }
       return
     }
     // Why: starring from any entry point mutes the threshold-based nag.
@@ -236,15 +240,22 @@ export default function Landing(): React.JSX.Element {
       return
     }
 
+    let cancelled = false
     // Why: some users complete `gh auth login` without ever leaving the Orca
     // window. Poll only while a warning is visible so the banner self-clears.
     const intervalId = window.setInterval(() => {
       void window.api.preflight.check({ force: true }).then((status) => {
+        if (cancelled) {
+          return
+        }
         setPreflightIssues(getPreflightIssues(status))
       })
     }, 30000)
 
-    return () => window.clearInterval(intervalId)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
   }, [preflightIssues.length])
 
   const createWorktreeKeys = useShortcutKeys('workspace.create')

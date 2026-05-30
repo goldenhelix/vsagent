@@ -20,12 +20,17 @@ import {
 } from '../../shared/agent-status-types'
 import { makePaneKey } from '../../shared/stable-pane-id'
 
-const { trackMock } = vi.hoisted(() => ({
+const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
+  getCohortAtEmitMock: vi.fn(),
   trackMock: vi.fn()
 }))
 
 vi.mock('../telemetry/client', () => ({
   track: trackMock
+}))
+
+vi.mock('../telemetry/cohort-classifier', () => ({
+  getCohortAtEmit: getCohortAtEmitMock
 }))
 
 const LEAF_1 = '11111111-1111-4111-8111-111111111111'
@@ -62,6 +67,8 @@ function buildBody(payload: Record<string, unknown>, overrides: Partial<Body> = 
 beforeEach(() => {
   _internals.resetCachesForTests()
   trackMock.mockReset()
+  getCohortAtEmitMock.mockReset()
+  getCohortAtEmitMock.mockReturnValue({ nth_repo_added: 2 })
 })
 
 afterEach(() => {
@@ -973,6 +980,30 @@ describe('AgentHookServer listener replay', () => {
     expect(rendererListener).not.toHaveBeenCalled()
   })
 
+  it('marks listener replay callbacks as replayed', () => {
+    const server = new AgentHookServer()
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        payload: { state: 'working', prompt: 'cached task', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+
+    const listener = vi.fn()
+    server.setListener(listener)
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paneKey: PANE,
+        isReplay: true,
+        payload: expect.objectContaining({ state: 'working', prompt: 'cached task' })
+      })
+    )
+  })
+
   it('unsubscribes status-change listeners without removing the remaining listeners', () => {
     const server = new AgentHookServer()
     const removed = vi.fn()
@@ -1228,6 +1259,242 @@ describe('AgentHookServer listener replay', () => {
           agentType: 'claude',
           toolName: 'Bash',
           toolInput: 'rm -rf /tmp/orca-subagent-repro'
+        })
+      ])
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('lets Claude permission clear when approved PostToolUse matches the preceding tool use id', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const postClaudeHook = async (payload: Record<string, unknown>): Promise<Response> =>
+        fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify(buildBody(payload))
+        })
+
+      await postClaudeHook({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'rm -rf /tmp/orca-2824-permission-target' },
+        tool_use_id: 'toolu-approved-by-claude'
+      })
+      await postClaudeHook({
+        hook_event_name: 'PermissionRequest',
+        tool_name: 'Bash',
+        tool_input: { command: 'rm -rf /tmp/orca-2824-permission-target' }
+      })
+      await postClaudeHook({
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'rm -rf /tmp/orca-2824-permission-target' },
+        tool_use_id: 'toolu-approved-by-claude'
+      })
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          state: 'working',
+          agentType: 'claude',
+          toolName: 'Bash',
+          toolInput: 'rm -rf /tmp/orca-2824-permission-target'
+        })
+      ])
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('lets Claude permission clear by tool use id when tool input is not previewable', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const postClaudeHook = async (payload: Record<string, unknown>): Promise<Response> =>
+        fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify(buildBody(payload))
+        })
+
+      await postClaudeHook({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'BespokeTool',
+        tool_input: { opaque: 'request-a' },
+        tool_use_id: 'toolu-approved-opaque'
+      })
+      await postClaudeHook({
+        hook_event_name: 'PermissionRequest',
+        tool_name: 'BespokeTool',
+        tool_input: { opaque: 'request-a' }
+      })
+      await postClaudeHook({
+        hook_event_name: 'PostToolUse',
+        tool_name: 'BespokeTool',
+        tool_input: { opaque: 'request-a' },
+        tool_use_id: 'toolu-approved-opaque'
+      })
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          state: 'working',
+          agentType: 'claude',
+          toolName: 'BespokeTool'
+        })
+      ])
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('keeps Claude permission visible for unpreviewable tool input with another tool use id', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const postClaudeHook = async (payload: Record<string, unknown>): Promise<Response> =>
+        fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify(buildBody(payload))
+        })
+
+      await postClaudeHook({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'BespokeTool',
+        tool_input: { opaque: 'request-a' },
+        tool_use_id: 'toolu-permission-owner-opaque'
+      })
+      await postClaudeHook({
+        hook_event_name: 'PermissionRequest',
+        tool_name: 'BespokeTool',
+        tool_input: { opaque: 'request-a' }
+      })
+      await postClaudeHook({
+        hook_event_name: 'PostToolUse',
+        tool_name: 'BespokeTool',
+        tool_input: { opaque: 'request-b' },
+        tool_use_id: 'toolu-other-opaque'
+      })
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          state: 'waiting',
+          agentType: 'claude',
+          toolName: 'BespokeTool'
+        })
+      ])
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('keeps Claude permission visible when another tool use completes after permission', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const postClaudeHook = async (payload: Record<string, unknown>): Promise<Response> =>
+        fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify(buildBody(payload))
+        })
+
+      await postClaudeHook({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm test' },
+        tool_use_id: 'toolu-permission-owner'
+      })
+      await postClaudeHook({
+        hook_event_name: 'PermissionRequest',
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm test' }
+      })
+      await postClaudeHook({
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm test' },
+        tool_use_id: 'toolu-other-subagent'
+      })
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          state: 'waiting',
+          agentType: 'claude',
+          toolName: 'Bash',
+          toolInput: 'pnpm test'
+        })
+      ])
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('keeps Claude permission visible when an explicit agent type reports another tool use id', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const postClaudeHook = async (payload: Record<string, unknown>): Promise<Response> =>
+        fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify(buildBody(payload))
+        })
+
+      await postClaudeHook({
+        hook_event_name: 'PreToolUse',
+        agent_type: 'main',
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm test' },
+        tool_use_id: 'toolu-permission-owner-type'
+      })
+      await postClaudeHook({
+        hook_event_name: 'PermissionRequest',
+        agent_type: 'main',
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm test' }
+      })
+      await postClaudeHook({
+        hook_event_name: 'PostToolUse',
+        agent_type: 'main',
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm test' },
+        tool_use_id: 'toolu-other-type'
+      })
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          state: 'waiting',
+          agentType: 'claude',
+          toolName: 'Bash',
+          toolInput: 'pnpm test'
         })
       ])
     } finally {
@@ -1765,6 +2032,110 @@ describe('AgentHookServer listener replay', () => {
     }
   })
 
+  it('tracks Codex agent statuses from form-encoded managed hook posts', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const listener = vi.fn()
+      server.setListener(listener)
+      const postCodexHook = async (payload: Record<string, unknown>): Promise<void> => {
+        const params = new URLSearchParams({
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          env: 'production',
+          version: env.ORCA_AGENT_HOOK_VERSION ?? '',
+          payload: JSON.stringify(payload)
+        })
+        const response = await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/codex`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: params
+        })
+        expect(response.status).toBe(204)
+      }
+
+      await postCodexHook({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'ship codex hook status'
+      })
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          state: 'working',
+          agentType: 'codex',
+          prompt: 'ship codex hook status',
+          toolName: undefined,
+          toolInput: undefined
+        })
+      ])
+
+      await postCodexHook({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'exec_command',
+        tool_input: { cmd: 'pnpm test', workdir: '/repo' }
+      })
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          state: 'working',
+          agentType: 'codex',
+          prompt: 'ship codex hook status',
+          toolName: 'exec_command',
+          toolInput: 'pnpm test'
+        })
+      ])
+
+      await postCodexHook({
+        hook_event_name: 'PermissionRequest',
+        tool_name: 'exec_command',
+        tool_input: { cmd: 'git push', workdir: '/repo' }
+      })
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          state: 'waiting',
+          agentType: 'codex',
+          prompt: 'ship codex hook status',
+          toolName: 'exec_command',
+          toolInput: 'git push'
+        })
+      ])
+
+      await postCodexHook({
+        hook_event_name: 'Stop',
+        last_assistant_message: 'done'
+      })
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          state: 'done',
+          agentType: 'codex',
+          prompt: 'ship codex hook status',
+          lastAssistantMessage: 'done'
+        })
+      ])
+      expect(listener).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: expect.objectContaining({
+            state: 'done',
+            agentType: 'codex',
+            prompt: 'ship codex hook status',
+            lastAssistantMessage: 'done'
+          })
+        })
+      )
+    } finally {
+      server.stop()
+    }
+  })
+
   it('accepts Hermes plugin hook posts on /hook/hermes', async () => {
     const server = new AgentHookServer()
     await server.start({ env: 'production' })
@@ -1804,6 +2175,895 @@ describe('AgentHookServer listener replay', () => {
     } finally {
       server.stop()
     }
+  })
+
+  it('accepts Amp plugin hook posts on /hook/amp', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const listener = vi.fn()
+      server.setListener(listener)
+
+      const response = await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/amp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+        },
+        body: JSON.stringify(
+          buildBody({
+            hook_event_name: 'agent.start',
+            message: 'verify Amp route'
+          })
+        )
+      })
+      expect(response.status).toBe(204)
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          connectionId: null,
+          payload: expect.objectContaining({
+            state: 'working',
+            prompt: 'verify Amp route',
+            agentType: 'amp'
+          })
+        })
+      )
+    } finally {
+      server.stop()
+    }
+  })
+})
+
+describe('Amp hook normalization', () => {
+  it('maps agent lifecycle events to working and done states', () => {
+    const start = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        message: 'wire Amp hooks'
+      }),
+      'production'
+    )
+
+    expect(start?.payload).toMatchObject({
+      state: 'working',
+      prompt: 'wire Amp hooks',
+      agentType: 'amp'
+    })
+
+    const done = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.end',
+        message: 'wire Amp hooks',
+        status: 'done'
+      }),
+      'production'
+    )
+
+    expect(done?.payload).toMatchObject({
+      state: 'done',
+      prompt: 'wire Amp hooks',
+      agentType: 'amp'
+    })
+  })
+
+  it('surfaces Amp tool call and result context while preserving the prompt', () => {
+    _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        message: 'run tests'
+      }),
+      'production'
+    )
+
+    const toolCall = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'tool.call',
+        tool: 'shell_command',
+        input: { command: 'pnpm test --run src/main/amp/hook-service.test.ts' }
+      }),
+      'production'
+    )
+
+    expect(toolCall?.payload).toMatchObject({
+      state: 'working',
+      prompt: 'run tests',
+      agentType: 'amp',
+      toolName: 'shell_command',
+      toolInput: 'pnpm test --run src/main/amp/hook-service.test.ts'
+    })
+
+    const result = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'tool.result',
+        tool: 'shell_command',
+        input: { command: 'pnpm test --run src/main/amp/hook-service.test.ts' },
+        status: 'done',
+        output: 'tests passed'
+      }),
+      'production'
+    )
+
+    expect(result?.payload).toMatchObject({
+      state: 'working',
+      prompt: 'run tests',
+      agentType: 'amp',
+      toolName: 'shell_command',
+      toolInput: 'pnpm test --run src/main/amp/hook-service.test.ts',
+      lastAssistantMessage: 'tests passed'
+    })
+  })
+
+  it('does not let Amp tool result messages overwrite the cached prompt', () => {
+    _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        message: 'run tests'
+      }),
+      'production'
+    )
+
+    const result = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'tool.result',
+        tool: 'shell_command',
+        input: { command: 'pnpm test' },
+        message: 'tests passed'
+      }),
+      'production'
+    )
+
+    expect(result?.payload).toMatchObject({
+      state: 'working',
+      prompt: 'run tests',
+      agentType: 'amp',
+      lastAssistantMessage: 'tests passed'
+    })
+
+    const done = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.end',
+        status: 'done'
+      }),
+      'production'
+    )
+
+    expect(done?.payload).toMatchObject({
+      state: 'done',
+      prompt: 'run tests',
+      agentType: 'amp'
+    })
+  })
+
+  it('keeps Amp prompt and tool caches isolated by thread id within one pane', () => {
+    _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        threadId: 'thread-a',
+        message: 'first task'
+      }),
+      'production'
+    )
+
+    _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        threadId: 'thread-b',
+        message: 'second task'
+      }),
+      'production'
+    )
+
+    const threadAResult = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'tool.result',
+        threadId: 'thread-a',
+        tool: 'shell_command',
+        input: { command: 'pnpm test:a' },
+        output: 'first done'
+      }),
+      'production'
+    )
+
+    expect(threadAResult?.payload).toMatchObject({
+      state: 'working',
+      prompt: 'first task',
+      agentType: 'amp',
+      toolName: 'shell_command',
+      toolInput: 'pnpm test:a',
+      lastAssistantMessage: 'first done'
+    })
+
+    const threadBDone = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.end',
+        threadId: 'thread-b',
+        status: 'done'
+      }),
+      'production'
+    )
+
+    expect(threadBDone?.payload).toMatchObject({
+      state: 'done',
+      prompt: 'second task',
+      agentType: 'amp'
+    })
+  })
+
+  it('drops stale Amp tool events that arrive after the thread ended', () => {
+    _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        threadId: 'thread-a',
+        message: 'run tests'
+      }),
+      'production'
+    )
+
+    const done = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.end',
+        threadId: 'thread-a',
+        status: 'done'
+      }),
+      'production'
+    )
+
+    expect(done?.payload).toMatchObject({
+      state: 'done',
+      prompt: 'run tests',
+      agentType: 'amp'
+    })
+
+    const staleToolResult = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'tool.result',
+        threadId: 'thread-a',
+        tool: 'shell_command',
+        input: { command: 'pnpm test' },
+        message: 'tests passed'
+      }),
+      'production'
+    )
+
+    expect(staleToolResult).toBeNull()
+  })
+
+  it('does not mark Amp tool result messages as explicit prompts', () => {
+    _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        threadId: 'thread-a',
+        message: 'run tests'
+      }),
+      'production'
+    )
+
+    const result = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'tool.result',
+        threadId: 'thread-a',
+        tool: 'shell_command',
+        input: { command: 'pnpm test' },
+        message: 'tests passed'
+      }),
+      'production'
+    )
+
+    expect(result?.payload).toMatchObject({
+      state: 'working',
+      prompt: 'run tests',
+      agentType: 'amp',
+      lastAssistantMessage: 'tests passed'
+    })
+    expect(result?.hasExplicitPrompt).toBeUndefined()
+  })
+
+  it('marks cancelled Amp turns as interrupted done states', () => {
+    const cancelled = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.end',
+        message: 'stop this run',
+        status: 'cancelled'
+      }),
+      'production'
+    )
+
+    expect(cancelled?.payload).toMatchObject({
+      state: 'done',
+      prompt: 'stop this run',
+      agentType: 'amp',
+      interrupted: true
+    })
+  })
+
+  it('treats session.start as cache reset without creating a visible row', () => {
+    _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'agent.start',
+        message: 'old prompt'
+      }),
+      'production'
+    )
+
+    const sessionStart = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({ hook_event_name: 'session.start', threadId: 'thread-1' }),
+      'production'
+    )
+    expect(sessionStart).toBeNull()
+
+    const nextTool = _internals.normalizeHookPayload(
+      'amp',
+      buildBody({
+        hook_event_name: 'tool.call',
+        tool: 'Read',
+        input: { file_path: '/tmp/file.ts' }
+      }),
+      'production'
+    )
+
+    expect(nextTool?.payload).toMatchObject({
+      state: 'working',
+      prompt: '',
+      agentType: 'amp',
+      toolName: 'Read',
+      toolInput: '/tmp/file.ts'
+    })
+  })
+})
+
+describe('AgentHookServer prompt-sent telemetry', () => {
+  it('tracks a live local hook explicit prompt with conservative attribution', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const response = await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+        },
+        body: JSON.stringify(
+          buildBody({
+            hook_event_name: 'UserPromptSubmit',
+            prompt: '  fix the spinner  '
+          })
+        )
+      })
+
+      expect(response.status).toBe(204)
+      expect(trackMock).toHaveBeenCalledWith('agent_prompt_sent', {
+        agent_kind: 'claude-code',
+        launch_source: 'unknown',
+        request_kind: 'followup',
+        nth_repo_added: 2
+      })
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('tracks a live SSH hook explicit prompt through ingestRemote', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'remote prompt', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledWith('agent_prompt_sent', {
+      agent_kind: 'codex',
+      launch_source: 'unknown',
+      request_kind: 'followup',
+      nth_repo_added: 2
+    })
+  })
+
+  it('dedupes adjacent same-turn reports without considering hook state', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          payload: { state: 'working', prompt: 'same turn', agentType: 'gemini' }
+        },
+        'conn-1'
+      )
+      vi.setSystemTime(1_500)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          payload: { state: 'done', prompt: 'same turn', agentType: 'gemini' }
+        },
+        'conn-1'
+      )
+
+      expect(trackMock).toHaveBeenCalledTimes(1)
+      expect(trackMock).toHaveBeenCalledWith('agent_prompt_sent', {
+        agent_kind: 'gemini',
+        launch_source: 'unknown',
+        request_kind: 'followup',
+        nth_repo_added: 2
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('tracks the same prompt again after a completed turn starts over', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          payload: { state: 'working', prompt: 'continue', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: { state: 'done', prompt: 'continue', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+      vi.setSystemTime(1_500)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          payload: { state: 'working', prompt: 'continue', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+
+      expect(trackMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('dedupes duplicate Command Code stop hooks but tracks same-prompt reruns', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        promptInteractionKey: 'command-code-transcript-user-1',
+        payload: { state: 'done', prompt: 'rerun', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        promptInteractionKey: 'command-code-transcript-user-1',
+        payload: { state: 'done', prompt: 'rerun', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        promptInteractionKey: 'command-code-transcript-user-2',
+        payload: { state: 'done', prompt: 'rerun', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('dedupes Command Code direct prompt hooks followed by transcript-backed stop hooks', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'same command', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        promptInteractionKey: 'command-code-transcript-a-1',
+        payload: { state: 'done', prompt: 'same command', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a reused interaction key suppress different prompt text', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        promptInteractionKey: 'command-code-transcript-reused',
+        payload: { state: 'done', prompt: 'first command', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        promptInteractionKey: 'command-code-transcript-reused',
+        payload: { state: 'done', prompt: 'second command', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not treat Command Code cached prompts as explicit prompt evidence', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'done', prompt: 'cached prompt', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: false,
+        payload: { state: 'done', prompt: 'cached prompt', agentType: 'command-code' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves prompt dedupe when a live status row is dismissed', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'long turn', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+    server.dropStatusEntry(PANE)
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'long turn', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets a dismissed completed row start the same prompt again', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'done', prompt: 'rerun after done', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+    server.dropStatusEntry(PANE)
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'rerun after done', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('dedupes the same prompt until a completed turn boundary is observed', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          payload: { state: 'working', prompt: 'repeat later', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+      vi.setSystemTime(32_000)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          payload: { state: 'working', prompt: 'repeat later', agentType: 'codex' }
+        },
+        'conn-1'
+      )
+
+      expect(trackMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not track replays, empty prompts, or inherited prompt snapshots', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        isReplay: true,
+        payload: { state: 'working', prompt: 'replayed prompt', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+    server.ingestRemote(
+      {
+        paneKey: GOOD_PANE,
+        tabId: 'tab-good',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: '   ', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+    server.ingestRemote(
+      {
+        paneKey: FRESH_PANE,
+        tabId: 'tab-fresh',
+        worktreeId: 'wt-1',
+        payload: { state: 'working', prompt: 'inherited prompt', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).not.toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
+  })
+
+  it('does not track hook status messages that preserve a cached prompt', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'real prompt', agentType: 'droid' }
+      },
+      'conn-1'
+    )
+    trackMock.mockClear()
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: false,
+        payload: { state: 'waiting', prompt: 'real prompt', agentType: 'droid' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).not.toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
+  })
+
+  it('tracks OpenCode user MessagePart hooks once per message id', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const response = await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/opencode`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+        },
+        body: JSON.stringify(
+          buildBody({
+            hook_event_name: 'MessagePart',
+            role: 'user',
+            text: 'fix',
+            messageID: 'msg-1'
+          })
+        )
+      })
+      const updatedResponse = await fetch(
+        `http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/opencode`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+          },
+          body: JSON.stringify(
+            buildBody({
+              hook_event_name: 'MessagePart',
+              role: 'user',
+              text: 'fix tests',
+              messageID: 'msg-1'
+            })
+          )
+        }
+      )
+
+      expect(response.status).toBe(204)
+      expect(updatedResponse.status).toBe(204)
+      expect(server.getStatusSnapshot()[0]).toMatchObject({
+        state: 'working',
+        prompt: 'fix tests',
+        agentType: 'opencode'
+      })
+      expect(trackMock).toHaveBeenCalledTimes(1)
+      expect(trackMock).toHaveBeenCalledWith('agent_prompt_sent', {
+        agent_kind: 'opencode',
+        launch_source: 'unknown',
+        request_kind: 'followup',
+        nth_repo_added: 2
+      })
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('maps custom hook agent types to other', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'custom prompt', agentType: 'my-local-agent' }
+      },
+      'conn-1'
+    )
+
+    expect(trackMock).toHaveBeenCalledWith('agent_prompt_sent', {
+      agent_kind: 'other',
+      launch_source: 'unknown',
+      request_kind: 'followup',
+      nth_repo_added: 2
+    })
+  })
+
+  it('does not block status cache mutation or listener fanout when telemetry throws', () => {
+    const server = new AgentHookServer()
+    const listener = vi.fn()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    trackMock.mockImplementationOnce(() => {
+      throw new Error('telemetry unavailable')
+    })
+    server.setListener(listener)
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hasExplicitPrompt: true,
+        payload: { state: 'working', prompt: 'keep status moving', agentType: 'codex' }
+      },
+      'conn-1'
+    )
+
+    expect(server.getStatusSnapshot()).toEqual([
+      expect.objectContaining({
+        paneKey: PANE,
+        state: 'working',
+        prompt: 'keep status moving',
+        agentType: 'codex'
+      })
+    ])
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paneKey: PANE,
+        payload: expect.objectContaining({ prompt: 'keep status moving' })
+      })
+    )
+    errorSpy.mockRestore()
   })
 })
 
@@ -2046,6 +3306,32 @@ describe('Claude hook normalization', () => {
     )
     expect(result?.payload.state).toBe('done')
     expect(result?.payload.lastAssistantMessage).toBe('what is up my dude')
+  })
+
+  it('StopFailure maps to done without copying provider error text', () => {
+    _internals.normalizeHookPayload(
+      'claude',
+      buildBody({
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'say hi'
+      }),
+      'production'
+    )
+
+    const result = _internals.normalizeHookPayload(
+      'claude',
+      buildBody({
+        hook_event_name: 'StopFailure',
+        error: 'invalid_request',
+        error_details: 'model is not supported',
+        last_assistant_message: 'API Error: model is not supported'
+      }),
+      'production'
+    )
+
+    expect(result?.payload.state).toBe('done')
+    expect(result?.payload.prompt).toBe('say hi')
+    expect(result?.payload.lastAssistantMessage).toBeUndefined()
   })
 
   describe('Stop transcript scan', () => {
@@ -2291,11 +3577,11 @@ describe('Codex hook normalization', () => {
 })
 
 describe('Gemini hook normalization', () => {
-  it('PreToolUse surfaces toolName + toolInput', () => {
+  it('BeforeTool surfaces toolName + toolInput', () => {
     const result = _internals.normalizeHookPayload(
       'gemini',
       buildBody({
-        hook_event_name: 'PreToolUse',
+        hook_event_name: 'BeforeTool',
         tool_name: 'read_file',
         tool_input: { path: '/src/index.ts' }
       }),
@@ -2310,7 +3596,7 @@ describe('Gemini hook normalization', () => {
     const result = _internals.normalizeHookPayload(
       'gemini',
       buildBody({
-        hook_event_name: 'PreToolUse',
+        hook_event_name: 'BeforeTool',
         tool_name: 'run_shell_command',
         args: { command: 'git status' }
       }),
@@ -2324,7 +3610,7 @@ describe('Gemini hook normalization', () => {
     _internals.normalizeHookPayload(
       'gemini',
       buildBody({
-        hook_event_name: 'PreToolUse',
+        hook_event_name: 'BeforeTool',
         tool_name: 'read_file',
         tool_input: { path: '/stale.ts' }
       }),
@@ -2444,11 +3730,18 @@ describe('OpenCode hook normalization', () => {
   it('MessagePart with role=user surfaces text as the prompt and stays working', () => {
     const result = _internals.normalizeHookPayload(
       'opencode',
-      buildBody({ hook_event_name: 'MessagePart', role: 'user', text: 'hi there' }),
+      buildBody({
+        hook_event_name: 'MessagePart',
+        role: 'user',
+        text: 'hi there',
+        messageID: 'msg-1'
+      }),
       'production'
     )
     expect(result?.payload.state).toBe('working')
     expect(result?.payload.prompt).toBe('hi there')
+    expect(result?.hasExplicitPrompt).toBe(true)
+    expect(result?.promptInteractionKey).toBe('opencode-message-msg-1')
   })
 
   it('MessagePart with role=assistant populates lastAssistantMessage', () => {
@@ -2744,6 +4037,7 @@ describe('Droid hook normalization', () => {
 
     expect(done?.payload.state).toBe('done')
     expect(done?.payload.prompt).toBe('write tests')
+    expect(done?.hasExplicitPrompt).toBe(false)
   })
 
   it('Notification ignores confirmation status text rather than treating it as permission', () => {
@@ -2928,6 +4222,30 @@ describe('Pi hook normalization', () => {
     expect(result?.payload.state).toBe('working')
     expect(result?.payload.agentType).toBe('pi')
     expect(result?.payload.prompt).toBe('rename this fn')
+  })
+
+  it('OMP uses Pi-compatible events but keeps OMP agent attribution', () => {
+    const started = _internals.normalizeHookPayload(
+      'omp',
+      buildBody({ hook_event_name: 'before_agent_start', prompt: 'status for omp' }),
+      'production'
+    )
+    expect(started?.payload).toMatchObject({
+      state: 'working',
+      prompt: 'status for omp',
+      agentType: 'omp'
+    })
+
+    const done = _internals.normalizeHookPayload(
+      'omp',
+      buildBody({ hook_event_name: 'agent_end' }),
+      'production'
+    )
+    expect(done?.payload).toMatchObject({
+      state: 'done',
+      prompt: 'status for omp',
+      agentType: 'omp'
+    })
   })
 
   it('agent_start without a prompt keeps the cached prompt from the current turn', () => {
@@ -3210,6 +4528,7 @@ describe('Copilot hook normalization', () => {
     expect(result?.payload.state).toBe('blocked')
     expect(result?.payload.prompt).toBe('deploy the app')
     expect(result?.payload.lastAssistantMessage).toBe('Which environment?')
+    expect(result?.hasExplicitPrompt).toBe(false)
   })
 
   it('Notification(elicitation_dialog) accepts camelCase type and surfaces the question', () => {
@@ -3822,6 +5141,32 @@ describe('Last-status persistence', () => {
         stateStartedAt: expect.any(Number),
         payload: expect.objectContaining({ state: 'working', prompt: 'persist me' })
       })
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('does not write prompt interaction keys to last-status.json', async () => {
+    const server = new AgentHookServer()
+    await server.start({
+      env: 'production',
+      userDataPath
+    })
+    try {
+      await postHookEvent(
+        server,
+        buildBody({
+          hook_event_name: 'MessagePart',
+          role: 'user',
+          text: 'persist status only',
+          messageID: 'opencode-local-message-id'
+        }),
+        '/hook/opencode'
+      )
+      server.flushStatusPersistSync()
+      const file = JSON.parse(readFileSync(lastStatusPath(), 'utf8'))
+      expect(file.entries[PANE].payload.prompt).toBe('persist status only')
+      expect(file.entries[PANE].promptInteractionKey).toBeUndefined()
     } finally {
       server.stop()
     }

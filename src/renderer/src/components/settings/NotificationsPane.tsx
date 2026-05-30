@@ -16,6 +16,8 @@ import {
 } from '../ui/select'
 import { BellRing, Bot, FileAudio, Siren, Upload, Volume2 } from 'lucide-react'
 import { getNotificationSoundOptions } from '@/components/notification-sound-options'
+import { useMountedRef } from '@/hooks/useMountedRef'
+import { useAppStore } from '@/store'
 export { NOTIFICATIONS_PANE_SEARCH_ENTRIES } from './notifications-search'
 
 type NotificationsPaneProps = {
@@ -141,6 +143,7 @@ export function NotificationsPane({
 }: NotificationsPaneProps): React.JSX.Element {
   const notificationSettings = settings.notifications
   const notificationSettingsRef = useRef(notificationSettings)
+  const mountedRef = useMountedRef()
   const [isPickingSound, setIsPickingSound] = useState(false)
 
   const updateNotificationSettings = async (
@@ -174,6 +177,7 @@ export function NotificationsPane({
   }
 
   const handleSendTestNotification = async (): Promise<void> => {
+    useAppStore.getState().recordFeatureInteraction('notifications')
     await sendNotificationSettingsTestNotification(notificationSettings, volumeDraft)
   }
 
@@ -201,7 +205,9 @@ export function NotificationsPane({
         await previewSound('custom')
       }
     } finally {
-      setIsPickingSound(false)
+      if (mountedRef.current) {
+        setIsPickingSound(false)
+      }
     }
   }
 
@@ -223,7 +229,12 @@ export function NotificationsPane({
         label="Enable Notifications"
         description="Native system notifications for background events."
         checked={notificationSettings.enabled}
-        onToggle={() => void updateNotificationSettings({ enabled: !notificationSettings.enabled })}
+        onToggle={() => {
+          if (!notificationSettings.enabled) {
+            useAppStore.getState().recordFeatureInteraction('notifications')
+          }
+          void updateNotificationSettings({ enabled: !notificationSettings.enabled })
+        }}
       />
 
       <Separator />

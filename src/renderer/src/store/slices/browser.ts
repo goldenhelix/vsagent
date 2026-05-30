@@ -515,7 +515,8 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       state.createUnifiedTab(worktreeId, 'browser', {
         entityId: workspaceId,
         label: browserTab.title,
-        targetGroupId: options?.targetGroupId
+        targetGroupId: options?.targetGroupId,
+        activate: options?.activate ?? true
       })
     }
     return browserTab
@@ -1252,7 +1253,14 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
 
   setBrowserTabUrl: (pageId, url) => get().setBrowserPageUrl(pageId, url),
 
-  setBrowserPageUrl: (pageId, url) =>
+  setBrowserPageUrl: (pageId, url) => {
+    const nextUrl = normalizeUrl(url)
+    if (nextUrl !== 'about:blank' && nextUrl !== ORCA_BROWSER_BLANK_URL) {
+      const currentPage = findPage(get().browserPagesByWorkspace, pageId)
+      if (currentPage) {
+        get().recordFeatureInteraction?.('browser')
+      }
+    }
     set((s) => {
       const page = findPage(s.browserPagesByWorkspace, pageId)
       if (!page) {
@@ -1262,7 +1270,6 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       if (!workspace) {
         return s
       }
-      const nextUrl = normalizeUrl(url)
       // Why: annotations point at DOM coordinates from one loaded document.
       // A real URL change invalidates those markers and copied context.
       const shouldClearAnnotations = normalizeUrl(page.url) !== nextUrl
@@ -1299,7 +1306,8 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
           ? { browserAnnotationsByPageId: nextBrowserAnnotationsByPageId }
           : {})
       }
-    }),
+    })
+  },
 
   setRemoteBrowserPageHandle: (pageId, handle) => {
     set((s) => ({
@@ -1597,7 +1605,8 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         if (!exists) {
           state.createUnifiedTab(worktreeId, 'browser', {
             entityId: bt.id,
-            label: bt.title
+            label: bt.title,
+            recordInteraction: false
           })
         }
       }
@@ -1746,6 +1755,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         profileId
       })) as BrowserCookieImportResult
       if (result.ok) {
+        get().recordFeatureInteraction?.('cookie-import')
         set({
           browserSessionImportState: {
             profileId,
@@ -1889,6 +1899,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         browserProfile
       })) as BrowserCookieImportResult
       if (result.ok) {
+        get().recordFeatureInteraction?.('cookie-import')
         set({
           browserSessionImportState: {
             profileId,
@@ -1945,6 +1956,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
     try {
       const ok = await window.api.browser.sessionClearDefaultCookies()
       if (ok) {
+        get().recordFeatureInteraction?.('cookie-import')
         await get().fetchBrowserSessionProfiles()
       }
       return ok

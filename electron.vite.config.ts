@@ -48,7 +48,20 @@ export default defineConfig({
           index: resolve('src/main/index.ts'),
           'daemon-entry': resolve('src/main/daemon/daemon-entry.ts'),
           'computer-sidecar': resolve('src/main/computer/sidecar-entry.ts'),
-          'stt-worker': resolve('src/main/speech/stt-worker.ts')
+          'stt-worker': resolve('src/main/speech/stt-worker.ts'),
+          // Why: electron-vite cleans out/main in dev. The dev CLI imports
+          // this path for `orca agent hooks ...`, so it must survive rebuilds.
+          'agent-hooks/managed-agent-hook-controls': resolve(
+            'src/main/agent-hooks/managed-agent-hook-controls.ts'
+          ),
+          // Why: managed-agent-hook-controls (a forced entry) statically pulls
+          // in every hook service, including codex/hook-service ->
+          // codex/codex-home-paths. With multiple entries sharing that module,
+          // Rollup mis-attributes its bindings to the hook-controls chunk
+          // namespace (which never re-exports them), so getOrcaManagedCodexHomePath
+          // resolves to undefined at runtime. Promoting codex-home-paths to its
+          // own entry makes it an authoritative chunk referenced directly.
+          'codex/codex-home-paths': resolve('src/main/codex/codex-home-paths.ts')
         }
       }
     },

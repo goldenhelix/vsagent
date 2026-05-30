@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- Why: this onboarding step owns the full notification setup surface, including macOS guidance, sound choices, and upload controls. */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { BellRing, FileAudio, Settings, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { GlobalSettings, NotificationPermissionStatusResult } from '../../../../shared/types'
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select'
 import { sendNotificationSettingsTestNotification } from '@/components/settings/NotificationsPane'
 import { getNotificationSoundOptions } from '@/components/notification-sound-options'
+import { useMountedRef } from '@/hooks/useMountedRef'
 import logo from '../../../../../resources/vsagent.svg'
 
 export type NotificationDraft = {
@@ -50,15 +51,20 @@ export function NotificationStep({
   const [isPickingSound, setIsPickingSound] = useState(false)
   const [showMacSettingsPreview, setShowMacSettingsPreview] = useState(false)
   const [selectPortalRoot, setSelectPortalRoot] = useState<HTMLElement | null>(null)
+  const syncedNotificationSettingsRef = useRef(notificationSettings)
+  const mountedRef = useMountedRef()
 
-  useEffect(() => {
+  if (syncedNotificationSettingsRef.current !== notificationSettings) {
+    syncedNotificationSettingsRef.current = notificationSettings
+    // Why: handlers optimistically update the ref before persisted settings
+    // flow back through props, so local re-renders must not overwrite it.
     notificationSettingsRef.current = notificationSettings
-  }, [notificationSettings])
+  }
 
-  useEffect(() => {
+  const setSelectPortalHost = useCallback((node: HTMLDivElement | null) => {
     // Why: onboarding sits above body-level portals, so the select menu must
     // portal into the overlay to stay clickable.
-    setSelectPortalRoot(document.querySelector<HTMLElement>('[data-onboarding-overlay]'))
+    setSelectPortalRoot(node?.closest<HTMLElement>('[data-onboarding-overlay]') ?? node)
   }, [])
 
   useEffect(() => {
@@ -96,7 +102,9 @@ export function NotificationStep({
   const handleMacPermission = async (): Promise<void> => {
     setShowMacSettingsPreview(true)
     const status = await window.api.notifications.requestPermission()
-    setPermissionStatus(status)
+    if (mountedRef.current) {
+      setPermissionStatus(status)
+    }
     await window.api.notifications.openSystemSettings()
   }
 
@@ -111,7 +119,9 @@ export function NotificationStep({
       volume: getCustomSoundVolume()
     })
     if (!result.played) {
-      toast.error('Notification sound could not be played')
+      if (mountedRef.current) {
+        toast.error('Notification sound could not be played')
+      }
     }
   }
 
@@ -124,7 +134,9 @@ export function NotificationStep({
         await previewSound('custom')
       }
     } finally {
-      setIsPickingSound(false)
+      if (mountedRef.current) {
+        setIsPickingSound(false)
+      }
     }
   }
 
@@ -159,7 +171,7 @@ export function NotificationStep({
   const isMac = permissionStatus?.platform === 'darwin'
 
   return (
-    <div className="space-y-5">
+    <div ref={setSelectPortalHost} className="space-y-5">
       {isMac ? (
         <section className="rounded-xl border border-border bg-card px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-4">

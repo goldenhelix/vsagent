@@ -11,6 +11,7 @@ const {
   notificationCloseMock,
   notificationOnMock,
   notificationOnceMock,
+  notificationRemoveListenerMock,
   notificationCtorMock,
   notificationIsSupportedMock,
   getAllWindowsMock,
@@ -22,12 +23,14 @@ const {
   const notificationCloseMock = vi.fn()
   const notificationOnMock = vi.fn()
   const notificationOnceMock = vi.fn()
+  const notificationRemoveListenerMock = vi.fn()
   const notificationCtorMock = vi.fn(function () {
     return {
       show: notificationShowMock,
       close: notificationCloseMock,
       on: notificationOnMock,
-      once: notificationOnceMock
+      once: notificationOnceMock,
+      removeListener: notificationRemoveListenerMock
     }
   })
   const notificationIsSupportedMock = vi.fn(() => true)
@@ -40,6 +43,7 @@ const {
     notificationCloseMock,
     notificationOnMock,
     notificationOnceMock,
+    notificationRemoveListenerMock,
     notificationCtorMock,
     notificationIsSupportedMock,
     getAllWindowsMock,
@@ -101,6 +105,7 @@ describe('registerNotificationHandlers', () => {
     notificationCloseMock.mockClear()
     notificationOnMock.mockClear()
     notificationOnceMock.mockClear()
+    notificationRemoveListenerMock.mockClear()
     notificationIsSupportedMock.mockReset()
     notificationIsSupportedMock.mockReturnValue(true)
     getAllWindowsMock.mockReset()
@@ -395,11 +400,14 @@ describe('registerNotificationHandlers', () => {
     expect(
       handler({}, { source: 'agent-task-complete', worktreeId: 'repo::wt1', paneKey })
     ).toEqual({ delivered: true })
+    expect(vi.getTimerCount()).toBe(1)
 
     getNotificationEventHandler('click')()
 
     expect(restore).toHaveBeenCalledTimes(1)
     expect(focus).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(notificationRemoveListenerMock).toHaveBeenCalledWith('click', expect.any(Function))
     expect(webContentsSend).toHaveBeenCalledWith('ui:activateWorktree', {
       repoId: 'repo',
       worktreeId: 'repo::wt1'
@@ -412,6 +420,29 @@ describe('registerNotificationHandlers', () => {
       flashFocusedPane: true,
       scrollToBottomIfOutputSinceLastView: true
     })
+  })
+
+  it('clears the retained notification fallback timer when the native notification closes', () => {
+    registerNotificationHandlers({
+      getSettings: () => ({
+        notifications: {
+          enabled: true,
+          agentTaskComplete: true,
+          terminalBell: true,
+          suppressWhenFocused: true
+        }
+      })
+    } as never)
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'agent-task-complete' })).toEqual({ delivered: true })
+    expect(vi.getTimerCount()).toBe(1)
+
+    const closeHandler = getNotificationEventHandler('close')
+    closeHandler()
+
+    expect(vi.getTimerCount()).toBe(0)
+    expect(notificationRemoveListenerMock).toHaveBeenCalledWith('close', closeHandler)
   })
 
   it('formats agent-task-complete with the agent response when a status snapshot is present', () => {
@@ -662,7 +693,7 @@ describe('registerNotificationHandlers', () => {
     )
   })
 
-  it('uses rich formatter output for mobile notifications before desktop guards', () => {
+  it('uses rich formatter output for mobile notifications before the native support guard', () => {
     notificationIsSupportedMock.mockReturnValue(false)
     const dispatchMobileNotification = vi.fn()
     registerNotificationHandlers(
@@ -702,6 +733,173 @@ describe('registerNotificationHandlers', () => {
       worktreeId: 'repo::wt1'
     })
     expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+
+  // Why (fork): mobile push is dispatched independent of desktop guards so a
+  // remote/server-deployment phone is notified even when desktop notifications
+  // are disabled. See notifications.ts top-of-handler dispatch.
+  it('still dispatches mobile notifications when desktop notifications are disabled', () => {
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: false,
+            agentTaskComplete: true,
+            terminalBell: true,
+            suppressWhenFocused: false
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'agent-task-complete', worktreeId: 'repo::wt1' })).toEqual({
+      delivered: false,
+      reason: 'disabled'
+    })
+
+    expect(dispatchMobileNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete', worktreeId: 'repo::wt1' })
+    )
+  })
+
+  // Why (fork): mobile push fires independent of desktop per-source toggles —
+  // the mobile client decides for itself what to surface.
+  it('still dispatches mobile notifications when the desktop source is disabled', () => {
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: true,
+            agentTaskComplete: false,
+            terminalBell: true,
+            suppressWhenFocused: false
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'agent-task-complete', worktreeId: 'repo::wt1' })).toEqual({
+      delivered: false,
+      reason: 'source-disabled'
+    })
+
+    expect(dispatchMobileNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete', worktreeId: 'repo::wt1' })
+    )
+  })
+
+  // Why (fork): suppressWhenFocused only silences the desktop notification when
+  // the desktop window is focused. The phone is a separate device, so mobile
+  // push still fires regardless of desktop focus.
+  it('still dispatches mobile notifications for focused active-worktree notifications', () => {
+    getAllWindowsMock.mockReturnValue([
+      {
+        isDestroyed: () => false,
+        isFocused: () => true
+      } as never
+    ])
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: true,
+            agentTaskComplete: true,
+            terminalBell: true,
+            suppressWhenFocused: true
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(
+      handler(
+        {},
+        { source: 'agent-task-complete', worktreeId: 'repo::wt1', isActiveWorktree: true }
+      )
+    ).toEqual({
+      delivered: false,
+      reason: 'suppressed-focus'
+    })
+
+    expect(dispatchMobileNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete', worktreeId: 'repo::wt1' })
+    )
+  })
+
+  // Why (fork): the desktop burst-dedupe cooldown does not gate mobile push.
+  // Mobile dispatch happens at the top of the handler, so each dispatch
+  // forwards to mobile even when the desktop notification is cooldown-suppressed;
+  // the mobile client owns its own surfacing/dedupe policy.
+  it('still dispatches mobile notifications for cooldown-suppressed bursts', () => {
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: true,
+            agentTaskComplete: true,
+            terminalBell: true,
+            suppressWhenFocused: false
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'agent-task-complete', worktreeId: 'repo::wt1' })).toEqual({
+      delivered: true
+    })
+    expect(handler({}, { source: 'terminal-bell', worktreeId: 'repo::wt1' })).toEqual({
+      delivered: false,
+      reason: 'cooldown'
+    })
+
+    expect(dispatchMobileNotification).toHaveBeenCalledTimes(2)
+    expect(dispatchMobileNotification).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ source: 'agent-task-complete', worktreeId: 'repo::wt1' })
+    )
+    expect(dispatchMobileNotification).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ source: 'terminal-bell', worktreeId: 'repo::wt1' })
+    )
+  })
+
+  // Why (fork): mobile dispatch sits at the top of the handler, independent of
+  // any desktop guards, so the explicit Settings "test" notification is also
+  // forwarded to mobile clients — letting the user verify the phone path too.
+  it('forwards explicit desktop test notifications to mobile clients', () => {
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: true,
+            agentTaskComplete: true,
+            terminalBell: true,
+            suppressWhenFocused: false
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'test' })).toEqual({ delivered: true })
+
+    expect(dispatchMobileNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'test' })
+    )
   })
 
   it('silences the native notification when a custom sound is configured', () => {
@@ -944,11 +1142,22 @@ describe('registerNotificationHandlers', () => {
 describe('triggerStartupNotificationRegistration', () => {
   const originalPlatform = process.platform
 
+  function getStartupNotificationEventHandler(eventName: string): () => void {
+    const call = notificationOnMock.mock.calls.find((c: unknown[]) => c[0] === eventName)
+    if (!call) {
+      throw new Error(`Startup notification ${eventName} handler not registered`)
+    }
+    return call[1] as () => void
+  }
+
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllTimers()
     notificationCtorMock.mockClear()
     notificationShowMock.mockClear()
     notificationCloseMock.mockClear()
     notificationOnMock.mockClear()
+    notificationRemoveListenerMock.mockClear()
     notificationIsSupportedMock.mockReset()
     notificationIsSupportedMock.mockReturnValue(true)
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
@@ -995,5 +1204,23 @@ describe('triggerStartupNotificationRegistration', () => {
     triggerStartupNotificationRegistration(store as never)
 
     expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+
+  it('clears startup notification timers when the notification is clicked', () => {
+    const store = {
+      getUI: () => ({ notificationPermissionRequested: undefined }),
+      updateUI: vi.fn()
+    }
+
+    triggerStartupNotificationRegistration(store as never)
+    expect(vi.getTimerCount()).toBe(1)
+
+    getStartupNotificationEventHandler('click')()
+
+    expect(notificationCloseMock).toHaveBeenCalledTimes(1)
+    expect(shellOpenExternalMock).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(notificationRemoveListenerMock).toHaveBeenCalledWith('click', expect.any(Function))
+    expect(notificationRemoveListenerMock).toHaveBeenCalledWith('show', expect.any(Function))
   })
 })

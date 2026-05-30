@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react'
-import type { CtrlTabOrderMode } from '../../../../shared/types'
 import {
   KEYBINDING_DEFINITIONS,
   findKeybindingConflicts,
@@ -18,18 +17,23 @@ import {
   type TerminalShortcutPolicy
 } from '../../../../shared/keybindings'
 import { useAppStore } from '../../store'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { KeybindingsFileActions } from './KeybindingsFileActions'
-import { SearchableSetting } from './SearchableSetting'
-import { SettingsRow, SettingsSubsectionHeader } from './SettingsFormControls'
-import { ShortcutBindingRow, type ShortcutTerminalStatus } from './ShortcutBindingRow'
-import { matchesSettingsSearch, type SettingsSearchEntry } from './settings-search'
+import { SettingsSubsectionHeader } from './SettingsFormControls'
+import type { ShortcutTerminalStatus } from './ShortcutBindingRow'
 import {
-  CTRL_TAB_BEHAVIOR_SEARCH_ENTRY,
-  SHORTCUTS_PANE_SEARCH_ENTRIES,
-  TERMINAL_SHORTCUT_POLICY_SEARCH_ENTRY
-} from './shortcuts-search'
-export { SHORTCUTS_PANE_SEARCH_ENTRIES }
+  getShortcutSearchEntry,
+  matchesShortcutFilter,
+  matchesShortcutLocalSearch,
+  ShortcutFilterRail,
+  type ShortcutFilter,
+  type ShortcutGroupSummary,
+  type ShortcutRowsByGroup
+} from './ShortcutFilterRail'
+import { ShortcutRowsList } from './ShortcutRowsList'
+import { ShortcutTerminalPolicyControl } from './ShortcutTerminalPolicyControl'
+import { TERMINAL_SHORTCUT_POLICY_SEARCH_ENTRY } from './shortcuts-search'
+import { matchesSettingsSearch, normalizeSettingsSearchQuery } from './settings-search'
+import { useMountedRef } from '@/hooks/useMountedRef'
 
 type ShortcutGroup = {
   title: string
@@ -118,7 +122,6 @@ function getShortcutTerminalStatus(
 
 export function ShortcutsPane(): React.JSX.Element {
   const searchQuery = useAppStore((state) => state.settingsSearchQuery)
-  const ctrlTabOrderMode = useAppStore((state) => state.settings?.ctrlTabOrderMode ?? 'mru')
   const terminalShortcutPolicy = useAppStore(
     (state) => state.settings?.terminalShortcutPolicy ?? 'orca-first'
   )
@@ -128,24 +131,14 @@ export function ShortcutsPane(): React.JSX.Element {
   const setKeybindingOverride = useAppStore((state) => state.setKeybindingOverride)
   const resetKeybindingOverride = useAppStore((state) => state.resetKeybindingOverride)
   const disableKeybindingAction = useAppStore((state) => state.disableKeybindingAction)
+  const mountedRef = useMountedRef()
   const [errors, setErrors] = useState<Partial<Record<KeybindingActionId, string>>>({})
   const [recordingActionId, setRecordingActionId] = useState<KeybindingActionId | null>(null)
+  const [shortcutQuery, setShortcutQuery] = useState('')
+  const [shortcutFilter, setShortcutFilter] = useState<ShortcutFilter>('all')
+  const [activeShortcutGroup, setActiveShortcutGroup] = useState<string>('all')
 
   const groups = useMemo(groupDefinitions, [])
-  const groupEntries = useMemo<Record<string, SettingsSearchEntry[]>>(
-    () =>
-      Object.fromEntries(
-        groups.map((group) => [
-          group.title,
-          group.items.map((item) => ({
-            title: item.title,
-            description: `${group.title} shortcut`,
-            keywords: [...item.searchKeywords]
-          }))
-        ])
-      ),
-    [groups]
-  )
   const conflictByAction = useMemo(() => {
     const result = new Map<KeybindingActionId, string[]>()
     for (const conflict of findKeybindingConflicts(platform, keybindings)) {
@@ -161,6 +154,76 @@ export function ShortcutsPane(): React.JSX.Element {
     }
     return result
   }, [keybindings])
+  const shortcutGroups = useMemo<ShortcutRowsByGroup[]>(
+    () =>
+      groups.map((group) => ({
+        title: group.title,
+        rows: group.items.map((item) => {
+          const effective = getEffectiveKeybindingsForAction(item.id, platform, keybindings)
+          const modified = hasOwnBindingOverride(keybindings, item.id)
+          const warnings = conflictByAction.get(item.id) ?? []
+          return {
+            item,
+            groupTitle: group.title,
+            effective,
+            modified,
+            warnings,
+            terminalStatus: getShortcutTerminalStatus(
+              item,
+              terminalShortcutPolicy,
+              effective.length > 0
+            )
+          }
+        })
+      })),
+    [conflictByAction, groups, keybindings, terminalShortcutPolicy]
+  )
+  const shortcutSearchQuery = normalizeSettingsSearchQuery(shortcutQuery)
+  const shortcutRows = shortcutGroups.flatMap((group) => group.rows)
+  const baseVisibleRows = shortcutRows.filter(
+    (row) =>
+      matchesSettingsSearch(searchQuery, getShortcutSearchEntry(row)) &&
+      matchesShortcutLocalSearch(row, shortcutSearchQuery, platform)
+  )
+  const filterCounts: Record<ShortcutFilter, number> = {
+    all: baseVisibleRows.length,
+    modified: baseVisibleRows.filter((row) => row.modified).length,
+    unassigned: baseVisibleRows.filter((row) => row.effective.length === 0).length,
+    conflicts: baseVisibleRows.filter((row) => row.warnings.length > 0).length
+  }
+  const groupSummaries: ShortcutGroupSummary[] = [
+    {
+      id: 'all',
+      label: 'All shortcuts',
+      count: baseVisibleRows.filter((row) => matchesShortcutFilter(row, shortcutFilter)).length
+    },
+    ...shortcutGroups.map((group) => ({
+      id: group.title,
+      label: group.title,
+      count: group.rows.filter(
+        (row) =>
+          matchesSettingsSearch(searchQuery, getShortcutSearchEntry(row)) &&
+          matchesShortcutLocalSearch(row, shortcutSearchQuery, platform) &&
+          matchesShortcutFilter(row, shortcutFilter)
+      ).length
+    }))
+  ]
+  const visibleShortcutGroups = shortcutGroups
+    .map((group) => ({
+      title: group.title,
+      rows: group.rows.filter(
+        (row) =>
+          (activeShortcutGroup === 'all' || row.groupTitle === activeShortcutGroup) &&
+          matchesSettingsSearch(searchQuery, getShortcutSearchEntry(row)) &&
+          matchesShortcutLocalSearch(row, shortcutSearchQuery, platform) &&
+          matchesShortcutFilter(row, shortcutFilter)
+      )
+    }))
+    .filter((group) => group.rows.length > 0)
+  const visibleShortcutCount = visibleShortcutGroups.reduce(
+    (sum, group) => sum + group.rows.length,
+    0
+  )
 
   const saveBindings = async (
     actionId: KeybindingActionId,
@@ -206,10 +269,12 @@ export function ShortcutsPane(): React.JSX.Element {
         : setKeybindingOverride(actionId, normalizedResult))
       return true
     } catch (error) {
-      setErrors((prev) => ({
-        ...prev,
-        [actionId]: error instanceof Error ? error.message : 'Failed to save shortcut.'
-      }))
+      if (mountedRef.current) {
+        setErrors((prev) => ({
+          ...prev,
+          [actionId]: error instanceof Error ? error.message : 'Failed to save shortcut.'
+        }))
+      }
       return false
     }
   }
@@ -226,7 +291,7 @@ export function ShortcutsPane(): React.JSX.Element {
 
     // Why: the visual editor records one chord at a time; users can still
     // manage multi-binding arrays directly in keybindings.json.
-    if (await saveBindings(actionId, [captured.value])) {
+    if ((await saveBindings(actionId, [captured.value])) && mountedRef.current) {
       setRecordingActionId(null)
     }
   }
@@ -238,10 +303,12 @@ export function ShortcutsPane(): React.JSX.Element {
         ? setKeybindingOverride(actionId, getEffectiveKeybindingsForAction(actionId, platform, {}))
         : resetKeybindingOverride(actionId))
     } catch (error) {
-      setErrors((prev) => ({
-        ...prev,
-        [actionId]: error instanceof Error ? error.message : 'Failed to reset shortcut.'
-      }))
+      if (mountedRef.current) {
+        setErrors((prev) => ({
+          ...prev,
+          [actionId]: error instanceof Error ? error.message : 'Failed to reset shortcut.'
+        }))
+      }
     }
   }
 
@@ -250,10 +317,12 @@ export function ShortcutsPane(): React.JSX.Element {
     try {
       await disableKeybindingAction(actionId)
     } catch (error) {
-      setErrors((prev) => ({
-        ...prev,
-        [actionId]: error instanceof Error ? error.message : 'Failed to disable shortcut.'
-      }))
+      if (mountedRef.current) {
+        setErrors((prev) => ({
+          ...prev,
+          [actionId]: error instanceof Error ? error.message : 'Failed to disable shortcut.'
+        }))
+      }
     }
   }
 
@@ -262,133 +331,57 @@ export function ShortcutsPane(): React.JSX.Element {
   }
 
   const showPolicy = matchesSettingsSearch(searchQuery, TERMINAL_SHORTCUT_POLICY_SEARCH_ENTRY)
-  const showCtrlTab = matchesSettingsSearch(searchQuery, CTRL_TAB_BEHAVIOR_SEARCH_ENTRY)
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-3">
+    <div className="flex h-full min-h-0 flex-col gap-6 overflow-hidden">
+      <section className="flex min-h-0 flex-1 flex-col space-y-3">
         <SettingsSubsectionHeader
           title="Keyboard Shortcuts"
           description="Customize shortcuts visually or edit the file directly."
         />
 
-        {showPolicy || showCtrlTab ? (
-          <div className="divide-y divide-border/40">
+        <div className="grid min-h-0 flex-1 gap-6 xl:grid-cols-[16rem_minmax(0,1fr)]">
+          <ShortcutFilterRail
+            query={shortcutQuery}
+            onQueryChange={setShortcutQuery}
+            filter={shortcutFilter}
+            onFilterChange={setShortcutFilter}
+            activeGroup={activeShortcutGroup}
+            onActiveGroupChange={setActiveShortcutGroup}
+            filterCounts={filterCounts}
+            groupSummaries={groupSummaries}
+            visibleCount={visibleShortcutCount}
+            totalCount={shortcutRows.length}
+          />
+
+          <div className="flex min-h-0 min-w-0 flex-col gap-5">
             {showPolicy ? (
-              <SearchableSetting
-                id="terminal-shortcut-policy"
-                title="Shortcuts in Terminal"
-                description="Choose whether Orca or the focused terminal wins when shortcuts overlap."
+              <ShortcutTerminalPolicyControl
+                terminalShortcutPolicy={terminalShortcutPolicy}
                 keywords={TERMINAL_SHORTCUT_POLICY_SEARCH_ENTRY.keywords}
-              >
-                <SettingsRow
-                  label="Shortcuts in Terminal"
-                  description="Orca first keeps app shortcuts active in TUIs. Terminal first lets shell shortcuts win unless marked terminal-active."
-                  control={
-                    <Select
-                      value={terminalShortcutPolicy}
-                      onValueChange={(value) =>
-                        void updateSettings({
-                          terminalShortcutPolicy: value as TerminalShortcutPolicy
-                        })
-                      }
-                    >
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="orca-first">Orca first</SelectItem>
-                        <SelectItem value="terminal-first">Terminal first</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  }
-                />
-              </SearchableSetting>
+                updateSettings={updateSettings}
+              />
             ) : null}
 
-            {showCtrlTab ? (
-              <SearchableSetting
-                title="Recent Tab Order"
-                description="Choose recent or sequential tab switching."
-                keywords={CTRL_TAB_BEHAVIOR_SEARCH_ENTRY.keywords}
-              >
-                <SettingsRow
-                  label="Recent Tab Order"
-                  description="Choose whether recent tab switching follows recent use or the tab strip order."
-                  control={
-                    <Select
-                      value={ctrlTabOrderMode}
-                      onValueChange={(value) =>
-                        void updateSettings({ ctrlTabOrderMode: value as CtrlTabOrderMode })
-                      }
-                    >
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="mru">Most recent</SelectItem>
-                        <SelectItem value="sequential">Tab strip order</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  }
-                />
-              </SearchableSetting>
-            ) : null}
+            <KeybindingsFileActions />
+
+            <ShortcutRowsList
+              className="min-h-0 flex-1 overflow-y-auto pr-1 scrollbar-sleek"
+              groups={visibleShortcutGroups}
+              platform={platform}
+              errors={errors}
+              recordingActionId={recordingActionId}
+              onStartRecording={(actionId) => {
+                setRecordingActionId(actionId)
+                clearError(actionId)
+              }}
+              onCancelRecording={() => setRecordingActionId(null)}
+              onCapture={(actionId, input) => void captureBinding(actionId, input)}
+              onClearError={clearError}
+              onDisable={(actionId) => void disableBinding(actionId)}
+              onReset={(actionId) => void resetBinding(actionId)}
+            />
           </div>
-        ) : null}
-
-        <KeybindingsFileActions />
-
-        <div className="grid gap-8">
-          {groups
-            .filter((group) => matchesSettingsSearch(searchQuery, groupEntries[group.title] ?? []))
-            .map((group) => (
-              <div key={group.title} className="space-y-3">
-                <h3 className="border-b border-border/50 pb-2 text-sm font-medium text-muted-foreground">
-                  {group.title}
-                </h3>
-                <div className="grid gap-2">
-                  {group.items.map((item) => {
-                    const effective = getEffectiveKeybindingsForAction(
-                      item.id,
-                      platform,
-                      keybindings
-                    )
-                    const modified = hasOwnBindingOverride(keybindings, item.id)
-                    const warnings = conflictByAction.get(item.id) ?? []
-                    const terminalStatus = getShortcutTerminalStatus(
-                      item,
-                      terminalShortcutPolicy,
-                      effective.length > 0
-                    )
-
-                    return (
-                      <ShortcutBindingRow
-                        key={item.id}
-                        item={item}
-                        groupTitle={group.title}
-                        platform={platform}
-                        effective={effective}
-                        modified={modified}
-                        error={errors[item.id]}
-                        warnings={warnings}
-                        recording={recordingActionId === item.id}
-                        terminalStatus={terminalStatus}
-                        onStartRecording={(actionId) => {
-                          setRecordingActionId(actionId)
-                          clearError(actionId)
-                        }}
-                        onCancelRecording={() => setRecordingActionId(null)}
-                        onCapture={(actionId, input) => void captureBinding(actionId, input)}
-                        onClearError={clearError}
-                        onDisable={(actionId) => void disableBinding(actionId)}
-                        onReset={(actionId) => void resetBinding(actionId)}
-                      />
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
         </div>
       </section>
     </div>

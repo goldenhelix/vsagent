@@ -19,6 +19,7 @@ import { SshFilesystemProvider } from '../providers/ssh-filesystem-provider'
 import { SshGitProvider } from '../providers/ssh-git-provider'
 import { agentHookServer } from '../agent-hooks/server'
 import { installRemoteManagedAgentHooks } from '../agent-hooks/remote-managed-hook-installers'
+import { isAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import {
   AGENT_HOOK_INSTALL_PLUGINS_METHOD,
   AGENT_HOOK_NOTIFICATION_METHOD,
@@ -47,11 +48,28 @@ import { notifyRemoteWorkspaceHandlers } from '../ipc/remote-workspace-events'
 import { PortScanner } from './ssh-port-scanner'
 import type { SshPortForwardManager } from './ssh-port-forward'
 import type { SshConnection } from './ssh-connection'
-import type { DetectedPort } from '../../shared/ssh-types'
+import {
+  DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS,
+  type DetectedPort,
+  MAX_SSH_RELAY_GRACE_PERIOD_SECONDS,
+  MIN_SSH_RELAY_GRACE_PERIOD_SECONDS,
+  SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD
+} from '../../shared/ssh-types'
 import type { Store } from '../persistence'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 
 export type RelaySessionState = 'idle' | 'deploying' | 'ready' | 'reconnecting' | 'disposed'
+
+function normalizeRelayGracePeriodSeconds(graceTimeSeconds: number | undefined): number {
+  const raw = graceTimeSeconds ?? DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS
+  const requested = Number.isFinite(raw) ? Math.floor(raw) : DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS
+  return requested === 0
+    ? 0
+    : Math.max(
+        MIN_SSH_RELAY_GRACE_PERIOD_SECONDS,
+        Math.min(MAX_SSH_RELAY_GRACE_PERIOD_SECONDS, requested)
+      )
+}
 
 export class SshRelaySession {
   private _state: RelaySessionState = 'idle'
@@ -92,6 +110,20 @@ export class SshRelaySession {
     ) => void
   ) {}
 
+  refreshEnvironment(
+    getMainWindow: () => BrowserWindow | null,
+    store: Store,
+    portForwardManager: SshPortForwardManager,
+    runtime?: OrcaRuntimeService,
+    onDetectedPortsChanged?: (targetId: string, ports: DetectedPort[], platform: string) => void
+  ): void {
+    this.getMainWindow = getMainWindow
+    this.store = store
+    this.portForwardManager = portForwardManager
+    this.runtime = runtime
+    this.onDetectedPortsChanged = onDetectedPortsChanged
+  }
+
   setOnRelayLost(cb: (targetId: string) => void): void {
     this._onRelayLost = cb
   }
@@ -130,6 +162,14 @@ export class SshRelaySession {
 
   getPortScanner(): PortScanner | null {
     return this.portScanner
+  }
+
+  prepareForHostSleep(): void {
+    const mux = this.mux
+    if (!mux || mux.isDisposed() || this.isDisposed()) {
+      return
+    }
+    mux.notify(SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD, { graceTimeSeconds: 0 })
   }
 
   // Why: single entry point for relay setup — used by both initial connect
@@ -202,6 +242,7 @@ export class SshRelaySession {
         throw new Error('Session disposed during establish')
       }
 
+      this.configureRelayGraceTime(mux, graceTimeSeconds)
       this.watchMuxForRelayLoss(mux)
       this._state = 'ready'
       this.startPortScanning()
@@ -327,6 +368,7 @@ export class SshRelaySession {
         return
       }
 
+      this.configureRelayGraceTime(mux, graceTimeSeconds)
       this.watchMuxForRelayLoss(mux)
       this._state = 'ready'
       this.startPortScanning()
@@ -461,13 +503,22 @@ export class SshRelaySession {
     return true
   }
 
+  private configureRelayGraceTime(
+    mux: SshChannelMultiplexer,
+    graceTimeSeconds: number | undefined
+  ): void {
+    mux.notify(SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD, {
+      graceTimeSeconds: normalizeRelayGracePeriodSeconds(graceTimeSeconds)
+    })
+  }
+
   // Why: the relay can inject ORCA_AGENT_HOOK_* env into SSH PTYs, but
   // hook-script agents (Claude/Codex/Gemini/etc.) still need their config
   // files on the remote host to call Orca's managed script. Install those
   // configs before registering the PTY provider so newly spawned agent panes
   // report status from their first prompt.
   private async installManagedHooksOnRemote(mux: SshChannelMultiplexer): Promise<void> {
-    if (!isRemoteAgentHooksEnabled()) {
+    if (!isRemoteAgentHooksEnabled() || !this.areAgentStatusHooksEnabled()) {
       return
     }
 
@@ -519,13 +570,14 @@ export class SshRelaySession {
   // they upgrade. Hook-script-based agents use a separate explicit remote
   // installer flow because that mutates user-owned agent config files.
   private async installPluginsOnRelay(mux: SshChannelMultiplexer): Promise<void> {
-    if (!isRemoteAgentHooksEnabled()) {
+    if (!isRemoteAgentHooksEnabled() || !this.areAgentStatusHooksEnabled()) {
       return
     }
     try {
       await mux.request(AGENT_HOOK_INSTALL_PLUGINS_METHOD, {
         opencodePluginSource: openCodeInternals.getOpenCodePluginSource(),
-        piExtensionSource: getPiAgentStatusExtensionSource()
+        piExtensionSource: getPiAgentStatusExtensionSource('pi'),
+        ompExtensionSource: getPiAgentStatusExtensionSource('omp')
       })
     } catch (err) {
       // Why: -32601 = older relay without the handler (treat as soft skip).
@@ -546,6 +598,11 @@ export class SshRelaySession {
         }`
       )
     }
+  }
+
+  private areAgentStatusHooksEnabled(): boolean {
+    const store = this.store as { getSettings?: Store['getSettings'] }
+    return isAgentStatusHooksEnabled(store.getSettings?.())
   }
 
   private wireUpRemoteWorkspaceEvents(mux: SshChannelMultiplexer): void {
@@ -585,6 +642,11 @@ export class SshRelaySession {
         env?: unknown
         version?: unknown
         hasExplicitPrompt?: unknown
+        promptInteractionKey?: unknown
+        hookEventName?: unknown
+        toolUseId?: unknown
+        toolAgentId?: unknown
+        toolAgentType?: unknown
         isReplay?: unknown
         payload?: unknown
       }
@@ -604,6 +666,16 @@ export class SshRelaySession {
           env: typeof envelope.env === 'string' ? envelope.env : undefined,
           version: typeof envelope.version === 'string' ? envelope.version : undefined,
           hasExplicitPrompt: envelope.hasExplicitPrompt === true ? true : undefined,
+          promptInteractionKey:
+            typeof envelope.promptInteractionKey === 'string'
+              ? envelope.promptInteractionKey
+              : undefined,
+          hookEventName:
+            typeof envelope.hookEventName === 'string' ? envelope.hookEventName : undefined,
+          toolUseId: typeof envelope.toolUseId === 'string' ? envelope.toolUseId : undefined,
+          toolAgentId: typeof envelope.toolAgentId === 'string' ? envelope.toolAgentId : undefined,
+          toolAgentType:
+            typeof envelope.toolAgentType === 'string' ? envelope.toolAgentType : undefined,
           isReplay: envelope.isReplay === true ? true : undefined,
           payload: envelope.payload
         },
@@ -740,16 +812,18 @@ export class SshRelaySession {
   }
 
   private wireUpPtyEvents(ptyProvider: SshPtyProvider): void {
-    const getWin = this.getMainWindow
     ptyProvider.onData((payload) => {
-      this.runtime?.onPtyData(payload.id, payload.data, Date.now())
-      const win = getWin()
+      const seq = this.runtime?.onPtyData(payload.id, payload.data, Date.now())
+      const win = this.getMainWindow()
       if (win && !win.isDestroyed()) {
-        win.webContents.send('pty:data', payload)
+        win.webContents.send('pty:data', {
+          ...payload,
+          ...(typeof seq === 'number' ? { seq, rawLength: payload.data.length } : {})
+        })
       }
     })
     ptyProvider.onReplay((payload) => {
-      const win = getWin()
+      const win = this.getMainWindow()
       if (win && !win.isDestroyed()) {
         win.webContents.send('pty:replay', payload)
       }
@@ -760,7 +834,7 @@ export class SshRelaySession {
       deletePtyOwnership(payload.id)
       this.store.markSshRemotePtyLease(this.targetId, relayPtyId, 'terminated')
       this.runtime?.onPtyExit(payload.id, payload.code)
-      const win = getWin()
+      const win = this.getMainWindow()
       if (win && !win.isDestroyed()) {
         win.webContents.send('pty:exit', payload)
       }

@@ -4,6 +4,7 @@ adapter ↔ history lifecycle logic. */
 import { basename } from 'path'
 import { existsSync } from 'fs'
 import { DaemonClient } from './client'
+import { getMacDaemonSystemResolverHealth } from './daemon-health'
 import { HistoryManager } from './history-manager'
 import { HistoryReader } from './history-reader'
 import { mintPtySessionId, parsePtySessionId } from './pty-session-id'
@@ -41,6 +42,8 @@ export class TerminalKilledError extends Error {
 
 export class DaemonPtyAdapter implements IPtyProvider {
   readonly protocolVersion: number
+  private socketPath: string
+  private tokenPath: string
   private client: DaemonClient
   private historyManager: HistoryManager | null
   private historyReader: HistoryReader | null
@@ -75,6 +78,8 @@ export class DaemonPtyAdapter implements IPtyProvider {
 
   constructor(opts: DaemonPtyAdapterOptions) {
     this.protocolVersion = opts.protocolVersion ?? PROTOCOL_VERSION
+    this.socketPath = opts.socketPath
+    this.tokenPath = opts.tokenPath
     this.client = new DaemonClient({
       socketPath: opts.socketPath,
       tokenPath: opts.tokenPath,
@@ -95,12 +100,14 @@ export class DaemonPtyAdapter implements IPtyProvider {
   }
 
   private async doSpawn(opts: PtySpawnOptions): Promise<PtySpawnResult> {
-    await this.ensureConnected()
-
     const sessionId = opts.sessionId ?? mintPtySessionId(opts.worktreeId)
 
     if (this.killedSessionTombstones.has(sessionId)) {
       throw new TerminalKilledError(sessionId)
+    }
+
+    if (opts.isNewSession) {
+      await this.replaceUnhealthyMacResolverDaemonBeforeNewPty()
     }
 
     // Why: detect crash-recovery history before spawning a replacement PTY so
@@ -111,12 +118,15 @@ export class DaemonPtyAdapter implements IPtyProvider {
     const effectiveCols = restoreInfo?.cols ?? opts.cols
     const effectiveRows = restoreInfo?.rows ?? opts.rows
 
+    await this.ensureConnected()
+
     const result = await this.client.request<CreateOrAttachResult>('createOrAttach', {
       sessionId,
       cols: effectiveCols,
       rows: effectiveRows,
       cwd: effectiveCwd,
       env: opts.env,
+      envToDelete: opts.envToDelete,
       command: opts.command,
       // Why: without this, the daemon always spawns cmd.exe (COMSPEC) or
       // PowerShell as a fallback — regardless of which shell the renderer
@@ -124,6 +134,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
       // the override makes the daemon path behave the same as the in-process
       // LocalPtyProvider.
       shellOverride: opts.shellOverride,
+      terminalWindowsWslDistro: opts.terminalWindowsWslDistro,
       terminalWindowsPowerShellImplementation: opts.terminalWindowsPowerShellImplementation,
       shellReadySupported: opts.command ? supportsPtyStartupBarrier(opts.env ?? {}) : false
     })
@@ -337,8 +348,16 @@ export class DaemonPtyAdapter implements IPtyProvider {
     return false
   }
 
-  async getForegroundProcess(_id: string): Promise<string | null> {
-    return null
+  async getForegroundProcess(id: string): Promise<string | null> {
+    try {
+      const result = await this.client.request<{ foregroundProcess: string | null }>(
+        'getForegroundProcess',
+        { sessionId: id }
+      )
+      return result.foregroundProcess
+    } catch {
+      return null
+    }
   }
 
   async serialize(ids: string[]): Promise<string> {
@@ -670,8 +689,56 @@ export class DaemonPtyAdapter implements IPtyProvider {
     }
   }
 
-  private async doRespawn(): Promise<void> {
-    console.warn('[daemon] Daemon died — respawning')
+  private async replaceUnhealthyMacResolverDaemonBeforeNewPty(): Promise<void> {
+    if (!this.respawnFn) {
+      return
+    }
+
+    const health = await getMacDaemonSystemResolverHealth(
+      this.socketPath,
+      this.tokenPath,
+      this.protocolVersion
+    )
+    if (health !== 'unhealthy') {
+      return
+    }
+
+    const daemonLiveSessionCount = await this.getDaemonLiveSessionCount()
+    const liveSessionCount = Math.max(this.activeSessionIds.size, daemonLiveSessionCount ?? 0)
+    if (daemonLiveSessionCount === null || liveSessionCount > 0) {
+      console.warn(
+        daemonLiveSessionCount === null
+          ? '[daemon] macOS system resolver unavailable - preserving daemon because live session state could not be verified'
+          : `[daemon] macOS system resolver unavailable - preserving daemon because it owns ${liveSessionCount} live session${liveSessionCount === 1 ? '' : 's'}`
+      )
+      return
+    }
+
+    // Why: replacing the daemon kills its sessions without daemon-side exit
+    // fanout. Emit exits first so renderer panes do not write to dead PTYs.
+    this.fanoutSyntheticExits(-1)
+    if (!this.respawnPromise) {
+      this.respawnPromise = this.doRespawn(
+        '[daemon] macOS system resolver unavailable - respawning daemon'
+      ).finally(() => {
+        this.respawnPromise = null
+      })
+    }
+    await this.respawnPromise
+  }
+
+  private async getDaemonLiveSessionCount(): Promise<number | null> {
+    try {
+      await this.client.ensureConnected()
+      const result = await this.client.request<ListSessionsResult>('listSessions', undefined)
+      return result.sessions.filter((session) => session.isAlive).length
+    } catch {
+      return null
+    }
+  }
+
+  private async doRespawn(message = '[daemon] Daemon died — respawning'): Promise<void> {
+    console.warn(message)
     this.removeEventListener?.()
     this.removeEventListener = null
     this.client.disconnect()

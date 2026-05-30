@@ -14,6 +14,7 @@ import type {
   WorktreeRemoteBranchConflictEvent,
   WorktreeMeta
 } from '../../../../shared/types'
+import type { TerminalGitHubPRLink } from '@/lib/terminal-github-pr-link-detector'
 export { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
 
 export type WorktreeDeleteState = {
@@ -44,9 +45,10 @@ export type WorktreeSlice = {
    * their PTYs, and the resulting `updateTabPtyId`/`clearTabPtyId` calls
    * are all side-effects of the click — not real activity. On first
    * activation we tag every terminal tab with `pendingActivationSpawn` so
-   * the bump is suppressed. After the first activation we do NOT re-tag,
-   * so subsequent events on the worktree (codex restart, new pane spawn,
-   * agent output) count normally. Session-only; never persisted.
+   * the bump is suppressed. Split-layout tabs may carry a numeric count so
+   * every click-driven pane remount is suppressed. After the first activation
+   * we do NOT re-tag, so subsequent events on the worktree (codex restart,
+   * new pane spawn, agent output) count normally. Session-only; never persisted.
    */
   everActivatedWorktreeIds: Set<string>
   /**
@@ -105,6 +107,7 @@ export type WorktreeSlice = {
     updatesByWorktreeId: ReadonlyMap<string, Partial<WorktreeMeta>>
   ) => Promise<void>
   markWorktreeUnread: (worktreeId: string) => void
+  observeTerminalGitHubPullRequestLink: (worktreeId: string, link: TerminalGitHubPRLink) => void
   /** Clear the worktree's unread dot. Called on user interaction with any
    *  terminal pane inside the worktree (keystroke, click) — matches
    *  ghostty's "show until interact" model. Persists isUnread=false. */

@@ -18,12 +18,9 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Separator } from '../ui/separator'
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Minus, Plus } from 'lucide-react'
-import {
-  clampNumber,
-  resolveEffectiveTerminalAppearance,
-  resolvePaneStyleOptions
-} from '@/lib/terminal-theme'
+import { clampNumber, resolvePaneStyleOptions } from '@/lib/terminal-theme'
 import {
   FontAutocomplete,
   NumberField,
@@ -44,6 +41,7 @@ import {
   TERMINAL_DARK_THEME_SEARCH_ENTRIES,
   TERMINAL_LIGHT_THEME_SEARCH_ENTRIES,
   TERMINAL_MAC_OPTION_SEARCH_ENTRIES,
+  TERMINAL_MAC_YEN_SEARCH_ENTRIES,
   TERMINAL_PANE_STYLE_SEARCH_ENTRIES,
   TERMINAL_RENDERING_SEARCH_ENTRIES,
   TERMINAL_SETUP_SCRIPT_SEARCH_ENTRIES,
@@ -61,6 +59,8 @@ import { TerminalWindowSection } from './TerminalWindowSection'
 import { GhosttyImportModal } from './GhosttyImportModal'
 import type { UseGhosttyImportReturn } from './useGhosttyImport'
 import { ManageSessionsSection } from './ManageSessionsSection'
+import { TerminalSettingsPreview } from './TerminalSettingsPreview'
+import { OSC52_CLIPBOARD_SETTING_ID } from '../terminal-pane/osc52-clipboard-setting-anchor'
 
 type TerminalPaneProps = {
   settings: GlobalSettings
@@ -75,6 +75,10 @@ type TerminalPaneProps = {
   ghostty: UseGhosttyImportReturn
   /** Whether WSL is installed on this Windows machine. */
   wslAvailable?: boolean
+  /** Installed WSL distro names, used to choose the default WSL terminal target. */
+  wslDistros?: string[]
+  /** Whether WSL capability probing is still in flight. */
+  wslCapabilitiesLoading?: boolean
   /** Whether PowerShell 7+ (pwsh.exe) is installed on this Windows machine. */
   pwshAvailable?: boolean
 }
@@ -88,6 +92,8 @@ export function TerminalPane({
   setScrollbackMode,
   ghostty,
   wslAvailable,
+  wslDistros = [],
+  wslCapabilitiesLoading = false,
   pwshAvailable
 }: TerminalPaneProps): React.JSX.Element {
   const searchQuery = useAppStore((state) => state.settingsSearchQuery)
@@ -101,15 +107,9 @@ export function TerminalPane({
   const isMac = shellHostIsMac()
   const [themeSearchDark, setThemeSearchDark] = useState('')
   const [themeSearchLight, setThemeSearchLight] = useState('')
+  // Why: hover preview lets the font picker update the sample without committing a setting.
+  const [previewFontFamily, setPreviewFontFamily] = useState<string | null>(null)
 
-  const darkPreviewAppearance = resolveEffectiveTerminalAppearance(
-    { ...settings, theme: 'dark' },
-    systemPrefersDark
-  )
-  const lightPreviewAppearance = resolveEffectiveTerminalAppearance(
-    { ...settings, theme: 'light' },
-    systemPrefersDark
-  )
   const paneStyleOptions = resolvePaneStyleOptions(settings)
   const detectedLayout = useDetectedOptionAsAlt()
   const detectedLayoutLabel =
@@ -125,6 +125,12 @@ export function TerminalPane({
   const scrollbackToggleValue =
     scrollbackMode === 'custom' ? 'custom' : isPreset ? `${scrollbackMb}` : 'custom'
   const windowsShell = settings.terminalWindowsShell ?? 'powershell.exe'
+  const selectedWslDistroName = settings.terminalWindowsWslDistro?.trim() || null
+  const selectedWslDistro = selectedWslDistroName || '__default__'
+  const wslDistroOptions =
+    selectedWslDistroName && !wslDistros.includes(selectedWslDistroName)
+      ? [selectedWslDistroName, ...wslDistros]
+      : wslDistros
   const powerShellImplementation = settings.terminalWindowsPowerShellImplementation ?? 'auto'
   const showWindowsPowerShellImplementation = isWindows && windowsShell === 'powershell.exe'
 
@@ -167,187 +173,236 @@ export function TerminalPane({
               }
             />
           </SearchableSetting>
+          {windowsShell === 'wsl.exe' ? (
+            <SearchableSetting
+              title="WSL Distribution"
+              description="Choose which WSL distribution new WSL terminals and local agent scans use."
+              keywords={['terminal', 'windows', 'wsl', 'linux', 'distribution', 'distro', 'ubuntu']}
+            >
+              <SettingsRow
+                label="WSL Distribution"
+                description="Used for new WSL terminal panes and local agent detection when the active workspace is not already inside WSL."
+                control={
+                  <Select
+                    value={selectedWslDistro}
+                    onValueChange={(value) =>
+                      updateSettings({
+                        terminalWindowsWslDistro: value === '__default__' ? null : value
+                      })
+                    }
+                    disabled={wslCapabilitiesLoading || !wslAvailable}
+                  >
+                    <SelectTrigger size="sm" aria-label="WSL Distribution" className="min-w-44">
+                      <SelectValue
+                        placeholder={
+                          wslCapabilitiesLoading ? 'Loading distributions' : 'Windows default'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">Windows default</SelectItem>
+                      {wslDistroOptions.map((distro) => (
+                        <SelectItem key={distro} value={distro}>
+                          {distro}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                }
+              />
+            </SearchableSetting>
+          ) : null}
         </div>
       </section>
     ) : null,
     matchesSettingsSearch(searchQuery, TERMINAL_TYPOGRAPHY_SEARCH_ENTRIES) ? (
-      <section key="typography" className="space-y-3">
-        <SettingsSubsectionHeader
-          title="Typography"
-          description="Default terminal typography for new panes and live updates."
-        />
+      <section key="typography" className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-3">
+          <SettingsSubsectionHeader
+            title="Typography"
+            description="Default terminal typography for new panes and live updates."
+          />
 
-        <div className="divide-y divide-border/40">
-          <SearchableSetting
-            title="Font Size"
-            description="Default terminal font size for new panes and live updates."
-            keywords={['terminal', 'typography', 'text size']}
-          >
-            <SettingsRow
-              label="Font Size"
+          <div className="divide-y divide-border/40">
+            <SearchableSetting
+              title="Font Size"
               description="Default terminal font size for new panes and live updates."
-              control={
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => {
-                      const next = Math.max(10, settings.terminalFontSize - 1)
-                      updateSettings({ terminalFontSize: next })
-                    }}
-                    disabled={settings.terminalFontSize <= 10}
-                  >
-                    <Minus className="size-3" />
-                  </Button>
-                  <Input
-                    type="number"
-                    min={10}
-                    max={24}
-                    value={settings.terminalFontSize}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value, 10)
-                      if (!Number.isNaN(value) && value >= 10 && value <= 24) {
-                        updateSettings({ terminalFontSize: value })
-                      }
-                    }}
-                    className="w-14 text-center tabular-nums"
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => {
-                      const next = Math.min(24, settings.terminalFontSize + 1)
-                      updateSettings({ terminalFontSize: next })
-                    }}
-                    disabled={settings.terminalFontSize >= 24}
-                  >
-                    <Plus className="size-3" />
-                  </Button>
-                  <span className="text-xs text-muted-foreground">px</span>
-                </div>
-              }
-            />
-          </SearchableSetting>
+              keywords={['terminal', 'typography', 'text size']}
+            >
+              <SettingsRow
+                label="Font Size"
+                description="Default terminal font size for new panes and live updates."
+                control={
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={() => {
+                        const next = Math.max(10, settings.terminalFontSize - 1)
+                        updateSettings({ terminalFontSize: next })
+                      }}
+                      disabled={settings.terminalFontSize <= 10}
+                    >
+                      <Minus className="size-3" />
+                    </Button>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={24}
+                      value={settings.terminalFontSize}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10)
+                        if (!Number.isNaN(value) && value >= 10 && value <= 24) {
+                          updateSettings({ terminalFontSize: value })
+                        }
+                      }}
+                      className="w-14 text-center tabular-nums"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={() => {
+                        const next = Math.min(24, settings.terminalFontSize + 1)
+                        updateSettings({ terminalFontSize: next })
+                      }}
+                      disabled={settings.terminalFontSize >= 24}
+                    >
+                      <Plus className="size-3" />
+                    </Button>
+                    <span className="text-xs text-muted-foreground">px</span>
+                  </div>
+                }
+              />
+            </SearchableSetting>
 
-          <SearchableSetting
-            title="Font Family"
-            description="Default terminal font family for new panes and live updates."
-            keywords={['terminal', 'typography', 'font']}
-          >
-            <SettingsRow
-              alignTop
-              label="Font Family"
+            <SearchableSetting
+              title="Font Family"
               description="Default terminal font family for new panes and live updates."
-              control={
-                <FontAutocomplete
-                  value={settings.terminalFontFamily}
-                  suggestions={terminalFontSuggestions}
-                  onChange={(value) => updateSettings({ terminalFontFamily: value })}
-                />
-              }
-            />
-          </SearchableSetting>
+              keywords={['terminal', 'typography', 'font']}
+            >
+              <SettingsRow
+                alignTop
+                label="Font Family"
+                description="Default terminal font family for new panes and live updates."
+                control={
+                  <FontAutocomplete
+                    value={settings.terminalFontFamily}
+                    suggestions={terminalFontSuggestions}
+                    onChange={(value) => updateSettings({ terminalFontFamily: value })}
+                    onPreviewFontFamily={setPreviewFontFamily}
+                  />
+                }
+              />
+            </SearchableSetting>
 
-          <SearchableSetting
-            title="Font Weight"
-            description="Controls the terminal text font weight."
-            keywords={['terminal', 'typography', 'weight']}
-          >
-            <NumberField
-              label="Font Weight"
+            <SearchableSetting
+              title="Font Weight"
               description="Controls the terminal text font weight."
-              value={normalizeTerminalFontWeight(settings.terminalFontWeight)}
-              defaultValue={DEFAULT_TERMINAL_FONT_WEIGHT}
-              min={TERMINAL_FONT_WEIGHT_MIN}
-              max={TERMINAL_FONT_WEIGHT_MAX}
-              step={TERMINAL_FONT_WEIGHT_STEP}
-              suffix="100–900"
-              onChange={(value) =>
-                updateSettings({
-                  terminalFontWeight: normalizeTerminalFontWeight(value)
-                })
-              }
-            />
-          </SearchableSetting>
+              keywords={['terminal', 'typography', 'weight']}
+            >
+              <NumberField
+                label="Font Weight"
+                description="Controls the terminal text font weight."
+                value={normalizeTerminalFontWeight(settings.terminalFontWeight)}
+                defaultValue={DEFAULT_TERMINAL_FONT_WEIGHT}
+                min={TERMINAL_FONT_WEIGHT_MIN}
+                max={TERMINAL_FONT_WEIGHT_MAX}
+                step={TERMINAL_FONT_WEIGHT_STEP}
+                suffix="100–900"
+                onChange={(value) =>
+                  updateSettings({
+                    terminalFontWeight: normalizeTerminalFontWeight(value)
+                  })
+                }
+              />
+            </SearchableSetting>
 
-          <SearchableSetting
-            title="Line Height"
-            description="Controls the terminal line height multiplier."
-            keywords={['terminal', 'typography', 'line height', 'spacing']}
-          >
-            <NumberField
-              label="Line Height"
+            <SearchableSetting
+              title="Line Height"
               description="Controls the terminal line height multiplier."
-              value={settings.terminalLineHeight}
-              defaultValue={1}
-              min={1}
-              max={3}
-              step={0.1}
-              suffix="1–3"
-              onChange={(value) =>
-                updateSettings({
-                  terminalLineHeight: clampNumber(value, 1, 3)
-                })
-              }
-            />
-          </SearchableSetting>
+              keywords={['terminal', 'typography', 'line height', 'spacing']}
+            >
+              <NumberField
+                label="Line Height"
+                description="Controls the terminal line height multiplier."
+                value={settings.terminalLineHeight}
+                defaultValue={1}
+                min={1}
+                max={3}
+                step={0.1}
+                suffix="1–3"
+                onChange={(value) =>
+                  updateSettings({
+                    terminalLineHeight: clampNumber(value, 1, 3)
+                  })
+                }
+              />
+            </SearchableSetting>
 
-          <SearchableSetting
-            title="Font Ligatures"
-            description='Render programming ligatures (e.g. =>, !=, ===) for fonts that ship them. "Auto" enables ligatures only for known ligature fonts (Fira Code, JetBrains Mono, Cascadia Code, Iosevka, etc.).'
-            keywords={[
-              'terminal',
-              'typography',
-              'ligatures',
-              'ligature',
-              'fira code',
-              'jetbrains mono',
-              'cascadia code',
-              'iosevka',
-              'calt',
-              'font features'
-            ]}
-          >
-            <SettingsRow
-              label="Font Ligatures"
-              description={
-                settings.terminalLigatures === 'on'
-                  ? 'Always on. Fonts without ligatures simply render as-is.'
-                  : settings.terminalLigatures === 'off'
-                    ? 'Always off, even for fonts that ship them.'
-                    : fontFamilyHasKnownLigatures(settings.terminalFontFamily)
-                      ? `Auto — enabled for "${settings.terminalFontFamily}".`
-                      : `Auto — disabled for "${
-                          settings.terminalFontFamily || 'the current font'
-                        }".`
-              }
-              control={
-                <SettingsSegmentedControl
-                  ariaLabel="Font Ligatures"
-                  value={settings.terminalLigatures ?? 'auto'}
-                  onChange={(option) => updateSettings({ terminalLigatures: option })}
-                  options={[
-                    { value: 'auto', label: 'Auto' },
-                    { value: 'on', label: 'On' },
-                    { value: 'off', label: 'Off' }
-                  ]}
-                />
-              }
-            />
-            {/* Why: surface the resolved state explicitly so the "Auto" label
-                isn't ambiguous when a user is staring at it. */}
-            <p className="sr-only" aria-live="polite">
-              Ligatures are currently{' '}
-              {resolveTerminalLigaturesEnabled(
-                settings.terminalLigatures,
-                settings.terminalFontFamily
-              )
-                ? 'enabled'
-                : 'disabled'}
-              .
-            </p>
-          </SearchableSetting>
+            <SearchableSetting
+              title="Font Ligatures"
+              description='Render programming ligatures (e.g. =>, !=, ===) for fonts that ship them. "Auto" enables ligatures only for known ligature fonts (Fira Code, JetBrains Mono, Cascadia Code, Iosevka, etc.).'
+              keywords={[
+                'terminal',
+                'typography',
+                'ligatures',
+                'ligature',
+                'fira code',
+                'jetbrains mono',
+                'cascadia code',
+                'iosevka',
+                'calt',
+                'font features'
+              ]}
+            >
+              <SettingsRow
+                label="Font Ligatures"
+                description={
+                  settings.terminalLigatures === 'on'
+                    ? 'Always on. Fonts without ligatures simply render as-is.'
+                    : settings.terminalLigatures === 'off'
+                      ? 'Always off, even for fonts that ship them.'
+                      : fontFamilyHasKnownLigatures(settings.terminalFontFamily)
+                        ? `Auto — enabled for "${settings.terminalFontFamily}".`
+                        : `Auto — disabled for "${
+                            settings.terminalFontFamily || 'the current font'
+                          }".`
+                }
+                control={
+                  <SettingsSegmentedControl
+                    ariaLabel="Font Ligatures"
+                    value={settings.terminalLigatures ?? 'auto'}
+                    onChange={(option) => updateSettings({ terminalLigatures: option })}
+                    options={[
+                      { value: 'auto', label: 'Auto' },
+                      { value: 'on', label: 'On' },
+                      { value: 'off', label: 'Off' }
+                    ]}
+                  />
+                }
+              />
+              {/* Why: surface the resolved state explicitly so the "Auto" label
+                  isn't ambiguous when a user is staring at it. */}
+              <p className="sr-only" aria-live="polite">
+                Ligatures are currently{' '}
+                {resolveTerminalLigaturesEnabled(
+                  settings.terminalLigatures,
+                  settings.terminalFontFamily
+                )
+                  ? 'enabled'
+                  : 'disabled'}
+                .
+              </p>
+            </SearchableSetting>
+          </div>
         </div>
+        <TerminalSettingsPreview
+          title="Preview"
+          settings={settings}
+          systemPrefersDark={systemPrefersDark}
+          previewFontFamily={previewFontFamily}
+          showThemeToggle
+        />
       </section>
     ) : null,
     matchesSettingsSearch(searchQuery, TERMINAL_RENDERING_SEARCH_ENTRIES) ? (
@@ -591,6 +646,7 @@ export function TerminalPane({
           </SearchableSetting>
 
           <SearchableSetting
+            id={OSC52_CLIPBOARD_SETTING_ID}
             title="Allow TUI Clipboard Writes (OSC 52)"
             description="Let tmux, Neovim, and fzf copy to the system clipboard over the PTY (including over SSH)."
             keywords={[
@@ -632,8 +688,7 @@ export function TerminalPane({
         themeSearchDark={themeSearchDark}
         setThemeSearchDark={setThemeSearchDark}
         updateSettings={updateSettings}
-        previewProps={paneStyleOptions}
-        darkPreviewAppearance={darkPreviewAppearance}
+        previewFontFamily={previewFontFamily}
       />
     ) : null,
     matchesSettingsSearch(searchQuery, TERMINAL_LIGHT_THEME_SEARCH_ENTRIES) ? (
@@ -643,8 +698,7 @@ export function TerminalPane({
         themeSearchLight={themeSearchLight}
         setThemeSearchLight={setThemeSearchLight}
         updateSettings={updateSettings}
-        previewProps={paneStyleOptions}
-        lightPreviewAppearance={lightPreviewAppearance}
+        previewFontFamily={previewFontFamily}
       />
     ) : null,
     matchesSettingsSearch(searchQuery, TERMINAL_SETUP_SCRIPT_SEARCH_ENTRIES) ? (
@@ -727,7 +781,9 @@ export function TerminalPane({
         searchQuery,
         TERMINAL_WINDOWS_POWERSHELL_IMPLEMENTATION_SEARCH_ENTRY
       )) ||
-    (isMac && matchesSettingsSearch(searchQuery, TERMINAL_MAC_OPTION_SEARCH_ENTRIES)) ? (
+    (isMac &&
+      (matchesSettingsSearch(searchQuery, TERMINAL_MAC_OPTION_SEARCH_ENTRIES) ||
+        matchesSettingsSearch(searchQuery, TERMINAL_MAC_YEN_SEARCH_ENTRIES))) ? (
       <section key="advanced" className="space-y-3">
         <SettingsSubsectionHeader
           title="Advanced"
@@ -892,53 +948,82 @@ export function TerminalPane({
           ) : null}
 
           {isMac ? (
-            <SearchableSetting
-              title="Option as Alt"
-              description="Controls whether the macOS Option key sends Alt/Esc sequences or composes characters."
-              keywords={[
-                'terminal',
-                'option',
-                'alt',
-                'key',
-                'meta',
-                'compose',
-                'mac',
-                'macos',
-                'keyboard',
-                'german',
-                'international',
-                'readline',
-                'ghostty'
-              ]}
-            >
-              <SettingsRow
-                alignTop
-                label="Option as Alt"
-                description={
-                  settings.terminalMacOptionAsAlt === 'auto'
-                    ? `Auto — detected: ${detectedLayoutLabel}.`
-                    : settings.terminalMacOptionAsAlt === 'false'
-                      ? 'Option composes special characters for your keyboard layout.'
-                      : settings.terminalMacOptionAsAlt === 'true'
-                        ? 'Both Option keys send Alt/Esc sequences.'
-                        : `The ${settings.terminalMacOptionAsAlt} Option key sends Alt/Esc; the other composes special characters.`
-                }
-                control={
-                  <SettingsSegmentedControl
-                    ariaLabel="Option as Alt"
-                    value={settings.terminalMacOptionAsAlt}
-                    onChange={(option) => updateSettings({ terminalMacOptionAsAlt: option })}
-                    options={[
-                      { value: 'auto', label: 'Auto' },
-                      { value: 'true', label: 'Both' },
-                      { value: 'left', label: 'Left' },
-                      { value: 'right', label: 'Right' },
-                      { value: 'false', label: 'Off' }
-                    ]}
-                  />
-                }
-              />
-            </SearchableSetting>
+            <>
+              <SearchableSetting
+                title="Option as Alt"
+                description="Controls whether the macOS Option key sends Alt/Esc sequences or composes characters."
+                keywords={[
+                  'terminal',
+                  'option',
+                  'alt',
+                  'key',
+                  'meta',
+                  'compose',
+                  'mac',
+                  'macos',
+                  'keyboard',
+                  'german',
+                  'international',
+                  'readline',
+                  'ghostty'
+                ]}
+              >
+                <SettingsRow
+                  alignTop
+                  label="Option as Alt"
+                  description={
+                    settings.terminalMacOptionAsAlt === 'auto'
+                      ? `Auto — detected: ${detectedLayoutLabel}.`
+                      : settings.terminalMacOptionAsAlt === 'false'
+                        ? 'Option composes special characters for your keyboard layout.'
+                        : settings.terminalMacOptionAsAlt === 'true'
+                          ? 'Both Option keys send Alt/Esc sequences.'
+                          : `The ${settings.terminalMacOptionAsAlt} Option key sends Alt/Esc; the other composes special characters.`
+                  }
+                  control={
+                    <SettingsSegmentedControl
+                      ariaLabel="Option as Alt"
+                      value={settings.terminalMacOptionAsAlt}
+                      onChange={(option) => updateSettings({ terminalMacOptionAsAlt: option })}
+                      options={[
+                        { value: 'auto', label: 'Auto' },
+                        { value: 'true', label: 'Both' },
+                        { value: 'left', label: 'Left' },
+                        { value: 'right', label: 'Right' },
+                        { value: 'false', label: 'Off' }
+                      ]}
+                    />
+                  }
+                />
+              </SearchableSetting>
+
+              <SearchableSetting
+                title="JIS Yen (¥) to Backslash (\\)"
+                description="Controls whether pressing the JIS Yen (¥) key sends a backslash (\\) instead."
+                keywords={[
+                  'terminal',
+                  'yen',
+                  'backslash',
+                  'japanese',
+                  'keyboard',
+                  'mac',
+                  'macos',
+                  'jis',
+                  'intl'
+                ]}
+              >
+                <SettingsSwitchRow
+                  label="JIS Yen (¥) to Backslash (\\)"
+                  description="Pressing the JIS Yen (¥) key sends a backslash (\\) instead."
+                  checked={settings.terminalJISYenToBackslash ?? false}
+                  onChange={() =>
+                    updateSettings({
+                      terminalJISYenToBackslash: !settings.terminalJISYenToBackslash
+                    })
+                  }
+                />
+              </SearchableSetting>
+            </>
           ) : null}
         </div>
       </section>

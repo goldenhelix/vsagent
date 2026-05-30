@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: one cohesive in-app browser pane — address
+bar, in-pane history, injected-script nav-sync, and iframe lifecycle are tightly
+coupled and belong in one file; splitting would scatter shared refs/state. */
 // Iframe-backed in-app browser pane for web mode. Replaces the Electron
 // <webview> path entirely.
 //

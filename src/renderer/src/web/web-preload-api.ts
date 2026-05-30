@@ -26,6 +26,7 @@ import {
 import { legacyBaseRefSearchResult } from '../../../shared/base-ref-search-result'
 import { createE2EConfig } from '../../../shared/e2e-config'
 import { relativePathInsideRoot } from '../../../shared/cross-platform-path'
+import { normalizeDisabledTuiAgents } from '../../../shared/tui-agent-selection'
 import type { RateLimitState } from '../../../shared/rate-limit-types'
 import type { RuntimeStatus, RuntimeSyncWindowGraph } from '../../../shared/runtime-types'
 import {
@@ -54,6 +55,11 @@ import { parseWebPairingInput } from './web-pairing'
 import { WebRuntimeClient } from './web-runtime-client'
 import { RuntimeRpcCallQueuePool } from '../../../shared/runtime-rpc-call-queue'
 import { sanitizeWebRuntimeWorkspaceSession } from './web-workspace-session'
+import {
+  normalizeFeatureInteractions,
+  type FeatureInteractionId,
+  type FeatureInteractionState
+} from '../../../shared/feature-interactions'
 
 const SETTINGS_STORAGE_KEY = 'orca.web.settings.v1'
 const UI_STORAGE_KEY = 'orca.web.ui.v1'
@@ -64,6 +70,10 @@ const KEYBINDINGS_STORAGE_KEY = 'orca.web.keybindings.v1'
 // Why: browser-paired clients need desktop parity for large dev sessions; the
 // runtime's no-limit default remains capped for lower-level RPC callers.
 const WEB_RUNTIME_WORKTREE_LIST_LIMIT = 10_000
+const MAX_CLIPBOARD_IMAGE_BASE64_CHARS = 24 * 1024 * 1024
+export const CLIPBOARD_IMAGE_UPLOAD_CHUNK_BASE64_CHARS = 512 * 1024
+export const CLIPBOARD_IMAGE_SINGLE_FRAME_FALLBACK_BASE64_CHARS = 256 * 1024
+const CLIPBOARD_IMAGE_SAVE_TIMEOUT_MS = 30_000
 
 let activeEnvironment: StoredWebRuntimeEnvironment | null = readStoredWebRuntimeEnvironment()
 let activeClient: WebRuntimeClient | null = null
@@ -71,6 +81,64 @@ let activeClientEnvironmentId: string | null = null
 let cachedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null = null
 let cachedDetectedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null = null
 const runtimeCallQueuePool = new RuntimeRpcCallQueuePool()
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      const commaIndex = result.indexOf(',')
+      resolve(commaIndex === -1 ? result : result.slice(commaIndex + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read clipboard image'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function convertImageBlobToPng(blob: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const context = canvas.getContext('2d')
+    if (!context || canvas.width <= 0 || canvas.height <= 0) {
+      throw new Error('Clipboard image could not be decoded')
+    }
+    context.drawImage(bitmap, 0, 0)
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((png) => {
+        if (!png) {
+          reject(new Error('Clipboard image could not be encoded as PNG'))
+          return
+        }
+        resolve(png)
+      }, 'image/png')
+    })
+  } finally {
+    bitmap.close()
+  }
+}
+
+async function readClipboardImagePngBase64(): Promise<string | null> {
+  const clipboard = navigator.clipboard as
+    | (Clipboard & { read?: () => Promise<ClipboardItem[]> })
+    | undefined
+  if (!clipboard?.read) {
+    return null
+  }
+  const items = await clipboard.read()
+  for (const item of items) {
+    const imageType = item.types.find((type) => type.startsWith('image/'))
+    if (!imageType) {
+      continue
+    }
+    const blob = await item.getType(imageType)
+    const pngBlob = imageType === 'image/png' ? blob : await convertImageBlobToPng(blob)
+    return blobToBase64(pngBlob)
+  }
+  return null
+}
 
 function invalidateRuntimeWorktreeCaches(): void {
   cachedWorktrees = null
@@ -101,6 +169,7 @@ type WebGitHubRouteKey =
   | 'setPRFileViewed'
   | 'updatePRTitle'
   | 'mergePR'
+  | 'setPRAutoMerge'
   | 'updatePRState'
   | 'requestPRReviewers'
   | 'removePRReviewers'
@@ -147,6 +216,7 @@ type WebGitHubRuntimeMethod =
   | 'github.setPRFileViewed'
   | 'github.updatePRTitle'
   | 'github.mergePR'
+  | 'github.setPRAutoMerge'
   | 'github.updatePRState'
   | 'github.requestPRReviewers'
   | 'github.removePRReviewers'
@@ -228,6 +298,7 @@ export const GITHUB_WEB_RPC_METHODS = {
   setPRFileViewed: 'github.setPRFileViewed',
   updatePRTitle: 'github.updatePRTitle',
   mergePR: 'github.mergePR',
+  setPRAutoMerge: 'github.setPRAutoMerge',
   updatePRState: 'github.updatePRState',
   requestPRReviewers: 'github.requestPRReviewers',
   removePRReviewers: 'github.removePRReviewers',
@@ -298,6 +369,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
         }),
       getFeatureWallAssetBaseUrl: () => Promise.resolve('/'),
       relaunch: () => Promise.resolve(window.location.reload()),
+      restart: () => Promise.resolve(window.location.reload()),
       reload: () => Promise.resolve(window.location.reload()),
       getKeyboardInputSourceId: () => Promise.resolve(null),
       setUnreadDockBadgeCount: () => Promise.resolve(),
@@ -442,8 +514,13 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     },
     pty: createPtyApi(),
     ssh: createSshApi(),
-    wsl: { isAvailable: () => Promise.resolve(false) },
-    pwsh: { isAvailable: () => Promise.resolve(false) },
+    wsl: {
+      isAvailable: () => callRuntimeResult<boolean>('host.wsl.isAvailable').catch(() => false),
+      listDistros: () => callRuntimeResult<string[]>('host.wsl.listDistros').catch(() => [])
+    },
+    pwsh: {
+      isAvailable: () => callRuntimeResult<boolean>('host.pwsh.isAvailable').catch(() => false)
+    },
     agentStatus: {
       onSet: () => noopUnsubscribe,
       getSnapshot: () => Promise.resolve([]),
@@ -1084,6 +1161,14 @@ function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
       const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
       return callRuntimeResult('git.conflictOperation', { worktree: worktree.id })
     },
+    abortMerge: async ({ worktreePath }) => {
+      const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
+      await callRuntimeResult('git.abortMerge', { worktree: worktree.id })
+    },
+    abortRebase: async ({ worktreePath }) => {
+      const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
+      await callRuntimeResult('git.abortRebase', { worktree: worktree.id })
+    },
     diff: async ({ worktreePath, filePath, staged, compareAgainstHead }) => {
       const file = await resolveRuntimeFilePath(filePath, worktreePath)
       return callRuntimeResult('git.diff', {
@@ -1116,6 +1201,10 @@ function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
     pull: async ({ worktreePath, pushTarget }) => {
       const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
       await callRuntimeResult('git.pull', { worktree: worktree.id, pushTarget })
+    },
+    fastForward: async ({ worktreePath, pushTarget }) => {
+      const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
+      await callRuntimeResult('git.fastForward', { worktree: worktree.id, pushTarget })
     },
     rebaseFromBase: async ({ worktreePath, baseRef }) => {
       const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
@@ -1300,6 +1389,8 @@ function createGitHubApi(): WebGitHubApi {
     updatePRTitle: (args) =>
       route<WebGitHubResult<'updatePRTitle'>>(GITHUB_WEB_RPC_METHODS.updatePRTitle, args),
     mergePR: (args) => route<WebGitHubResult<'mergePR'>>(GITHUB_WEB_RPC_METHODS.mergePR, args),
+    setPRAutoMerge: (args) =>
+      route<WebGitHubResult<'setPRAutoMerge'>>(GITHUB_WEB_RPC_METHODS.setPRAutoMerge, args),
     updatePRState: (args) =>
       route<WebGitHubResult<'updatePRState'>>(GITHUB_WEB_RPC_METHODS.updatePRState, args),
     requestPRReviewers: (args) =>
@@ -1480,7 +1571,14 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
           undefined,
           15_000
         )
-        const next = mergeWebUIState(readLocalWebUIState(), result.ui)
+        const local = readLocalWebUIState()
+        const next = {
+          ...mergeWebUIState(local, result.ui),
+          featureInteractions: mergeFeatureInteractionState(
+            local.featureInteractions,
+            result.ui.featureInteractions
+          )
+        }
         writeJson(UI_STORAGE_KEY, next)
         zoomLevel = next.uiZoomLevel
         return next
@@ -1498,11 +1596,54 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
         // Why: unpaired/offline web clients still need local UI persistence.
       }
     },
+    recordFeatureInteraction: async (id: FeatureInteractionId) => {
+      const current = readLocalWebUIState()
+      const featureInteractions = normalizeFeatureInteractions(current.featureInteractions)
+      const existing = featureInteractions[id]
+      const optimistic = mergeWebUIState(current, {
+        featureInteractions: {
+          ...featureInteractions,
+          [id]: {
+            firstInteractedAt: existing?.firstInteractedAt ?? Date.now(),
+            interactionCount: (existing?.interactionCount ?? 0) + 1
+          }
+        }
+      })
+      writeJson(UI_STORAGE_KEY, optimistic)
+      try {
+        const result = await callRuntimeResult<{ ui: PersistedUIState }>(
+          'ui.recordFeatureInteraction',
+          id,
+          15_000
+        )
+        const local = readLocalWebUIState()
+        const next = {
+          ...mergeWebUIState(local, result.ui),
+          featureInteractions: mergeFeatureInteractionState(
+            local.featureInteractions,
+            result.ui.featureInteractions
+          )
+        }
+        writeJson(UI_STORAGE_KEY, next)
+        zoomLevel = next.uiZoomLevel
+        return next
+      } catch {
+        return optimistic
+      }
+    },
     readClipboardText: () => navigator.clipboard?.readText?.() ?? Promise.resolve(''),
     readSelectionClipboardText: () =>
       Promise.reject(new Error('Selection clipboard is unavailable in the web client')),
-    saveClipboardImageAsTempFile: (_args?: { connectionId?: string | null }) =>
-      Promise.resolve(null),
+    saveClipboardImageAsTempFile: async (args?: { connectionId?: string | null }) => {
+      if (!requireActiveEnvironmentOrNull()) {
+        return null
+      }
+      const contentBase64 = await readClipboardImagePngBase64()
+      if (!contentBase64) {
+        return null
+      }
+      return saveClipboardImageAsTempFileInRuntime(contentBase64, args)
+    },
     writeClipboardText: (text) => navigator.clipboard?.writeText?.(text) ?? Promise.resolve(),
     writeSelectionClipboardText: () =>
       Promise.reject(new Error('Selection clipboard is unavailable in the web client')),
@@ -1639,7 +1780,7 @@ function createPreflightApi(): NonNullable<Partial<PreloadApi>['preflight']> {
 function createCliApi(): NonNullable<Partial<PreloadApi>['cli']> {
   const status = {
     platform: getBrowserPlatform(),
-    commandName: 'orca',
+    commandName: getBrowserPlatform() === 'linux' ? 'orca-ide' : 'orca',
     commandPath: null,
     pathDirectory: null,
     pathConfigured: false,
@@ -1665,11 +1806,14 @@ function createAgentHooksApi(): NonNullable<Partial<PreloadApi>['agentHooks']> {
   const status = (
     agent:
       | 'claude'
+      | 'openclaude'
       | 'codex'
       | 'gemini'
       | 'antigravity'
+      | 'amp'
       | 'cursor'
       | 'droid'
+      | 'command-code'
       | 'grok'
       | 'copilot'
       | 'hermes'
@@ -1683,11 +1827,14 @@ function createAgentHooksApi(): NonNullable<Partial<PreloadApi>['agentHooks']> {
     } as const)
   return {
     claudeStatus: () => status('claude'),
+    openClaudeStatus: () => status('openclaude'),
     codexStatus: () => status('codex'),
     geminiStatus: () => status('gemini'),
     antigravityStatus: () => status('antigravity'),
+    ampStatus: () => status('amp'),
     cursorStatus: () => status('cursor'),
     droidStatus: () => status('droid'),
+    commandCodeStatus: () => status('command-code'),
     grokStatus: () => status('grok'),
     copilotStatus: () => status('copilot'),
     hermesStatus: () => status('hermes')
@@ -1721,6 +1868,14 @@ function createComputerUsePermissionsApi(): NonNullable<
         openedSettings: false,
         launchedHelper: false,
         nextStep: 'Computer-use permissions are managed on the Orca server.'
+      }),
+    reset: () =>
+      Promise.resolve({
+        platform: getBrowserPlatform(),
+        helperAppPath: null,
+        helperUnavailableReason: 'web_client',
+        bundleId: null,
+        permissions: []
       })
   }
 }
@@ -1743,12 +1898,16 @@ function createRateLimitsApi(): NonNullable<Partial<PreloadApi>['rateLimits']> {
     codex: null,
     gemini: null,
     opencodeGo: null,
+    claudeTarget: { runtime: 'host', wslDistro: null },
+    codexTarget: { runtime: 'host', wslDistro: null },
     inactiveClaudeAccounts: [],
     inactiveCodexAccounts: []
   }
   return {
     get: () => Promise.resolve(empty),
     refresh: () => Promise.resolve(empty),
+    refreshCodexForTarget: () => Promise.resolve(empty),
+    refreshClaudeForTarget: () => Promise.resolve(empty),
     setPollingInterval: () => Promise.resolve(),
     fetchInactiveClaudeAccounts: () => Promise.resolve(),
     fetchInactiveCodexAccounts: () => Promise.resolve(),
@@ -1757,7 +1916,11 @@ function createRateLimitsApi(): NonNullable<Partial<PreloadApi>['rateLimits']> {
 }
 
 function createAccountsApi(): never {
-  const empty = { accounts: [], activeAccountId: null }
+  const empty = {
+    accounts: [],
+    activeAccountId: null,
+    activeAccountIdsByRuntime: { host: null, wsl: {} }
+  }
   return {
     list: () => Promise.resolve(empty),
     add: () => Promise.resolve(empty),
@@ -1822,6 +1985,7 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     getForegroundProcess: () => Promise.resolve(null),
     getCwd: () => Promise.resolve('~'),
     listSessions: () => Promise.resolve([]),
+    getMainBufferSnapshot: () => Promise.resolve(null),
     onData: () => noopUnsubscribe,
     onReplay: () => noopUnsubscribe,
     onExit: () => noopUnsubscribe,
@@ -1911,6 +2075,70 @@ async function callRuntimeResult<TResult>(
     throw new Error(response.error.message)
   }
   return response.result as TResult
+}
+
+async function saveClipboardImageAsTempFileInRuntime(
+  contentBase64: string,
+  args?: { connectionId?: string | null }
+): Promise<string> {
+  if (contentBase64.length > MAX_CLIPBOARD_IMAGE_BASE64_CHARS) {
+    throw new Error('Clipboard image is too large')
+  }
+  const connectionId = args?.connectionId ?? null
+  const startResponse = await callRuntimeEnvelope<{ uploadId: string }>(
+    'clipboard.startImageUpload',
+    { expectedBase64Length: contentBase64.length, connectionId },
+    CLIPBOARD_IMAGE_SAVE_TIMEOUT_MS
+  )
+  if (!startResponse.ok) {
+    if (
+      startResponse.error.code === 'method_not_found' &&
+      contentBase64.length <= CLIPBOARD_IMAGE_SINGLE_FRAME_FALLBACK_BASE64_CHARS
+    ) {
+      return callRuntimeResult<string>(
+        'clipboard.saveImageAsTempFile',
+        { contentBase64, connectionId },
+        CLIPBOARD_IMAGE_SAVE_TIMEOUT_MS
+      )
+    }
+    throw new Error(startResponse.error.message)
+  }
+
+  const { uploadId } = startResponse.result
+  try {
+    for (
+      let offset = 0;
+      offset < contentBase64.length;
+      offset += CLIPBOARD_IMAGE_UPLOAD_CHUNK_BASE64_CHARS
+    ) {
+      await callRuntimeResult(
+        'clipboard.appendImageUploadChunk',
+        {
+          uploadId,
+          offset,
+          contentBase64: contentBase64.slice(
+            offset,
+            offset + CLIPBOARD_IMAGE_UPLOAD_CHUNK_BASE64_CHARS
+          )
+        },
+        CLIPBOARD_IMAGE_SAVE_TIMEOUT_MS
+      )
+    }
+    return await callRuntimeResult<string>(
+      'clipboard.commitImageUpload',
+      { uploadId },
+      CLIPBOARD_IMAGE_SAVE_TIMEOUT_MS
+    )
+  } catch (error) {
+    // Why: once chunked paste has created server-side state, failed append or
+    // commit must not wait for TTL cleanup before releasing the bounded slot.
+    await callRuntimeResult(
+      'clipboard.abortImageUpload',
+      { uploadId },
+      CLIPBOARD_IMAGE_SAVE_TIMEOUT_MS
+    ).catch(() => {})
+    throw error
+  }
 }
 
 async function getRemoteRuntimeStatus(): Promise<RuntimeStatus> {
@@ -2037,10 +2265,18 @@ function closeWebOnboarding(base: OnboardingState): OnboardingState {
 }
 
 function readLocalWebUIState(): PersistedUIState {
-  return mergeWebUIState(
-    getDefaultUIState(),
-    readJson<Partial<PersistedUIState>>(UI_STORAGE_KEY, {})
-  )
+  const defaults = getDefaultUIState()
+  const stored = readJson<Partial<PersistedUIState>>(UI_STORAGE_KEY, {})
+  if (typeof stored.rightSidebarOpen === 'boolean') {
+    return mergeWebUIState(defaults, stored)
+  }
+  const storedSettings = getStoredSettings()
+  return mergeWebUIState(defaults, {
+    ...stored,
+    // Why: web fallback lacks main-process normalization, so migrate the
+    // retired setting only when the local UI preference is still absent.
+    rightSidebarOpen: storedSettings.rightSidebarOpenByDefault
+  })
 }
 
 function mergeWebUIState(
@@ -2051,6 +2287,32 @@ function mergeWebUIState(
     ...base,
     ...updates
   }
+}
+
+function mergeFeatureInteractionState(
+  current: PersistedUIState['featureInteractions'],
+  incoming: PersistedUIState['featureInteractions']
+): FeatureInteractionState {
+  const currentNormalized = normalizeFeatureInteractions(current)
+  const incomingNormalized = normalizeFeatureInteractions(incoming)
+  const merged: FeatureInteractionState = { ...currentNormalized }
+  for (const [id, incomingRecord] of Object.entries(incomingNormalized)) {
+    const featureId = id as FeatureInteractionId
+    const currentRecord = currentNormalized[featureId]
+    merged[featureId] = currentRecord
+      ? {
+          firstInteractedAt: Math.min(
+            currentRecord.firstInteractedAt,
+            incomingRecord.firstInteractedAt
+          ),
+          interactionCount: Math.max(
+            currentRecord.interactionCount,
+            incomingRecord.interactionCount
+          )
+        }
+      : incomingRecord
+  }
+  return merged
 }
 
 function mergeSettings(base: GlobalSettings, updates: Partial<GlobalSettings>): GlobalSettings {
@@ -2066,6 +2328,9 @@ function mergeSettings(base: GlobalSettings, updates: Partial<GlobalSettings>): 
       ...(base.githubProjects ?? defaults.githubProjects),
       ...updates.githubProjects
     } as GlobalSettings['githubProjects'],
+    disabledTuiAgents: normalizeDisabledTuiAgents(
+      updates.disabledTuiAgents ?? base.disabledTuiAgents
+    ),
     voice: {
       ...(base.voice ?? defaults.voice),
       ...updates.voice
