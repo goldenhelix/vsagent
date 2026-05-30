@@ -22,6 +22,11 @@ on:
         description: Tag to release (e.g. v1.2.3). Optional — defaults to the current ref.
         required: false
         type: string
+      dry_run:
+        description: Build + smoke-test only; skip publishing the GitHub Release.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -96,7 +101,27 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: node config/scripts/build-release-tarball.mjs
 
+      - name: Smoke test — boot the packaged tarball headless
+        # Why: 0.5.0 shipped an out/main that require()d an unstaged module and
+        # crash-looped before binding its port (every request → 502). Inspecting
+        # the bundle isn't enough — boot the just-built tarball headless and
+        # assert it binds, so a non-bootable artifact fails the release here
+        # instead of being published. Electron needs a handful of shared libs
+        # even under --ozone-platform=headless; install them first (libasound's
+        # package was renamed on 24.04, so fall back).
+        env:
+          SMOKE_PORT: '7099'
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libgtk-3-0
+          sudo apt-get install -y --no-install-recommends libasound2t64 \
+            || sudo apt-get install -y --no-install-recommends libasound2 || true
+          node config/scripts/smoke-test-tarball.mjs "${{ steps.tarball.outputs.tarball_path }}"
+
       - name: Create "latest" alias for the asset
+        if: ${{ !inputs.dry_run }}
         # The installer's `--version=latest` path downloads
         # vsagent-linux-x64-latest.tar.gz from /releases/latest/download/.
         # Copy the versioned artifact under that name so the alias works
@@ -118,6 +143,7 @@ jobs:
 
       - name: Generate release notes
         id: notes
+        if: ${{ !inputs.dry_run }}
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -164,6 +190,7 @@ jobs:
           echo "notes_path=$notes_file" >>"$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
+        if: ${{ !inputs.dry_run }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -178,9 +205,14 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### VSAgent release published"
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              echo "### VSAgent tarball built + smoke-tested (dry run — not published)"
+            else
+              echo "### VSAgent release published"
+            fi
             echo
             echo "- tag: \`${{ steps.version.outputs.tag }}\`"
             echo "- tarball: \`${{ steps.tarball.outputs.tarball_name }}\`"
             echo "- sha256: \`${{ steps.tarball.outputs.tarball_sha256 }}\`"
+            echo "- smoke test: booted headless and bound :7099 ✅"
           } >>"$GITHUB_STEP_SUMMARY"
