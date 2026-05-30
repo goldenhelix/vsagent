@@ -18,6 +18,8 @@ import { BellRing, Bot, FileAudio, Siren, Upload, Volume2 } from 'lucide-react'
 import { getNotificationSoundOptions } from '@/components/notification-sound-options'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { useAppStore } from '@/store'
+import { isWebMode } from '@/lib/runtime-flavor'
+import { notificationsSupported, requestNotificationPermission } from '@/lib/web-notifications'
 export { NOTIFICATIONS_PANE_SEARCH_ENTRIES } from './notifications-search'
 
 type NotificationsPaneProps = {
@@ -137,6 +139,58 @@ export async function sendNotificationSettingsTestNotification(
   )
 }
 
+type WebNotificationPermission = 'unsupported' | 'granted' | 'denied' | 'default'
+
+function readWebNotificationPermission(): WebNotificationPermission {
+  if (!notificationsSupported()) {
+    return 'unsupported'
+  }
+  return Notification.permission as WebNotificationPermission
+}
+
+// Why: web-only. In the deployed web stack the headless main can't show OS
+// toasts, so the browser shows them — which requires the browser's own
+// Notification permission. Desktop/SSH never render this (main owns permission).
+function WebNotificationPermissionSection(): React.JSX.Element {
+  const [permission, setPermission] = useState<WebNotificationPermission>(
+    readWebNotificationPermission
+  )
+
+  const handleRequestPermission = async (): Promise<void> => {
+    await requestNotificationPermission()
+    setPermission(readWebNotificationPermission())
+  }
+
+  const description =
+    permission === 'granted'
+      ? 'Browser notifications are enabled for this site.'
+      : permission === 'denied'
+        ? 'Blocked. Allow notifications for this site in your browser settings.'
+        : permission === 'unsupported'
+          ? 'This browser or connection (insecure context) cannot show notifications.'
+          : 'Allow this browser to show desktop notifications when agents finish or terminals need attention.'
+
+  return (
+    <div className="flex items-center justify-between gap-4 py-2">
+      <div className="space-y-0.5">
+        <div className="flex items-center gap-2">
+          <BellRing className="size-4" />
+          <Label>Browser Notifications</Label>
+        </div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={permission === 'granted' || permission === 'unsupported'}
+        onClick={() => void handleRequestPermission()}
+      >
+        {permission === 'granted' ? 'Enabled' : 'Enable browser notifications'}
+      </Button>
+    </div>
+  )
+}
+
 export function NotificationsPane({
   settings,
   updateSettings
@@ -236,6 +290,8 @@ export function NotificationsPane({
           void updateNotificationSettings({ enabled: !notificationSettings.enabled })
         }}
       />
+
+      {isWebMode() ? <WebNotificationPermissionSection /> : null}
 
       <Separator />
 

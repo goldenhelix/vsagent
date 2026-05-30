@@ -4,7 +4,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { applyDocumentTheme } from './lib/document-theme'
-import { loadRuntimeFlavor } from './lib/runtime-flavor'
+import { isWebMode, loadRuntimeFlavor } from './lib/runtime-flavor'
+import { ensureAudioUnlockListeners } from './lib/web-notifications'
 import { shouldEnableReactGrab } from './lib/react-grab-dev-gate'
 
 if (
@@ -31,6 +32,12 @@ async function bootstrap(): Promise<void> {
     // desktop mode. We continue to mount so the user sees something even
     // if the flavor IPC is unreachable.
     console.error('[boot] runtime flavor preload failed', err)
+  }
+  // Why: in web mode, arm a one-shot user-gesture listener so the browser grants
+  // audio activation early — event-driven notification sounds carry no gesture
+  // of their own and would otherwise be blocked by the autoplay policy.
+  if (isWebMode()) {
+    ensureAudioUnlockListeners()
   }
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

@@ -3,11 +3,65 @@ import { useAppStore } from '@/store'
 import { getRepoMapFromState, getWorktreeMapFromState } from '@/store/selectors'
 import { playDesktopNotificationSound } from '@/lib/desktop-notification-sound'
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
+import { isWebMode } from '@/lib/runtime-flavor'
+import {
+  isWebTabForeground,
+  notificationPermissionGranted,
+  showWebNotification
+} from '@/lib/web-notifications'
 import { AGENT_STATUS_STALE_AFTER_MS } from '../../../../shared/agent-status-types'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
-import type { TerminalPaneLayoutNode } from '../../../../shared/types'
+import type { NotificationDispatchRequest, TerminalPaneLayoutNode } from '../../../../shared/types'
 
 const AGENT_NOTIFICATION_SNAPSHOT_MAX_AGE_MS = 10_000
+
+// Why: web mode's headless main short-circuits at the 'not-supported' daemon
+// gate before it ever reaches the enabled/source/focus/cooldown checks, so the
+// client mirrors main's per-worktree cooldown to coalesce bursts.
+const WEB_NOTIFICATION_COOLDOWN_MS = 5000
+const webRecentNotifications = new Map<string, number>()
+
+// Mirrors main's gate ordering for web mode (see src/main/ipc/notifications.ts):
+// enabled -> source toggle -> suppressWhenFocused -> per-worktree cooldown.
+// Returns true only when a browser notification should be shown client-side.
+function shouldShowWebNotification(
+  state: ReturnType<typeof useAppStore.getState>,
+  args: NotificationDispatchRequest
+): boolean {
+  const settings = state.settings?.notifications
+  if (!settings?.enabled) {
+    return false
+  }
+  if (
+    (args.source === 'agent-task-complete' && !settings.agentTaskComplete) ||
+    (args.source === 'terminal-bell' && !settings.terminalBell)
+  ) {
+    return false
+  }
+  // Why: only the browser knows real tab focus; main's suppress-focus check is
+  // moot in the headless deployment, so enforce it here.
+  if (settings.suppressWhenFocused && args.isActiveWorktree && isWebTabForeground()) {
+    return false
+  }
+  // Why: the Settings test button is an explicit user action and bypasses dedupe.
+  if (args.source !== 'test') {
+    const dedupeKey = args.worktreeId ?? args.worktreeLabel ?? 'global'
+    const now = Date.now()
+    const lastSentAt = webRecentNotifications.get(dedupeKey) ?? 0
+    if (now - lastSentAt < WEB_NOTIFICATION_COOLDOWN_MS) {
+      return false
+    }
+    webRecentNotifications.set(dedupeKey, now)
+    if (webRecentNotifications.size > 50) {
+      for (const [key, ts] of webRecentNotifications) {
+        if (now - ts >= WEB_NOTIFICATION_COOLDOWN_MS) {
+          webRecentNotifications.delete(key)
+        }
+      }
+    }
+  }
+  return notificationPermissionGranted()
+}
 
 type TerminalNotificationEvent = {
   source: 'terminal-bell' | 'agent-task-complete'
@@ -270,21 +324,31 @@ export function dispatchTerminalNotification(
       }
     : {}
 
+  const dispatchArgs: NotificationDispatchRequest = {
+    source: event.source,
+    worktreeId,
+    paneKey: event.paneKey,
+    repoLabel: repo?.displayName,
+    worktreeLabel: worktree?.displayName || worktree?.branch || worktreeId,
+    hasMultipleActiveRepos: countReposNeedingNotificationDisambiguation(state) > 1,
+    terminalTitle: event.terminalTitle,
+    isActiveWorktree: state.activeWorktreeId === worktreeId,
+    ...agentSnapshot
+  }
+
+  // Why: still dispatch to main in web mode so mobile push + server logic run.
+  // Main returns delivered:false ('not-supported') from the headless daemon
+  // gate before it checks enabled/source/focus/cooldown, so the renderer applies
+  // those gates itself and shows the browser toast + plays the bridge sound.
   void window.api.notifications
-    .dispatch({
-      source: event.source,
-      worktreeId,
-      paneKey: event.paneKey,
-      repoLabel: repo?.displayName,
-      worktreeLabel: worktree?.displayName || worktree?.branch || worktreeId,
-      hasMultipleActiveRepos: countReposNeedingNotificationDisambiguation(state) > 1,
-      terminalTitle: event.terminalTitle,
-      isActiveWorktree: state.activeWorktreeId === worktreeId,
-      ...agentSnapshot
-    })
+    .dispatch(dispatchArgs)
     .then((result) => {
       if (result.delivered) {
         void playDesktopNotificationSound(customSoundId, customSoundVolume)
+      } else if (isWebMode() && shouldShowWebNotification(state, dispatchArgs)) {
+        if (showWebNotification(dispatchArgs)) {
+          void playDesktopNotificationSound(customSoundId, customSoundVolume)
+        }
       }
     })
     .catch((err) => {

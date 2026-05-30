@@ -21,7 +21,7 @@ import type {
 } from '../../shared/types'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree-id'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
-import { buildNotificationOptions } from './notification-options'
+import { buildNotificationOptions } from '../../shared/notification-options'
 import { isNotificationDaemonAvailable } from './notification-daemon-probe'
 import { parsePaneKey } from '../../shared/stable-pane-id'
 
