@@ -72,22 +72,20 @@ for (const rel of ['out/main/index.js', 'out/web/index.html', 'config/scripts/we
 // --no-frozen-lockfile mirrors install.sh: the staged package.json is slimmed
 // to runtime deps only, so it won't match the full (dev-inclusive) lockfile,
 // and CI otherwise defaults --frozen-lockfile=true and would reject it.
-// Clean env for the install so electron's binary actually lands: some CI
-// images set ELECTRON_SKIP_BINARY_DOWNLOAD (which makes electron's install.js a
-// no-op), and install.js reads its cache root from `electron_config_cache` (NOT
-// ELECTRON_CACHE). Point it at a throwaway dir under the work tree.
-const installEnv = { ...process.env, electron_config_cache: path.join(work, 'electron-cache') }
+// The tarball's own postinstall rebuilds native deps and runs the strict
+// electron installer, so a successful `pnpm install --prod` already lands
+// electron's binary. Pass an env with ELECTRON_SKIP_BINARY_DOWNLOAD removed so
+// nothing on the runner short-circuits the download.
+const installEnv = { ...process.env }
 const skipFlag = installEnv.ELECTRON_SKIP_BINARY_DOWNLOAD
 if (skipFlag) {log(`unsetting ELECTRON_SKIP_BINARY_DOWNLOAD (was ${skipFlag}) for the smoke install`)}
 delete installEnv.ELECTRON_SKIP_BINARY_DOWNLOAD
 
-log('pnpm install --prod --no-frozen-lockfile (fetches electron binary + rebuilds native deps)')
+log('pnpm install --prod --no-frozen-lockfile (runs the tarball postinstall: native rebuild + strict electron install)')
 run('pnpm', ['install', '--prod', '--no-frozen-lockfile'], { cwd: appDir, env: installEnv })
 
-// require('electron') returns the binary path; verify it exists. pnpm 10's
-// build-script gate plus a cold store/cache can still leave it missing, so if
-// so, wipe any half-written state and force a clean download before booting.
-const electronModule = path.join(appDir, 'node_modules/electron')
+// Guard: require('electron') returns the binary path — confirm it exists. The
+// postinstall should have guaranteed this; fail loud with diagnostics if not.
 function resolveElectron() {
   const r = spawnSync(
     'node',
@@ -100,19 +98,10 @@ function resolveElectron() {
     return { path: null, exists: false, err: (r.stderr || '').trim() }
   }
 }
-let electron = resolveElectron()
+const electron = resolveElectron()
 log(`electron: ${JSON.stringify(electron)}`)
 if (!electron.exists) {
-  log('electron binary missing after install — forcing a clean download')
-  rmSync(path.join(electronModule, 'dist'), { recursive: true, force: true })
-  rmSync(path.join(electronModule, 'path.txt'), { force: true })
-  run('node', ['install.js'], {
-    cwd: electronModule,
-    env: { ...installEnv, force_no_cache: 'true' }
-  })
-  electron = resolveElectron()
-  log(`electron after repair: ${JSON.stringify(electron)}`)
-  if (!electron.exists) {die(`electron binary still missing after forced install: ${JSON.stringify(electron)}`)}
+  die(`electron binary missing after install — the postinstall strict installer should have fetched it: ${JSON.stringify(electron)}`)
 }
 
 // Boot the gateway headless. web-serve.mjs already pins the Ozone headless

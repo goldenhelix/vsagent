@@ -113,6 +113,7 @@ jobs:
           SMOKE_PORT: '7099'
         run: |
           sudo apt-get install -y --no-install-recommends \
+            unzip \
             libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
             libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
             libgbm1 libpango-1.0-0 libcairo2 libgtk-3-0

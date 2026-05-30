@@ -157,6 +157,12 @@ stagePath('out/cli')
 // the on-host install has only what's needed at runtime.
 stageFile('config/scripts/web-serve.mjs')
 stageFile('config/scripts/web-cjs-wrapper.cjs')
+// Why: electron's own install.js can exit 0 without extracting on Node 24
+// (extract-zip leaves an unsettled promise), leaving the binary + path.txt
+// absent so the backend crash-loops on a fresh install. This strict installer
+// re-downloads with @electron/get and a synchronous unzip, then repairs
+// path.txt. The staged postinstall runs it as a guarantee.
+stageFile('config/scripts/install-electron-package-binary.mjs')
 stagePath('config/patches', { optional: true })
 
 stageFile('resources/vsagent.svg', { optional: true })
@@ -208,13 +214,15 @@ const stagedPkg = {
   bin: { vsagent: './out/cli/index.js' },
   scripts: {
     'web:serve': 'node config/scripts/web-serve.mjs',
-    // Why: belt-and-suspenders native rebuild against the host ABI. The real
-    // binary download for electron now happens at install time via
-    // onlyBuiltDependencies below — `pnpm rebuild electron` alone is NOT
-    // enough because pnpm 10's rebuild also honors the allowlist and would
-    // skip electron (the bug that crash-looped fresh installs with "Electron
-    // failed to install correctly").
-    postinstall: 'pnpm rebuild better-sqlite3 node-pty || true'
+    // Why: rebuild native deps against the host ABI, then GUARANTEE electron's
+    // binary is present. electron is on onlyBuiltDependencies (below) so pnpm
+    // runs its install.js, but that can no-op on Node 24 (extract-zip unsettled
+    // promise) and `pnpm rebuild electron` is gated the same way — both crash-
+    // looped fresh installs with "Electron failed to install correctly". The
+    // strict installer re-downloads + repairs path.txt and fails LOUD here
+    // (rather than at runtime) if electron still can't be fetched.
+    postinstall:
+      'pnpm rebuild better-sqlite3 node-pty || true && node config/scripts/install-electron-package-binary.mjs'
   },
   dependencies: pkg.dependencies,
   engines: pkg.engines,
