@@ -12,7 +12,7 @@ import {
   setEventBroadcaster
 } from './ipc-intercept'
 import { setHeadlessBroadcaster, patchBrowserWindowLookup } from './headless-window'
-import { handleWebPreview, isWebPreviewPath } from './webpreview/proxy'
+import { handleWebPreview, isWebPreviewPath, handleLeakedPreviewRequest } from './webpreview/proxy'
 
 // Why: we treat the gateway as proof-of-concept; in production this token
 // should be exchanged through an auth flow (the same kind of pairing the
@@ -239,11 +239,20 @@ export class WebGateway {
     try {
       const st = await stat(candidate)
       if (!st.isFile()) {
+        // Why: a prefix-less request refered from a webpreview iframe is a
+        // leaked SPA route/asset — proxy it to that session's upstream rather
+        // than serving the Orca shell (which causes recursion / SPA 404s).
+        if (await handleLeakedPreviewRequest(req, res)) {
+          return
+        }
         // SPA fallback: serve index.html for client-side routes
         return this.serveFile(res, join(this.webRoot, 'index.html'))
       }
       return this.serveFile(res, candidate)
     } catch {
+      if (await handleLeakedPreviewRequest(req, res)) {
+        return
+      }
       return this.serveFile(res, join(this.webRoot, 'index.html'))
     }
   }

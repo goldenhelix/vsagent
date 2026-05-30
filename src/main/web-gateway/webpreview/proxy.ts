@@ -19,7 +19,12 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import { request as httpRequest } from 'http'
 import { request as httpsRequest } from 'https'
 import { URL } from 'url'
-import { getSession, followSessionOrigin } from './registry'
+import {
+  getSession,
+  followSessionOrigin,
+  rememberLeakedPath,
+  getLeakedPathSession
+} from './registry'
 import { buildRewriteScript } from './rewrite-script'
 
 const PROXY_PREFIX = '/__orca/webpreview'
@@ -156,6 +161,73 @@ export async function handleWebPreview(req: IncomingMessage, res: ServerResponse
     injectHtml: true,
     followCrossOriginRedirect: true
   })
+}
+
+// Why: SPA routers and root-relative assets sometimes hit the gateway WITHOUT
+// the /__orca/webpreview/<id> prefix (e.g. VitePress pushes a base-relative URL,
+// or a stylesheet references `/font.woff`). Without rescue those fall through to
+// the gateway's SPA fallback and load the Orca renderer (recursion) or 404.
+// Mirroring MidTerm's referer-based leak rescue: if the request's Referer is a
+// preview route (or a previously-rescued leaked path), proxy it to that
+// session's upstream instead. Returns true when it owns the response.
+function resolvePreviewSessionFromReferer(req: IncomingMessage): string | null {
+  const referer = req.headers['referer']
+  if (typeof referer !== 'string') {
+    return null
+  }
+  let refPath: string
+  try {
+    refPath = new URL(referer).pathname
+  } catch {
+    return null
+  }
+  // Referer is a proxy route: /__orca/webpreview/<id>/...
+  if (refPath.startsWith(`${PROXY_PREFIX}/`)) {
+    const id = refPath.slice(PROXY_PREFIX.length + 1).split('/')[0]
+    if (id && getSession(id)) {
+      return id
+    }
+  }
+  // Referer is itself a previously-rescued leaked path (asset-from-asset chain).
+  return getLeakedPathSession(refPath) ?? null
+}
+
+export async function handleLeakedPreviewRequest(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<boolean> {
+  if (!req.url || req.url.startsWith('/__orca/')) {
+    // Never rescue gateway-owned paths (ws, health, the proxy itself).
+    return false
+  }
+  const sessionId = resolvePreviewSessionFromReferer(req)
+  if (!sessionId) {
+    return false
+  }
+  const session = getSession(sessionId)
+  if (!session) {
+    return false
+  }
+  let upstreamUrl: URL
+  try {
+    upstreamUrl = new URL(req.url, session.targetOrigin)
+  } catch {
+    return false
+  }
+  // Remember this path so a follow-up request refered from it resolves too.
+  rememberLeakedPath(req.url, sessionId)
+  // followCrossOriginRedirect:false — a leaked asset must not retarget the
+  // session (only top-level document navs adopt a new origin).
+  await forwardRequest({
+    req,
+    res,
+    target: upstreamUrl,
+    sessionId,
+    targetOrigin: session.targetOrigin,
+    injectHtml: true,
+    followCrossOriginRedirect: false
+  })
+  return true
 }
 
 type ForwardArgs = {
@@ -355,7 +427,12 @@ function streamResponseToClient(
       (contentType.includes('javascript') ||
         contentType.includes('application/x-javascript') ||
         contentType.includes('text/jsx'))
-    if (!isHtml && !isJs) {
+    // Why: CSS can reference root-relative assets via url(/...) and @import
+    // "/..."; like static HTML attrs the parser resolves these at load time so
+    // they bypass the runtime rewriter and 404 against the gateway. Rewrite
+    // them server-side too (matches MidTerm's CSS url rewriting).
+    const isCss = args.injectHtml && contentType.includes('text/css')
+    if (!isHtml && !isJs && !isCss) {
       upstreamRes.pipe(res)
       upstreamRes.on('end', () => resolve())
       return
@@ -379,6 +456,8 @@ function streamResponseToClient(
         }
       } else if (isJs) {
         rewritten = rewriteJsImports(rewritten, proxyPathPrefix)
+      } else if (isCss) {
+        rewritten = rewriteCssUrls(rewritten, proxyPathPrefix)
       }
       const out = Buffer.from(rewritten, 'utf-8')
       res.setHeader('Content-Length', String(out.length))
@@ -566,6 +645,22 @@ function rewriteHtmlAttributes(html: string, proxyPathPrefix: string): string {
 //   import { … } from "/z"    — named
 //   export … from "/q"
 //   import("/dyn")            — dynamic import (string literal arg)
+// Why: rewrite root-relative URLs inside CSS — `url(/path)` (optionally quoted)
+// and `@import "/path"` — so fonts/images/imported sheets stay under the proxy
+// prefix instead of 404ing against the gateway. Only absolute-path (`/`, not
+// `//`) targets need it; relative and data:/http(s) URLs are left alone.
+function rewriteCssUrls(css: string, proxyPathPrefix: string): string {
+  return css
+    .replace(
+      /(url\(\s*["']?)(\/(?!\/))/gi,
+      (_m, lead: string, slash: string) => `${lead}${proxyPathPrefix}${slash}`
+    )
+    .replace(
+      /(@import\s+["'])(\/(?!\/))/gi,
+      (_m, lead: string, slash: string) => `${lead}${proxyPathPrefix}${slash}`
+    )
+}
+
 function rewriteJsImports(js: string, proxyPathPrefix: string): string {
   // Static imports / re-exports: `from "/..."` or `from '/...'`
   const fromRe = /(from\s*)(["'])(\/(?!\/))([^"']*?)\2/g

@@ -79,6 +79,40 @@ export function listSessions(): WebPreviewSession[] {
   return [...sessions.values()]
 }
 
+// Why: SPA routers (and root-relative assets) sometimes request a path WITHOUT
+// the /__orca/webpreview/<id> prefix. The proxy rescues those via the Referer,
+// but a follow-up request (e.g. a font referenced from a rescued CSS file) has
+// a Referer that is itself a prefix-less leaked path, not a preview route. We
+// remember which session first claimed each leaked path so the chain resolves —
+// the same trick as MidTerm's leaked-path route cache. Bounded to avoid growth.
+const leakedPathToSession = new Map<string, string>()
+const MAX_LEAKED_PATHS = 2048
+
+function normalizeLeakedPath(path: string): string {
+  return path.split('?')[0].split('#')[0]
+}
+
+export function rememberLeakedPath(path: string, sessionId: string): void {
+  const key = normalizeLeakedPath(path)
+  if (!key || key === '/') {
+    return
+  }
+  // Bounded FIFO: drop the oldest entry once we hit the cap.
+  if (leakedPathToSession.size >= MAX_LEAKED_PATHS && !leakedPathToSession.has(key)) {
+    const oldest = leakedPathToSession.keys().next().value
+    if (oldest !== undefined) {
+      leakedPathToSession.delete(oldest)
+    }
+  }
+  leakedPathToSession.set(key, sessionId)
+}
+
+export function getLeakedPathSession(path: string): string | undefined {
+  const id = leakedPathToSession.get(normalizeLeakedPath(path))
+  // Only return live sessions; a dropped session's stale mapping is ignored.
+  return id && sessions.has(id) ? id : undefined
+}
+
 function normalizeOrigin(input: string): string {
   const trimmed = input.trim()
   if (!trimmed) {
