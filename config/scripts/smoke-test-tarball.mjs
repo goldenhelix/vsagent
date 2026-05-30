@@ -72,14 +72,22 @@ for (const rel of ['out/main/index.js', 'out/web/index.html', 'config/scripts/we
 // --no-frozen-lockfile mirrors install.sh: the staged package.json is slimmed
 // to runtime deps only, so it won't match the full (dev-inclusive) lockfile,
 // and CI otherwise defaults --frozen-lockfile=true and would reject it.
-log('pnpm install --prod --no-frozen-lockfile (fetches electron binary + rebuilds native deps)')
-run('pnpm', ['install', '--prod', '--no-frozen-lockfile'], { cwd: appDir })
+// Clean env for the install so electron's binary actually lands: some CI
+// images set ELECTRON_SKIP_BINARY_DOWNLOAD (which makes electron's install.js a
+// no-op), and install.js reads its cache root from `electron_config_cache` (NOT
+// ELECTRON_CACHE). Point it at a throwaway dir under the work tree.
+const installEnv = { ...process.env, electron_config_cache: path.join(work, 'electron-cache') }
+const skipFlag = installEnv.ELECTRON_SKIP_BINARY_DOWNLOAD
+if (skipFlag) {log(`unsetting ELECTRON_SKIP_BINARY_DOWNLOAD (was ${skipFlag}) for the smoke install`)}
+delete installEnv.ELECTRON_SKIP_BINARY_DOWNLOAD
 
-// pnpm 10 gates a dependency's install script behind onlyBuiltDependencies, and
-// a "cold" store/cache (e.g. a fresh CI runner that never downloaded electron's
-// binary) can leave electron's install.js a no-op, so `require('electron')`
-// resolves to a binary that isn't there. require('electron') returns the binary
-// path; verify it exists and, if not, force a clean download before booting.
+log('pnpm install --prod --no-frozen-lockfile (fetches electron binary + rebuilds native deps)')
+run('pnpm', ['install', '--prod', '--no-frozen-lockfile'], { cwd: appDir, env: installEnv })
+
+// require('electron') returns the binary path; verify it exists. pnpm 10's
+// build-script gate plus a cold store/cache can still leave it missing, so if
+// so, wipe any half-written state and force a clean download before booting.
+const electronModule = path.join(appDir, 'node_modules/electron')
 function resolveElectron() {
   const r = spawnSync(
     'node',
@@ -96,9 +104,11 @@ let electron = resolveElectron()
 log(`electron: ${JSON.stringify(electron)}`)
 if (!electron.exists) {
   log('electron binary missing after install — forcing a clean download')
+  rmSync(path.join(electronModule, 'dist'), { recursive: true, force: true })
+  rmSync(path.join(electronModule, 'path.txt'), { force: true })
   run('node', ['install.js'], {
-    cwd: path.join(appDir, 'node_modules/electron'),
-    env: { ...process.env, ELECTRON_CACHE: path.join(work, 'electron-cache'), force_no_cache: 'true' }
+    cwd: electronModule,
+    env: { ...installEnv, force_no_cache: 'true' }
   })
   electron = resolveElectron()
   log(`electron after repair: ${JSON.stringify(electron)}`)
@@ -110,7 +120,7 @@ if (!electron.exists) {
 log(`booting web-serve.mjs on ${HOST}:${PORT}`)
 const child = spawn('node', ['config/scripts/web-serve.mjs'], {
   cwd: appDir,
-  env: { ...process.env, VSAGENT_HOST: HOST, VSAGENT_PORT: PORT, VSAGENT_USER_DATA_PATH: dataDir },
+  env: { ...installEnv, VSAGENT_HOST: HOST, VSAGENT_PORT: PORT, VSAGENT_USER_DATA_PATH: dataDir },
   stdio: ['ignore', 'pipe', 'pipe']
 })
 let bootLog = ''
