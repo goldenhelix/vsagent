@@ -12,7 +12,13 @@ import {
   setEventBroadcaster
 } from './ipc-intercept'
 import { setHeadlessBroadcaster, patchBrowserWindowLookup } from './headless-window'
-import { handleWebPreview, isWebPreviewPath, handleLeakedPreviewRequest } from './webpreview/proxy'
+import {
+  handleWebPreview,
+  isWebPreviewPath,
+  handleLeakedPreviewRequest,
+  isWebPreviewUpgrade,
+  handleWebPreviewUpgrade
+} from './webpreview/proxy'
 
 // Why: we treat the gateway as proof-of-concept; in production this token
 // should be exchanged through an auth flow (the same kind of pairing the
@@ -134,18 +140,27 @@ export class WebGateway {
     this.httpServer = createServer((req, res) => this.handleHttp(req, res))
     this.wss = new WebSocketServer({ noServer: true })
     this.httpServer.on('upgrade', (req, socket, head) => {
-      if (!req.url?.startsWith('/__orca/ws')) {
-        socket.destroy()
+      if (req.url?.startsWith('/__orca/ws')) {
+        if (!this.checkAuth(req)) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+          socket.destroy()
+          return
+        }
+        this.wss!.handleUpgrade(req, socket, head, (ws) => {
+          this.wss!.emit('connection', ws, req)
+        })
         return
       }
-      if (!this.checkAuth(req)) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
-        socket.destroy()
+      // Why: the in-app browser (webpreview) proxies WebSockets too — a
+      // KasmVNC stream, a dev server's HMR socket, etc. Tunnel those to the
+      // session's upstream instead of dropping them. The handler destroys the
+      // socket itself if the URL/Referer doesn't resolve to a live session, so
+      // unknown upgrades still get rejected.
+      if (isWebPreviewUpgrade(req)) {
+        handleWebPreviewUpgrade(req, socket, head)
         return
       }
-      this.wss!.handleUpgrade(req, socket, head, (ws) => {
-        this.wss!.emit('connection', ws, req)
-      })
+      socket.destroy()
     })
     this.wss.on('connection', (ws) => this.handleConnection(ws))
 

@@ -9,7 +9,9 @@
 //   - GET only (no POST/PUT yet — the renderer's address bar only issues
 //     GETs; SPAs can still issue fetch POSTs via the rewriter and those
 //     route through here too — TODO for future).
-//   - No WebSocket upgrade yet (TODO).
+//   - WebSocket upgrades ARE proxied (handleWebPreviewUpgrade): a transparent
+//     raw byte tunnel to the session's upstream, so e.g. KasmVNC's binary VNC
+//     stream and dev-server HMR sockets work inside the in-app browser.
 //   - No service-worker shim.
 //   - No content-encoding handling (we pass-through compressed responses).
 //     We turn off Accept-Encoding on the upstream request so the response is
@@ -18,6 +20,9 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 import { request as httpRequest } from 'http'
 import { request as httpsRequest } from 'https'
+import { connect as netConnect } from 'net'
+import { connect as tlsConnect } from 'tls'
+import type { Duplex } from 'stream'
 import { URL } from 'url'
 import {
   getSession,
@@ -228,6 +233,167 @@ export async function handleLeakedPreviewRequest(
     followCrossOriginRedirect: false
   })
   return true
+}
+
+// ── WebSocket upgrade proxying ─────────────────────────────────────────────
+// The in-app browser proxies WebSockets too (KasmVNC's VNC stream, dev-server
+// HMR, etc.). We can't reuse the HTTP forwarder: a WS upgrade hijacks the raw
+// socket. Instead we open a raw socket to the session's upstream, replay the
+// client's upgrade handshake (verbatim Sec-WebSocket-* so the end-to-end
+// Key/Accept check still validates at the browser), and pipe bytes both ways.
+// No frame interpretation — binary VNC frames pass through untouched. A non-101
+// upstream response is forwarded as-is, so the browser surfaces the real error.
+//
+// Known limitations: a WebSocket opened from inside a Web Worker isn't routed
+// through the proxy (the rewriter runs in the page, not worker scopes), and a
+// ws:// to a third-party host (neither the session target nor the gateway)
+// falls through to the HTTP-only _ext path and won't tunnel. Neither affects
+// the main case (KasmVNC opens its VNC socket on the page's main thread to the
+// session host).
+
+// True when this upgrade is something the webpreview proxy should handle (a
+// proxy-prefixed URL, or a prefix-less leaked path resolvable via Referer).
+export function isWebPreviewUpgrade(req: IncomingMessage): boolean {
+  return isWebPreviewPath(req.url) || resolvePreviewSessionFromReferer(req) !== null
+}
+
+// Resolve the upstream URL for an upgrade, from either the proxy-prefixed path
+// or the Referer-based leaked-path rescue. Returns null when no live session
+// owns it (caller destroys the socket).
+function resolveUpgradeTarget(req: IncomingMessage): URL | null {
+  if (!req.url) {
+    return null
+  }
+  if (isWebPreviewPath(req.url)) {
+    const afterPrefix = req.url.slice(PROXY_PREFIX.length)
+    const trimmed = afterPrefix.startsWith('/') ? afterPrefix.slice(1) : afterPrefix
+    const firstSlash = trimmed.indexOf('/')
+    let sessionId: string
+    let restPath: string
+    if (firstSlash === -1) {
+      sessionId = trimmed.split('?')[0]
+      const query = trimmed.includes('?') ? trimmed.slice(trimmed.indexOf('?')) : ''
+      restPath = `/${query}`
+    } else {
+      sessionId = trimmed.slice(0, firstSlash)
+      restPath = `/${trimmed.slice(firstSlash + 1)}`
+    }
+    const session = getSession(sessionId)
+    if (!session) {
+      return null
+    }
+    try {
+      return new URL(restPath, session.targetOrigin)
+    } catch {
+      return null
+    }
+  }
+  // Prefix-less leaked WS (e.g. a client that built the URL outside the
+  // rewriter's reach): resolve via Referer like the HTTP leak rescue.
+  const sessionId = resolvePreviewSessionFromReferer(req)
+  if (!sessionId) {
+    return null
+  }
+  const session = getSession(sessionId)
+  if (!session) {
+    return null
+  }
+  try {
+    return new URL(req.url, session.targetOrigin)
+  } catch {
+    return null
+  }
+}
+
+export function handleWebPreviewUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  const dbg = process.env.VSAGENT_PROXY_DEBUG === '1' || process.env.ORCA_WEBPREVIEW_DEBUG === '1'
+  const target = resolveUpgradeTarget(req)
+  if (!target) {
+    socket.destroy()
+    return
+  }
+  // ws→http / wss→https for the transport decision.
+  const isTls = target.protocol === 'https:' || target.protocol === 'wss:'
+  const port = Number(target.port) || (isTls ? 443 : 80)
+
+  let piped = false
+  let connectTimer: ReturnType<typeof setTimeout> | undefined
+  const onUpstreamReady = (upstream: Duplex): void => {
+    piped = true
+    if (connectTimer) {
+      clearTimeout(connectTimer)
+    }
+    // Replay the handshake to the upstream. Preserve header casing/order via
+    // rawHeaders (some WS servers are picky), but rewrite Host + Origin so an
+    // origin-checking upstream (KasmVNC does) sees a same-origin request.
+    const lines = [`${req.method || 'GET'} ${target.pathname}${target.search} HTTP/1.1`]
+    const raw = req.rawHeaders
+    for (let i = 0; i + 1 < raw.length; i += 2) {
+      const lower = raw[i].toLowerCase()
+      if (lower === 'host' || lower === 'origin') {
+        continue
+      }
+      lines.push(`${raw[i]}: ${raw[i + 1]}`)
+    }
+    lines.push(`Host: ${target.host}`)
+    lines.push(`Origin: ${target.protocol}//${target.host}`)
+    lines.push('', '')
+    upstream.write(lines.join('\r\n'))
+    // Forward any bytes the server already read past the request headers.
+    if (head && head.length) {
+      upstream.write(head)
+    }
+    if (dbg) {
+      console.log(`[webpreview] ws tunnel ${req.url} -> ${target.toString()}`)
+    }
+    // Transparent byte relay (pipe handles backpressure for high-throughput
+    // binary streams like VNC). The upstream's 101 + all frames flow back.
+    socket.pipe(upstream)
+    upstream.pipe(socket)
+  }
+
+  const upstream: Duplex = isTls
+    ? tlsConnect(
+        { host: target.hostname, port, servername: target.hostname, rejectUnauthorized: false },
+        () => onUpstreamReady(upstream)
+      )
+    : netConnect({ host: target.hostname, port }, () => onUpstreamReady(upstream))
+
+  // Why: a silently-dropped SYN (firewalled/unreachable upstream) fires neither
+  // the connect callback nor a prompt 'error', so without this the client +
+  // upstream sockets would leak until the OS TCP timeout (minutes). Bound it;
+  // destroy(err) routes through the 'error' handler below for the 502 + cleanup.
+  connectTimer = setTimeout(() => {
+    upstream.destroy(new Error('webpreview: ws upstream connect timeout'))
+  }, 15000)
+
+  upstream.on('error', (err: NodeJS.ErrnoException) => {
+    if (connectTimer) {
+      clearTimeout(connectTimer)
+    }
+    if (dbg) {
+      console.warn(
+        `[webpreview] ws upstream error ${target.toString()}: ${err.code ?? err.message}`
+      )
+    }
+    // If we never reached the relay, the client is still expecting an HTTP
+    // handshake response — give it a 502 so it fails cleanly instead of hanging.
+    if (!piped) {
+      try {
+        socket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n')
+      } catch {
+        // socket already gone
+      }
+    }
+    socket.destroy()
+    upstream.destroy()
+  })
+  socket.on('error', () => {
+    socket.destroy()
+    upstream.destroy()
+  })
+  socket.on('close', () => upstream.destroy())
+  upstream.on('close', () => socket.destroy())
 }
 
 type ForwardArgs = {

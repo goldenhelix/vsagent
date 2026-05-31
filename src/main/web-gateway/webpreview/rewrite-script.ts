@@ -65,7 +65,11 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
       try {
         var parsed = new URL(u);
         var targetParsed = new URL(TO);
-        if (parsed.origin === targetParsed.origin) {
+        // Why: ws:// and wss:// URLs have a ws-scheme origin, so they never
+        // === an http(s) origin even when they point at the same server. The
+        // gateway tunnels WS by host:port, so match on host for ws/wss.
+        var isWs = parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
+        if (parsed.origin === targetParsed.origin || (isWs && parsed.host === targetParsed.host)) {
           return P + parsed.pathname + parsed.search + parsed.hash;
         }
         // Why: the iframe's actual document origin is the GATEWAY (since
@@ -86,7 +90,7 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
         // URL that the gateway can't route, so its SPA fallback serves
         // the renderer's index.html and the app loads recursively. Strip
         // the existing prefix before re-prepending.
-        if (parsed.origin === location.origin) {
+        if (parsed.origin === location.origin || (isWs && parsed.host === location.host)) {
           var pn = parsed.pathname;
           if (pn === P || pn.startsWith(P + '/')) {
             return pn + parsed.search + parsed.hash;
@@ -243,8 +247,9 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
   };
 
   // WebSocket / EventSource — route URLs through r() so ws://target/...
-  // becomes ws://<gateway>/__orca/webpreview/<sessionId>/... (we'd need a
-  // ws upgrade handler in the gateway to actually carry these — TODO).
+  // becomes a proxy-relative /__orca/webpreview/<sessionId>/... path. The
+  // gateway's upgrade handler tunnels these to the session's upstream
+  // (handleWebPreviewUpgrade), so e.g. KasmVNC's VNC stream works.
   if (window.WebSocket && window.Proxy) {
     try {
       var OWS = window.WebSocket;
