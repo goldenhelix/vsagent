@@ -16,8 +16,18 @@ Environment=VSAGENT_USER_DATA_PATH=__USER_DATA_PATH__
 Environment=NODE_ENV=production
 WorkingDirectory=__INSTALL_DIR__
 ExecStart=__INSTALL_DIR__/bin/vsagent
+# Why: web-serve.mjs now propagates the backend's abnormal exit (a SIGSEGV under
+# memory pressure surfaces as 139, not a misleading 0), so on-failure actually
+# fires on a crash — without restarting on an intentional `systemctl stop`.
 Restart=on-failure
-RestartSec=5
+RestartSec=2
+# Why: contain the blast radius of long-session memory growth (observed ~63G RSS
+# over ~2 days) so a leak gets the service auto-restarted well before it can
+# exhaust the host. MemoryHigh throttles + reclaims; MemoryMax is the hard cap
+# whose OOM kill triggers the restart. Tune to the deployment's RAM.
+MemoryAccounting=yes
+MemoryHigh=8G
+MemoryMax=16G
 # Capture stdout/stderr into the journal in addition to the rotating log
 # under VSAGENT_USER_DATA_PATH/logs/web-serve.log (handled by
 # web-serve.mjs itself).

@@ -20,6 +20,7 @@
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { constants as osConstants } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -166,6 +167,11 @@ console.log(`[web-serve] web root: ${webRoot}`)
 console.log(`[web-serve] log file: ${logPath}`)
 logStream.write(`\n=== [web-serve] launching at ${new Date().toISOString()} ===\n`)
 
+// Why: track requested shutdowns so the exit-code logic below can tell a clean
+// `systemctl stop` (we forwarded SIGTERM → child dies by signal, expected) from
+// an unsolicited backend crash.
+let shuttingDown = false
+
 const child = spawn(electronPath, args, { env, stdio: ['inherit', 'pipe', 'pipe'] })
 child.stdout?.on('data', teeStdout)
 child.stderr?.on('data', teeStderr)
@@ -173,11 +179,28 @@ child.on('exit', (code, signal) => {
   const msg = `[web-serve] backend exited code=${code} signal=${signal}`
   console.log(msg)
   logStream.write(`${msg  }\n`)
-  logStream.end(() => process.exit(code ?? 0))
+  // Why: a signal death (e.g. SIGSEGV when the backend's RSS balloons under a
+  // long session) reports code=null. `code ?? 0` exited 0 here, so the crashed
+  // backend sat dead behind a 502 and systemd's Restart=on-failure never fired.
+  // Propagate the real disposition: 0 for a requested shutdown, the child's own
+  // code if it had one, else 128+signum (SIGSEGV → 139) so the supervisor fails
+  // and systemd restarts it.
+  let exitCode
+  if (shuttingDown) {
+    exitCode = 0
+  } else if (code != null) {
+    exitCode = code
+  } else if (signal) {
+    exitCode = 128 + (osConstants.signals[signal] ?? 0)
+  } else {
+    exitCode = 0
+  }
+  logStream.end(() => process.exit(exitCode))
 })
 
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => {
+    shuttingDown = true
     if (!child.killed) {child.kill(sig)}
   })
 }

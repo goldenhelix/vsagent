@@ -249,8 +249,14 @@ Environment=VSAGENT_HOST=$HOST
 Environment=VSAGENT_USER_DATA_PATH=$USER_DATA_PATH
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/bin/vsagent
+# web-serve.mjs propagates the backend's abnormal exit (SIGSEGV -> 139), so
+# on-failure fires on a crash but not on an intentional stop. Memory limits cap
+# the blast radius of long-session memory growth (~63G RSS over ~2 days).
 Restart=on-failure
-RestartSec=5
+RestartSec=2
+MemoryAccounting=yes
+MemoryHigh=8G
+MemoryMax=16G
 SyslogIdentifier=vsagent
 
 [Install]
