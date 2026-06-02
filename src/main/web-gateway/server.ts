@@ -107,6 +107,17 @@ export class WebGateway {
   //      it gives when the next freeze report lands.
   private static readonly SLOW_DRAIN_MS = 20
   private static readonly TELEMETRY_INTERVAL_MS = 30_000
+  // Why: ping every client on this cadence and reap any that missed the prior
+  // round's pong. A tab that drops off-network without a clean TCP close (laptop
+  // sleep, killed Wi-Fi) leaves readyState===OPEN forever, so ws.on('close')
+  // never fires and the dead subscriber keeps buffering broadcasts until OOM.
+  private static readonly HEARTBEAT_INTERVAL_MS = 30_000
+  // Why: a client whose send buffer is this far behind can't catch up on a
+  // high-volume channel (pty:data carries agent TUI output at MB/s). The `ws`
+  // lib queues undelivered frames on the heap with NO bound, so one stuck/zombie
+  // socket grows RSS without limit — the ~63G-over-2.3-days leak. Reap it past
+  // this cap; the browser reconnects.
+  private static readonly MAX_BUFFERED_BYTES = 16 * 1024 * 1024
   private telemetry = {
     enqueued: 0,
     coalesced: 0,
@@ -119,6 +130,10 @@ export class WebGateway {
     perChannelBytes: new Map<string, number>()
   }
   private telemetryTimer: ReturnType<typeof setInterval> | null = null
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  // Why: track per-client liveness via ping/pong so half-open sockets get
+  // reaped. WeakMap so entries vanish when the socket is GC'd.
+  private liveness = new WeakMap<WebSocket, boolean>()
 
   constructor(opts: WebGatewayOptions) {
     this.port = opts.port ?? 8765
@@ -169,16 +184,19 @@ export class WebGateway {
     })
     console.log(`[web-gateway] listening on http://${this.host}:${this.port}`)
     this.startTelemetryTimer()
+    this.startHeartbeat()
   }
 
   async stop(): Promise<void> {
     setEventBroadcaster(null)
     setHeadlessBroadcaster(null)
     this.stopTelemetryTimer()
+    this.stopHeartbeat()
     // Drop anything queued; a pending setImmediate drain becomes a no-op
     // because both the queue and the coalesce-index map are empty.
     this.eventQueue = []
     this.coalesceIndices.clear()
+    this.subscribersByChannel.clear()
     if (this.wss) {
       for (const client of this.wss.clients) {
         client.terminate()
@@ -322,6 +340,8 @@ export class WebGateway {
 
   private handleConnection(ws: WebSocket): void {
     this.subscriptionsByClient.set(ws, new Set())
+    this.liveness.set(ws, true)
+    ws.on('pong', () => this.liveness.set(ws, true))
     console.log('[web-gateway] client connected; total =', this.wss?.clients.size ?? 1)
     ws.on('message', async (data) => {
       let msg: WireIn
@@ -380,7 +400,15 @@ export class WebGateway {
       const channels = this.subscriptionsByClient.get(ws)
       if (channels) {
         for (const c of channels) {
-          this.subscribersByChannel.get(c)?.delete(ws)
+          const set = this.subscribersByChannel.get(c)
+          if (set) {
+            set.delete(ws)
+            // Why: drop the channel key once its last subscriber leaves so the
+            // Map can't accumulate empty Sets across reconnects.
+            if (set.size === 0) {
+              this.subscribersByChannel.delete(c)
+            }
+          }
         }
       }
     })
@@ -397,7 +425,13 @@ export class WebGateway {
   }
 
   private unsubscribe(ws: WebSocket, channel: string): void {
-    this.subscribersByChannel.get(channel)?.delete(ws)
+    const set = this.subscribersByChannel.get(channel)
+    if (set) {
+      set.delete(ws)
+      if (set.size === 0) {
+        this.subscribersByChannel.delete(channel)
+      }
+    }
     this.subscriptionsByClient.get(ws)?.delete(channel)
   }
 
@@ -453,6 +487,17 @@ export class WebGateway {
         if (ws.readyState !== WebSocket.OPEN) {
           continue
         }
+        // Why: a client this far behind is a stuck/zombie subscriber; sending
+        // more only grows the ws lib's unbounded heap send-buffer (the leak).
+        // Terminate it — 'close' then runs the subscriber cleanup, and the
+        // browser reconnects fresh.
+        if (ws.bufferedAmount > WebGateway.MAX_BUFFERED_BYTES) {
+          console.warn(
+            `[web-gateway] terminating slow client on ${channel}: bufferedAmount=${ws.bufferedAmount}`
+          )
+          ws.terminate()
+          continue
+        }
         try {
           ws.send(payload)
         } catch (err) {
@@ -497,6 +542,44 @@ export class WebGateway {
     }
   }
 
+  // Why: reap half-open sockets. Each round, terminate any client that didn't
+  // pong since the last round (its 'close' then runs the subscriber cleanup),
+  // then ping the rest. Without this a dropped-off-network tab stays a forever
+  // subscriber and the broadcast path buffers into it without bound until OOM.
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      return
+    }
+    this.heartbeatTimer = setInterval(() => {
+      const wss = this.wss
+      if (!wss) {
+        return
+      }
+      for (const ws of wss.clients) {
+        if (this.liveness.get(ws) === false) {
+          ws.terminate()
+          continue
+        }
+        this.liveness.set(ws, false)
+        try {
+          ws.ping()
+        } catch {
+          ws.terminate()
+        }
+      }
+    }, WebGateway.HEARTBEAT_INTERVAL_MS)
+    if (typeof this.heartbeatTimer.unref === 'function') {
+      this.heartbeatTimer.unref()
+    }
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+  }
+
   private logTelemetrySummary(): void {
     const t = this.telemetry
     if (t.enqueued === 0) {
@@ -505,9 +588,23 @@ export class WebGateway {
     const avgDrainMs = t.drains > 0 ? (t.totalDrainMs / t.drains).toFixed(2) : '0'
     const topBytes = formatTopByBytes(t.perChannelBytes, 5)
     const topCoalesced = formatTopByCount(t.perChannelCoalesced, 3)
+    // Why: surface client count + the worst per-client send backlog. A
+    // monotonically climbing maxBuffered with a flat client count is the
+    // zombie-subscriber signature — the thing that leaked RSS to ~63G.
+    let maxBuffered = 0
+    let clientCount = 0
+    if (this.wss) {
+      for (const ws of this.wss.clients) {
+        clientCount += 1
+        if (ws.bufferedAmount > maxBuffered) {
+          maxBuffered = ws.bufferedAmount
+        }
+      }
+    }
     console.log(
       `[web-gateway] telemetry: enqueued=${t.enqueued} coalesced=${t.coalesced} drains=${t.drains} ` +
-        `maxQ=${t.maxQueueSize} maxDrain=${t.maxDrainMs}ms avgDrain=${avgDrainMs}ms`
+        `maxQ=${t.maxQueueSize} maxDrain=${t.maxDrainMs}ms avgDrain=${avgDrainMs}ms ` +
+        `clients=${clientCount} channels=${this.subscribersByChannel.size} maxBuffered=${maxBuffered}`
     )
     console.log(`[web-gateway] telemetry by bytes: ${topBytes || '(none)'}`)
     if (t.coalesced > 0) {
