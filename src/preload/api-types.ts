@@ -928,7 +928,23 @@ export type AppApi = {
   pickFloatingWorkspaceDirectory: () => Promise<string | null>
 }
 
+// Why (VSAgent fork): web clients back browser panes with a server-side
+// reverse proxy instead of an Electron webview. Optional — only the web
+// preload implements it; desktop panes never consult it.
+export type WebPreviewSessionInfo = {
+  id: string
+  targetOrigin: string
+  proxyPath: string
+}
+
+export type WebPreviewApi = {
+  create: (args: { targetOrigin: string }) => Promise<WebPreviewSessionInfo>
+  setOrigin: (args: { id: string; targetOrigin: string }) => Promise<WebPreviewSessionInfo | null>
+  delete: (args: { id: string }) => Promise<void>
+}
+
 export type PreloadApi = {
+  webPreview?: WebPreviewApi
   app: AppApi
   orcaProfiles: {
     list: () => Promise<OrcaProfileListResult>

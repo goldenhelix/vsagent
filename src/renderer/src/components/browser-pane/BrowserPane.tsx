@@ -118,6 +118,8 @@ import { formatGrabPayloadAsText } from './GrabConfirmationSheet'
 import { formatBrowserAnnotationsAsMarkdown } from './browser-annotation-output'
 import { isEditableKeyboardTarget } from './browser-keyboard'
 import { getBrowserPagesForWorkspace } from './browser-pane-page-selection'
+import { isWebClientLocation } from '@/lib/web-client-location'
+import WebBrowserPane from './WebBrowserPane'
 import BrowserAddressBar from './BrowserAddressBar'
 import { BrowserImportHintButton } from './BrowserImportHintButton'
 import { BrowserToolbarMenu } from './BrowserToolbarMenu'
@@ -832,6 +834,14 @@ export default function BrowserPane({
     }
     await window.api.runtime.reclaimBrowserForDesktop(activeBrowserPageId)
   }, [activeBrowserPageId])
+
+  // Why: web clients have no Electron <webview>, and the remote screencast
+  // path needs Xvfb on the serve host. The iframe-backed webpreview pane
+  // replaces both; desktop is untouched (webPreview only exists in the web
+  // preload, and isWebClientLocation() is false there).
+  if (window.api?.webPreview && isWebClientLocation()) {
+    return <WebBrowserPane browserTab={browserTab} />
+  }
 
   if (activeBrowserRuntimeEnvironmentId) {
     return activeBrowserPage ? (
