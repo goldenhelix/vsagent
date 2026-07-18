@@ -43,7 +43,12 @@ import {
 } from '@/components/ui/context-menu'
 import { useAppStore } from './store'
 import { useShallow } from 'zustand/react/shallow'
-import { isRemoteWorkspaceSnapshotApplyInProgress, useIpcEvents } from './hooks/useIpcEvents'
+import {
+  isRemoteWorkspaceSnapshotApplyInProgress,
+  openNewWorkspaceFromShortcut,
+  useIpcEvents
+} from './hooks/useIpcEvents'
+import { isVSAgentWebMode } from './lib/vsagent-web-mode'
 import { useAutomationDispatchEvents } from './hooks/useAutomationDispatchEvents'
 import RetainedAgentsSyncGate from './components/dashboard/RetainedAgentsSyncGate'
 import { AgentHibernationGate } from './components/AgentHibernationGate'
@@ -1652,6 +1657,17 @@ function App(): React.JSX.Element {
           platform: shortcutPlatform,
           keybindings
         })
+      }
+
+      // Why (VSAgent web mode): Cmd/Ctrl+N normally reaches the app through the
+      // main-process before-input-event allowlist, which never fires for the
+      // browser client. Handle the remapped browser-safe new-workspace chord
+      // (see vsagent-web-keybindings.ts) here. Gated so desktop keeps its single
+      // main-process path and avoids double-handling.
+      if (isVSAgentWebMode() && matchShortcut('workspace.create')) {
+        input.preventDefault()
+        openNewWorkspaceFromShortcut(useAppStore.getState())
+        return
       }
 
       const canRevealRightSidebar = !creationLayoutActive && canShowRightSidebarForView(activeView)

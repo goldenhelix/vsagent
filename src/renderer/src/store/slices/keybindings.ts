@@ -5,6 +5,7 @@ import type {
   KeybindingFileSnapshot,
   KeybindingOverrides
 } from '../../../../shared/keybindings'
+import { applyWebModeKeybindingOverrides } from '../../lib/vsagent-web-keybindings'
 
 const EMPTY_KEYBINDINGS: KeybindingOverrides = {}
 
@@ -26,7 +27,10 @@ function applySnapshot(
   snapshot: KeybindingFileSnapshot
 ): Pick<KeybindingsSlice, 'keybindings' | 'keybindingSnapshot'> {
   return {
-    keybindings: snapshot.overrides,
+    // Why (VSAgent web mode): layer browser-safe chord remaps under the user's
+    // overrides so every consumer (matching, labels, conflict detection) sees
+    // them consistently. Identity on desktop, so behavior there is unchanged.
+    keybindings: applyWebModeKeybindingOverrides(snapshot.overrides),
     keybindingSnapshot: snapshot
   }
 }
