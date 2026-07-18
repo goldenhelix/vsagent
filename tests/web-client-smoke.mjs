@@ -9,6 +9,7 @@
 //   5. terminal scrollback survives a full page reload
 //   6. the webpreview proxy serves a host-local HTTP server through an iframe
 //      path (and its WS tunnel echoes)
+//   7. trusted-proxy mode: GET / redirects with an embedded offer and pairs
 //
 // Usage: node tests/web-client-smoke.mjs   (requires out/ built: pnpm build:cli
 // && pnpm build:electron-vite && pnpm build:web, plus @playwright/test chromium)
@@ -60,7 +61,13 @@ try {
   writeFileSync(join(projectDir, 'run_pipeline.sh'), '#!/bin/bash\necho pipeline\n')
 
   const electronBin = join(repoRoot, 'node_modules', '.bin', 'electron')
-  const serveEnv = { ...process.env, ORCA_E2E_USER_DATA_DIR: userData }
+  // Why: ORCA_SERVE_OPEN_PAIRING covers the trusted-proxy flow (step 7) and
+  // does not change the tokenized-URL flow the earlier steps exercise.
+  const serveEnv = {
+    ...process.env,
+    ORCA_E2E_USER_DATA_DIR: userData,
+    ORCA_SERVE_OPEN_PAIRING: '1'
+  }
   // Why: a parent launched via the CLI shim would otherwise force node mode.
   delete serveEnv.ELECTRON_RUN_AS_NODE
   serveChild = spawn(electronBin, ['.', '--serve', '--serve-port', '0', '--serve-json'], {
@@ -312,6 +319,28 @@ try {
     proxyResult.ok === true,
     JSON.stringify(proxyResult)
   )
+
+  // ── 7. Trusted-proxy mode: bare / pairs without a tokenized URL ───────────
+  const rootUrl = `${webClientUrl.split('/web-index.html')[0]}/`
+  const redirectResp = await fetch(rootUrl, { redirect: 'manual' })
+  const location = redirectResp.headers.get('location') ?? ''
+  const redirectOk = redirectResp.status === 302 && location.startsWith('web-index.html#pairing=')
+  const bare = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+  let bareRendered = false
+  try {
+    await bare.goto(rootUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await bare
+      .getByRole('button', { name: /add project/i })
+      .first()
+      .waitFor({ state: 'visible', timeout: 30000 })
+    bareRendered = true
+  } catch {}
+  await bare.close()
+  step(
+    'open pairing: bare / redirects and pairs a fresh browser',
+    redirectOk && bareRendered,
+    `302=${redirectOk} rendered=${bareRendered}`
+  )
 } catch (error) {
   console.error('smoke aborted:', error)
 } finally {
@@ -320,4 +349,4 @@ try {
 
 const failed = results.filter((r) => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} steps passed`)
-process.exit(failed.length === 0 && results.length >= 6 ? 0 : 1)
+process.exit(failed.length === 0 && results.length >= 7 ? 0 : 1)
