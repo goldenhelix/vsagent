@@ -23,7 +23,9 @@ import type {
 } from '../../shared/types'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree-id'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
-import { buildNotificationOptions } from './notification-options'
+// Why (VSAgent fork): composition lives in shared so the browser-hosted web
+// client can render the same notification text client-side.
+import { buildNotificationOptions } from '../../shared/notification-options'
 import { readNotificationAuthorizationStatus } from './notification-authorization-status'
 import { parsePaneKey } from '../../shared/stable-pane-id'
 import { setTrayAttention } from '../tray/system-tray'

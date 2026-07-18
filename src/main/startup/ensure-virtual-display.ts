@@ -115,6 +115,7 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
       '[serve] Xvfb not found; browser panes are unavailable on this headless Linux host. ' +
         'Install Xvfb (e.g. `apt-get install xvfb`) or set DISPLAY to enable them.'
     )
+    configureDisplaylessOzoneFallback()
     return false
   }
 
@@ -155,6 +156,7 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
   if (!ready) {
     console.warn('[serve] Xvfb did not become ready in time; browser panes may be unavailable.')
     stopVirtualDisplay()
+    configureDisplaylessOzoneFallback()
     return false
   }
 
@@ -168,6 +170,21 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
   app.once('will-quit', stopVirtualDisplay)
 
   return true
+}
+
+// Why (VSAgent fork): without any X display Electron 43 aborts at Ozone init
+// ("Missing X server or $DISPLAY" → SIGTRAP), taking terminal-only serve
+// deployments down with it. The headless Ozone platform boots the runtime
+// fine (verified against this Electron); only offscreen browser panes need a
+// real display, and callers already treat the false return as panes-off.
+function configureDisplaylessOzoneFallback(): void {
+  console.warn(
+    '[serve] Falling back to Ozone headless platform (terminals work; browser panes off).'
+  )
+  app.commandLine.appendSwitch('headless')
+  app.commandLine.appendSwitch('ozone-platform', 'headless')
+  app.commandLine.appendSwitch('disable-gpu')
+  app.disableHardwareAcceleration()
 }
 
 export function stopVirtualDisplay(): void {

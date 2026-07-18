@@ -38,6 +38,7 @@ import {
 } from './local-pty-shell-ready'
 import type { ShellReadySignal } from './local-pty-shell-ready'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
+import { removeInheritedNodeEnv } from '../pty/terminal-node-env'
 import { removeAppImageRuntimeEnv } from '../pty/appimage-terminal-env'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 import { addWslEnvKeys } from '../wsl-env'
@@ -627,6 +628,7 @@ export class LocalPtyProvider implements IPtyProvider {
     removeUnspecifiedPaneIdentityEnv(spawnEnv, args.env)
     removeAppImageRuntimeEnv(spawnEnv)
     removeInheritedNoColor(spawnEnv)
+    removeInheritedNodeEnv(spawnEnv)
     for (const key of args.envToDelete ?? []) {
       delete spawnEnv[key]
     }
