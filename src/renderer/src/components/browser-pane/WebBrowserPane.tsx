@@ -32,6 +32,8 @@ import {
   deriveOriginFromInput,
   derivePathFromInput,
   isBlankBrowserUrl,
+  isNavPingForOrigin,
+  navigateProxyIframe,
   releaseWebPreviewSession,
   type WebPreviewSession
 } from './webpreview-proxy-navigation'
@@ -66,6 +68,10 @@ function WebBrowserPagePane({ page }: { page: BrowserPage }): React.JSX.Element 
   const [urlInput, setUrlInput] = useState(initialUrl)
   const [displayedUrl, setDisplayedUrl] = useState(initialUrl)
   const [session, setSession] = useState<WebPreviewSession | null>(null)
+  // Why: the nav-ping handler runs from a window listener whose effect closes
+  // over mount-time state; the ref always reflects the current session.
+  const sessionRef = useRef<WebPreviewSession | null>(null)
+  sessionRef.current = session
   // Why: dedupe the store→pane echo. Local navigation writes to the store,
   // which fires this pane's storeUrl subscription with the URL it just set.
   // Recording the last pushed URL lets that self-echo skip a no-op reload.
@@ -140,25 +146,17 @@ function WebBrowserPagePane({ page }: { page: BrowserPage }): React.JSX.Element 
         if (seq !== navSeq.current) {
           return
         }
+        // Why: update the ref before React re-renders so nav pings from the
+        // outgoing page are origin-filtered from this instant, not next paint.
+        sessionRef.current = s
         setSession(s)
         const nextIframeSrc = s.proxyPath + path
         if (iframeSrc === nextIframeSrc) {
           // Why: React won't touch an unchanged src attribute, so the iframe
           // never refetches (same URL typed twice, Back across a redirect that
-          // maps to the same proxy path). The proxy path is same-origin with
-          // the renderer, so reload through contentWindow; the about:blank
-          // round-trip is the fallback when that is somehow unreachable.
-          const ifr = iframeRef.current
-          try {
-            ifr?.contentWindow?.location?.reload()
-          } catch {
-            if (ifr) {
-              ifr.src = 'about:blank'
-              requestAnimationFrame(() => {
-                ifr.src = nextIframeSrc
-              })
-            }
-          }
+          // maps to the same proxy path). Navigate explicitly to the TYPED
+          // path — see navigateProxyIframe for the stale-path rationale.
+          navigateProxyIframe(iframeRef.current, nextIframeSrc)
         } else {
           setIframeSrc(nextIframeSrc)
         }
@@ -201,6 +199,11 @@ function WebBrowserPagePane({ page }: { page: BrowserPage }): React.JSX.Element 
         return
       }
       if (typeof data.upstreamUrl !== 'string') {
+        return
+      }
+      // Why: pings from a page predating an address-bar origin change must
+      // not relabel the tab (teardown popstate, late SPA route).
+      if (!isNavPingForOrigin(data.upstreamUrl, sessionRef.current?.targetOrigin)) {
         return
       }
       const next = data.upstreamUrl
@@ -350,9 +353,19 @@ function WebBrowserPagePane({ page }: { page: BrowserPage }): React.JSX.Element 
     // Why: open the PROXY path, not the upstream URL — upstream origins are
     // usually the serve host's loopback, unreachable from the user's machine.
     // The proxy path shares the gateway origin (and its auth) so a plain new
-    // tab works, with real DevTools and downloads.
-    if (iframeSrc && iframeSrc !== 'about:blank') {
-      window.open(iframeSrc, '_blank', 'noopener,noreferrer')
+    // tab works, with real DevTools and downloads. Prefer the iframe's LIVE
+    // location — the page may have client-routed since src was set.
+    let target = iframeSrc
+    try {
+      const live = iframeRef.current?.contentWindow?.location?.href
+      if (live && live !== 'about:blank') {
+        target = live
+      }
+    } catch {
+      // cross-origin fallback: keep the last src we set
+    }
+    if (target && target !== 'about:blank') {
+      window.open(target, '_blank', 'noopener,noreferrer')
     }
   }, [iframeSrc])
 

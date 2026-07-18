@@ -64,3 +64,38 @@ export async function acquireWebPreviewSession(
 export function releaseWebPreviewSession(id: string): void {
   void window.api.webPreview?.delete({ id }).catch(() => {})
 }
+
+// Navigate an already-mounted iframe to the typed proxy path. A bare reload()
+// would replay whatever path the page client-routed to — wrong the moment the
+// session was retargeted to a new origin (stale-path leak). replace() of an
+// identical URL still refetches, covering the same-URL-retyped case.
+export function navigateProxyIframe(ifr: HTMLIFrameElement | null, nextSrc: string): void {
+  if (!ifr) {
+    return
+  }
+  try {
+    ifr.contentWindow?.location?.replace(nextSrc)
+  } catch {
+    ifr.src = 'about:blank'
+    requestAnimationFrame(() => {
+      ifr.src = nextSrc
+    })
+  }
+}
+
+// True when a nav ping (whose reporting page baked in the session origin at
+// response time) belongs to the session's CURRENT origin. Pings from a page
+// predating an address-bar origin change must not relabel the tab.
+export function isNavPingForOrigin(
+  upstreamUrl: string,
+  sessionOrigin: string | undefined
+): boolean {
+  if (!sessionOrigin) {
+    return true
+  }
+  try {
+    return new URL(upstreamUrl).origin === sessionOrigin
+  } catch {
+    return false
+  }
+}
