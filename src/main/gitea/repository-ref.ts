@@ -177,10 +177,58 @@ export async function getGiteaRepoRefForRemote(
   }
 }
 
+async function listGitRemoteNames(
+  repoPath: string,
+  connectionId?: string | null,
+  localGitOptions: LocalGitExecOptions = {}
+): Promise<string[]> {
+  try {
+    const sshGitProvider = connectionId ? getSshGitProvider(connectionId) : null
+    if (connectionId && !sshGitProvider) {
+      return []
+    }
+    const { stdout } = sshGitProvider
+      ? await sshGitProvider.exec(['remote'], repoPath)
+      : await gitExecFileAsync(['remote'], {
+          cwd: repoPath,
+          ...(localGitOptions.wslDistro ? { wslDistro: localGitOptions.wslDistro } : {})
+        })
+    return stdout
+      .split('\n')
+      .map((name) => name.trim())
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 export async function getGiteaRepoRef(
   repoPath: string,
   connectionId?: string | null,
   localGitOptions: LocalGitExecOptions = {}
 ): Promise<GiteaRepoRef | null> {
-  return getGiteaRepoRefForRemote(repoPath, 'origin', connectionId, localGitOptions)
+  // Why: the Gitea remote is not always named `origin` — a repo may have only
+  // a `gitea` remote, or a GitHub `origin` mirror alongside a Gitea remote.
+  // Prefer `origin`, then scan the rest and return the first that parses as a
+  // Gitea/Forgejo host (a known non-Gitea host like github.com yields null).
+  const fromOrigin = await getGiteaRepoRefForRemote(
+    repoPath,
+    'origin',
+    connectionId,
+    localGitOptions
+  )
+  if (fromOrigin) {
+    return fromOrigin
+  }
+  const remoteNames = await listGitRemoteNames(repoPath, connectionId, localGitOptions)
+  for (const remoteName of remoteNames) {
+    if (remoteName === 'origin') {
+      continue
+    }
+    const ref = await getGiteaRepoRefForRemote(repoPath, remoteName, connectionId, localGitOptions)
+    if (ref) {
+      return ref
+    }
+  }
+  return null
 }

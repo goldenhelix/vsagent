@@ -125,6 +125,28 @@ describe('Gitea repository ref parsing', () => {
     })
   })
 
+  it('falls back to a non-origin remote when there is no origin', async () => {
+    // origin get-url fails (no origin), then `git remote` lists names, then the
+    // gitea remote's URL parses as a Gitea host.
+    gitExecFileAsyncMock
+      .mockRejectedValueOnce(new Error("fatal: No such remote 'origin'"))
+      .mockResolvedValueOnce({ stdout: 'gitea\n', stderr: '' })
+      .mockResolvedValueOnce({
+        stdout: 'git@gitea.example.com:goldenhelix/varseq.git\n',
+        stderr: ''
+      })
+
+    await expect(getGiteaRepoRef('/repo')).resolves.toMatchObject({
+      host: 'gitea.example.com',
+      owner: 'goldenhelix',
+      repo: 'varseq'
+    })
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(['remote'], { cwd: '/repo' })
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(['remote', 'get-url', 'gitea'], {
+      cwd: '/repo'
+    })
+  })
+
   it('keeps local host and local WSL repository-ref cache entries separate', async () => {
     gitExecFileAsyncMock
       .mockResolvedValueOnce({
