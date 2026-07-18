@@ -1,0 +1,42 @@
+[Unit]
+Description=VSAgent web service (Orca serve)
+Documentation=https://github.com/goldenhelix/vsagent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# install.sh fills these placeholders in when it writes
+# ~/.config/systemd/user/vsagent.service. The defaults below document the
+# contract; the installed copy has concrete values substituted via sed.
+Environment=VSAGENT_PORT=__PORT__
+Environment=VSAGENT_PAIRING_ADDRESS=__PAIRING_ADDRESS__
+Environment=NODE_ENV=production
+WorkingDirectory=__INSTALL_DIR__
+# The launcher boots `electron <install-dir> --serve` and records the printed
+# "Web client URL" (which carries the pairing token) to
+# ${XDG_STATE_HOME:-~/.local/state}/vsagent/web-url for later retrieval.
+# Xvfb is optional: installing it (apt-get install xvfb) enables in-app
+# browser panes; without it serve falls back to a display-less headless boot
+# (terminals and agents work, browser panes are off).
+ExecStart=__INSTALL_DIR__/scripts/vsagent-serve
+# Why: an intentional `systemctl stop` exits cleanly, so on-failure only fires
+# on crashes (e.g. a SIGSEGV under memory pressure surfaces as 139).
+Restart=on-failure
+RestartSec=2
+# Why: contain the blast radius of long-session memory growth (observed ~63G
+# RSS over ~2 days on the previous stack) so a leak gets the service restarted
+# well before it can exhaust the host. MemoryHigh throttles + reclaims;
+# MemoryMax is the hard cap whose OOM kill triggers the restart. Tune to the
+# deployment's RAM.
+MemoryAccounting=yes
+MemoryHigh=8G
+MemoryMax=16G
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vsagent
+# A 30s shutdown grace gives the daemon time to flush runtime state.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

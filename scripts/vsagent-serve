@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# VSAgent serve launcher — boots upstream Orca's native `--serve` mode from an
+# installed release tarball. Shipped at <install-dir>/scripts/vsagent-serve;
+# both the systemd unit and ~/.local/bin/vsagent point here.
+#
+# Env vars:
+#   VSAGENT_PORT             runtime WS/HTTP port (default 6768)
+#   VSAGENT_PAIRING_ADDRESS  host advertised in printed pairing / web client
+#                            URLs (default: Orca picks one)
+# Args:
+#   --json    passthrough to --serve-json (machine-readable ready line)
+#   anything else is forwarded to the Orca serve process verbatim
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
+
+PORT="${VSAGENT_PORT:-6768}"
+PAIRING_ADDRESS="${VSAGENT_PAIRING_ADDRESS:-}"
+
+ARGS=(--serve --serve-port "$PORT")
+if [[ -n "$PAIRING_ADDRESS" ]]; then
+  ARGS+=(--serve-pairing-address "$PAIRING_ADDRESS")
+fi
+
+EXTRA=()
+for arg in "$@"; do
+  case "$arg" in
+    --json) EXTRA+=(--serve-json) ;;
+    *) EXTRA+=("$arg") ;;
+  esac
+done
+
+# Why: systemd user units run with a minimal PATH that rarely includes node,
+# and node_modules/.bin/electron is a Node shim. Prefer the real binary; fall
+# back to the shim for layouts where dist/ lives elsewhere (path.txt installs).
+ELECTRON="$INSTALL_DIR/node_modules/electron/dist/electron"
+if [[ ! -x "$ELECTRON" ]]; then
+  ELECTRON="$INSTALL_DIR/node_modules/.bin/electron"
+fi
+if [[ ! -x "$ELECTRON" ]]; then
+  echo "[vsagent-serve] electron is not installed — run 'pnpm install --prod' in $INSTALL_DIR" >&2
+  exit 1
+fi
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/vsagent"
+mkdir -p "$STATE_DIR"
+WEB_URL_FILE="$STATE_DIR/web-url"
+
+# Why: app.getAppPath() must resolve out/web (web client) and the daemon entry
+# relative to the install dir, and runtime skill assets load from cwd/resources.
+cd "$INSTALL_DIR"
+
+# Why: the printed "Web client URL" carries the pairing token, and journald may
+# rotate past it. Mirror stdout while recording that line to a state file so
+# systemd users can always recover the URL. exec keeps electron as the service
+# main process (signals, exit code) while the process substitution filters.
+exec "$ELECTRON" "$INSTALL_DIR" "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} > >(
+  while IFS= read -r line; do
+    printf '%s\n' "$line"
+    case "$line" in
+      'Web client URL: '*)
+        printf '%s\n' "${line#Web client URL: }" >"$WEB_URL_FILE"
+        printf '[vsagent-serve] web client URL saved to %s\n' "$WEB_URL_FILE"
+        ;;
+    esac
+  done
+)
