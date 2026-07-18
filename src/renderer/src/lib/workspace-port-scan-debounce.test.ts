@@ -147,4 +147,11 @@ describe('reconcileTransientPortScanFailures', () => {
 
     expect(next[0].result).toBe(manualResult)
   })
+
+  it('tolerates an undefined result instead of crashing the render', () => {
+    const { apply } = createHarness()
+    const next = apply([{ key: 'h:all', result: undefined as unknown as WorkspacePortScanResult }])
+    expect(next[0].result.unavailableReason).toBeTruthy()
+    expect(next[0].result.ports).toEqual([])
+  })
 })

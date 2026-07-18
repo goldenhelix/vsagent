@@ -24,6 +24,18 @@ export function reconcileTransientPortScanFailures(
   }
 
   return results.map(({ key, result }) => {
+    // Why (VSAgent fork): a scanner that resolves to a malformed/undefined
+    // result must not crash the whole render — treat it as unavailable.
+    if (!result) {
+      const fallback: WorkspacePortScanResult = {
+        platform: 'unknown',
+        scannedAt: Date.now(),
+        ports: [],
+        unavailableReason: 'Workspace port scan returned no result.'
+      }
+      state.set(key, { consecutiveFailures: 0, publishedResult: fallback })
+      return { key, result: fallback }
+    }
     const previous = state.get(key)
     const publishedResult = publishedScans[key]
     // A different object was published by another refresh path, so it breaks this poller's streak.

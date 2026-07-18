@@ -754,6 +754,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     shell: createShellApi(),
     skills: createSkillsApi(),
     webPreview: createWebPreviewApi(),
+    workspacePorts: createWorkspacePortsApi(),
     pty: createPtyApi(),
     ssh: createSshApi(),
     wsl: {
@@ -2945,6 +2946,30 @@ function createShellApi(): NonNullable<Partial<PreloadApi>['shell']> {
     pickAudio: () => Promise.resolve(null),
     pickDirectory: () => Promise.resolve(null),
     copyFile: () => Promise.resolve()
+  }
+}
+
+// Why (VSAgent fork): there is no "local" host in the browser — a workspace
+// pinned to a local execution host (stale persisted state, or a project added
+// before its runtime owner resolved) would otherwise hit the fallback proxy,
+// which resolves scan() to undefined and crashes upstream's scan-debounce
+// (result.unavailableReason on undefined), taking down the whole app subtree.
+// Runtime-owned workspaces never reach here — they route over the paired RPC.
+function createWorkspacePortsApi(): NonNullable<PreloadApi['workspacePorts']> {
+  return {
+    scan: () =>
+      Promise.resolve({
+        platform: 'unknown' as const,
+        scannedAt: Date.now(),
+        ports: [],
+        unavailableReason: 'Port scanning runs on the workspace host, not the browser.'
+      }),
+    kill: () =>
+      Promise.resolve({
+        ok: false as const,
+        reason: 'Port management runs on the workspace host, not the browser.'
+      }),
+    onAdvertisedUrlChanged: () => noopUnsubscribe
   }
 }
 
