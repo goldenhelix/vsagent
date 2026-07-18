@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import {
   buildSidebarHostOptions,
   buildSidebarHostScopeOptions,
@@ -33,7 +34,10 @@ export function useSidebarHostScopeOptions(): {
         runtimeEnvironments,
         runtimeStatusByEnvironmentId,
         hostLabelOverrides
-      }),
+        // Why (VSAgent fork): the browser has no "local" host — the serve host
+        // is the only host — so drop it from the picker and scope strip. This
+        // stops new repos being pinned to a dead local execution host.
+      }).filter((host) => !(isVSAgentWebMode() && host.kind === 'local')),
     [
       repos,
       sshTargetLabels,

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
+
+let webModeForTest = false
+vi.mock('@/lib/vsagent-web-mode', () => ({
+  isVSAgentWebMode: () => webModeForTest
+}))
 import {
   getExplicitRuntimeEnvironmentIdForWorktree,
   getExecutionHostIdForWorktree,
@@ -368,5 +373,30 @@ describe('getRuntimeSessionMirrorEnvironmentIds', () => {
     }
 
     expect(getRuntimeSessionMirrorEnvironmentIds(localOnlyState)).toEqual([])
+  })
+})
+
+describe('web-mode local-host coercion (VSAgent fork)', () => {
+  it('routes a local-pinned repo to the active runtime in web mode', () => {
+    webModeForTest = true
+    try {
+      expect(getRuntimeEnvironmentIdForWorktree(state, 'local-repo::wt-a')).toBe('focused-env')
+    } finally {
+      webModeForTest = false
+    }
+  })
+
+  it('routes a local-pinned folder to the active runtime in web mode', () => {
+    webModeForTest = true
+    try {
+      expect(getRuntimeEnvironmentIdForWorktree(state, 'folder:local-folder')).toBe('focused-env')
+    } finally {
+      webModeForTest = false
+    }
+  })
+
+  it('leaves local as null on desktop (no coercion)', () => {
+    webModeForTest = false
+    expect(getRuntimeEnvironmentIdForWorktree(state, 'local-repo::wt-a')).toBeNull()
   })
 })

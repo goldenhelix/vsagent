@@ -14,12 +14,27 @@ import type {
 import { folderWorkspaceKey, parseWorkspaceKey } from '../../../shared/workspace-scope'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { getRepoIdFromWorktreeId } from '@/store/slices/worktree-helpers'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import {
   findIndexedFolderWorkspaceOwner,
   findIndexedProjectGroupOwner,
   findIndexedRepoOwner as findRepoRecord,
   findIndexedWorktreeOwner as findWorktreeRecord
 } from './worktree-runtime-owner-index'
+
+// Why (VSAgent fork): the browser has no local host, so a workspace that
+// resolves to local (no explicit owner, or a repo stale-pinned to
+// executionHostId 'local') must route to the paired runtime instead of a dead
+// local target. No-op on desktop and under tests (isVSAgentWebMode is false).
+function coerceOwnerForWebMode(
+  resolved: string | null,
+  state: WorktreeRuntimeOwnerState
+): string | null {
+  if (resolved || !isVSAgentWebMode()) {
+    return resolved
+  }
+  return state.settings?.activeRuntimeEnvironmentId?.trim() || null
+}
 
 type RuntimeExecutionHost = Extract<ParsedExecutionHost, { kind: 'runtime' }>
 
@@ -66,13 +81,15 @@ function getRuntimeEnvironmentIdForFolderWorkspace(
     folderWorkspace?.connectionId?.trim() ||
     projectGroup?.connectionId?.trim()
   ) {
-    return null
+    // Why (VSAgent fork): a folder stale-pinned to local has no host in the
+    // browser — route it to the paired runtime rather than a dead local target.
+    return coerceOwnerForWebMode(null, state)
   }
   const restoredRuntimeHost = getRestoredRuntimeHostForFolderWorkspace(state, folderWorkspaceId)
   if (restoredRuntimeHost) {
     return restoredRuntimeHost.environmentId
   }
-  return state.settings?.activeRuntimeEnvironmentId?.trim() || null
+  return coerceOwnerForWebMode(state.settings?.activeRuntimeEnvironmentId?.trim() || null, state)
 }
 
 function getRestoredRuntimeHostForFolderWorkspace(
@@ -174,9 +191,9 @@ export function getRuntimeEnvironmentIdForWorktree(
   const hasExplicitOwner = Boolean(repo?.executionHostId?.trim() || repo?.connectionId?.trim())
   if (repo && hasExplicitOwner) {
     const parsed = parseExecutionHostId(getRepoExecutionHostId(repo))
-    return parsed?.kind === 'runtime' ? parsed.environmentId : null
+    return coerceOwnerForWebMode(parsed?.kind === 'runtime' ? parsed.environmentId : null, state)
   }
-  return state.settings?.activeRuntimeEnvironmentId?.trim() || null
+  return coerceOwnerForWebMode(state.settings?.activeRuntimeEnvironmentId?.trim() || null, state)
 }
 
 export function getExplicitRuntimeEnvironmentIdForWorktree(
