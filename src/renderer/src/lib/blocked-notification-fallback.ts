@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
+import { isWebClientLocation } from '@/lib/web-client-location'
 
 // Why: agent completions can dispatch in bursts; one in-app pointer at the
 // broken OS setting per session teaches the fix without nagging.
@@ -15,6 +16,44 @@ export function showBlockedNotificationFallbackToast(): void {
     return
   }
   shownThisSession = true
+  // Why (VSAgent fork): in the browser web client 'blocked-by-system' means
+  // the BROWSER's notification permission, not macOS — pointing users at
+  // System Settings is wrong, and the browser prompt needs a user gesture,
+  // which the toast button provides.
+  if (isWebClientLocation()) {
+    const canPrompt = typeof Notification !== 'undefined' && Notification.permission === 'default'
+    toast.warning(
+      translate(
+        'auto.lib.blocked.notification.fallback.web.blocked',
+        'Your browser is blocking notifications'
+      ),
+      {
+        description: canPrompt
+          ? translate(
+              'auto.lib.blocked.notification.fallback.web.allow',
+              'Allow notifications for this site to get agent alerts.'
+            )
+          : translate(
+              'auto.lib.blocked.notification.fallback.web.reenable',
+              'Re-enable notifications for this site in your browser settings.'
+            ),
+        ...(canPrompt
+          ? {
+              action: {
+                label: translate(
+                  'auto.lib.blocked.notification.fallback.web.enable',
+                  'Enable notifications'
+                ),
+                onClick: () => {
+                  void Notification.requestPermission().catch(() => {})
+                }
+              }
+            }
+          : {})
+      }
+    )
+    return
+  }
   toast.warning(
     translate(
       'auto.lib.blocked.notification.fallback.de50bef680',

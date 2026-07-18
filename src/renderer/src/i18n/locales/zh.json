@@ -585,7 +585,13 @@
       "blocked": {
         "notification": {
           "fallback": {
-            "de50bef680": "macOS 正在阻止 Orca 通知"
+            "de50bef680": "macOS 正在阻止 Orca 通知",
+            "web": {
+              "blocked": "Your browser is blocking notifications",
+              "allow": "Allow notifications for this site to get agent alerts.",
+              "reenable": "Re-enable notifications for this site in your browser settings.",
+              "enable": "Enable notifications"
+            }
           }
         }
       }
@@ -12392,6 +12398,24 @@
                   "87fcdd0da9": "{{value0}} 搜索"
                 }
               }
+            }
+          },
+          "WebBrowserPane": {
+            "invalid": {
+              "url": "Invalid URL"
+            },
+            "back": "Go back",
+            "forward": "Go forward",
+            "reload": "Reload",
+            "more": "More options",
+            "copy": {
+              "url": "Copy URL"
+            },
+            "open": {
+              "tab": "Open in browser tab"
+            },
+            "go": {
+              "to": "Go to"
             }
           }
         }
