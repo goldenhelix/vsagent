@@ -273,6 +273,42 @@ server {
 The web client is built with relative asset URLs, so serving it under a path
 prefix (e.g. `location /vsagent/`) also works.
 
+### Trusted-proxy mode: no pairing token in the URL
+
+When the proxy itself authenticates users (Tailscale serve, an SSO gateway,
+VSWarehouse auth), the tokenized pairing URL adds nothing — whoever can reach
+the port is already trusted. Set:
+
+```ini
+Environment=ORCA_SERVE_OPEN_PAIRING=1
+```
+
+on the systemd unit (or export it before launching `vsagent-serve`). Then
+`GET /` on the serve port 302-redirects to the web client with a pairing
+offer already embedded in the URL fragment — users just open
+`https://vsagent.example.com/` and land paired. The WebSocket endpoint in the
+offer is derived per-request from `Host` / `X-Forwarded-Host` /
+`X-Forwarded-Proto` (`https` → `wss`), so the same server works via any
+hostname that reaches it, TLS or not. Fragments are resolved client-side and
+never appear in proxy access logs.
+
+All visitors share one persistent device entry ("Shared web access (trusted
+proxy)") — revoking that device in the runtime's device list cuts everyone
+off at once. Direct hits to `/web-index.html` still require a pairing
+fragment; only `/` redirects.
+
+If the serve port is reachable by machines that should NOT get access (shared
+LAN without a firewall), use the header-gated variant instead: set
+`ORCA_SERVE_PAIRING_PROXY_SECRET=<random>` on the service and have only the
+proxy inject the matching header:
+
+```nginx
+    proxy_set_header X-VSAgent-Proxy-Auth "<random>";
+```
+
+Requests without the header are not redirected (they fall through to a 404),
+so only proxy-authenticated traffic can mint a session.
+
 ## Uninstall
 
 ```bash

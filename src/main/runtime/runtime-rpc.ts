@@ -23,6 +23,7 @@ import {
   isWebPreviewPath,
   isWebPreviewUpgrade
 } from '../webpreview/proxy'
+import { handleOpenPairingRedirect, readOpenPairingConfig } from './rpc/open-pairing-redirect'
 import { readWsFallbackPort, writeWsFallbackPort } from './rpc/ws-fallback-port-store'
 import type { WebSocket } from 'ws'
 import { DeviceRegistry, type DeviceScope } from './device-registry'
@@ -638,6 +639,31 @@ export class OrcaRuntimeRpcServer {
     }
   }
 
+  // Why (VSAgent fork): trusted-reverse-proxy deployments redirect GET / to
+  // the web client with a pairing offer baked in. All visitors share ONE
+  // persistent device (single revocation unit) so the registry does not gain
+  // an entry per page load; the endpoint comes from the proxied request so
+  // the same serve works via any hostname that reaches it.
+  createSharedAccessPairingUrl(endpoint: string): string | null {
+    const publicKeyB64 = this.getE2EEPublicKey()
+    if (!this.deviceRegistry || !publicKeyB64 || !this.getWebSocketEndpoint()) {
+      return null
+    }
+    const sharedName = 'Shared web access (trusted proxy)'
+    const device =
+      this.deviceRegistry
+        .listDevices()
+        .find((entry) => entry.scope === 'runtime' && entry.name === sharedName) ??
+      this.deviceRegistry.addDevice(sharedName, 'runtime')
+    return encodePairingOffer({
+      v: PAIRING_OFFER_VERSION,
+      endpoint,
+      deviceToken: device.token,
+      publicKeyB64,
+      scope: 'runtime'
+    })
+  }
+
   async createMobilePairingOffer(args: {
     address?: string | null
     connectionMode?: MobilePairingConnectionMode
@@ -870,6 +896,7 @@ export class OrcaRuntimeRpcServer {
       try {
         this.deviceRegistry = new DeviceRegistry(this.userDataPath)
         this.e2eeKeypair = loadOrCreateE2EEKeypair(this.userDataPath)
+        const openPairingConfig = readOpenPairingConfig()
 
         const wsTransport = new WebSocketTransport({
           host: '0.0.0.0',
@@ -887,6 +914,13 @@ export class OrcaRuntimeRpcServer {
           // client bundle. Session ids are unguessable 128-bit capabilities
           // minted only over the authenticated webpreview.* RPC methods.
           extraHttpHandler: async (req, res) => {
+            if (
+              handleOpenPairingRedirect(req, res, openPairingConfig, (endpoint) =>
+                this.createSharedAccessPairingUrl(endpoint)
+              )
+            ) {
+              return true
+            }
             if (isWebPreviewPath(req.url)) {
               await handleWebPreview(req, res)
               return true
