@@ -22,7 +22,7 @@ function isDesktopOwnedHost(hostId: TaskSourceContext['hostId']): boolean {
 }
 
 function getRepoBackedProviderToolStatus(
-  provider: Extract<TaskProvider, 'github' | 'gitlab'>,
+  provider: Extract<TaskProvider, 'github' | 'gitlab' | 'gitea'>,
   preflightStatus: PreflightStatus | null
 ): ProviderAvailabilityStatus | null {
   if (!preflightStatus) {
@@ -30,6 +30,19 @@ function getRepoBackedProviderToolStatus(
   }
   if (provider === 'github') {
     return preflightStatus.gh
+  }
+  if (provider === 'gitea') {
+    // Why: Gitea is token-gated, not CLI-installed. Map "token configured" onto
+    // the installed slot so the shared reason logic surfaces a missing token as
+    // provider-auth. Hosts predating Gitea preflight report unsupported.
+    if (!Object.hasOwn(preflightStatus, 'gitea')) {
+      return 'unsupported'
+    }
+    const gitea = preflightStatus.gitea
+    return {
+      installed: gitea?.tokenConfigured ?? false,
+      authenticated: gitea?.authenticated ?? false
+    }
   }
   // Why: older remote servers can predate GitLab preflight entirely. That is a
   // host capability gap, not a user-fixable missing `glab` install.
@@ -54,7 +67,7 @@ function getProviderReason(
 }
 
 export function getRepoBackedProviderAvailability(args: {
-  provider: Extract<TaskProvider, 'github' | 'gitlab'>
+  provider: Extract<TaskProvider, 'github' | 'gitlab' | 'gitea'>
   contexts: readonly TaskSourceContext[]
   preflightStatus: PreflightStatus | null
   preflightReady: boolean

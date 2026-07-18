@@ -469,6 +469,16 @@ type GitLabRepoSelectorArgs = {
   sourceContext?: TaskSourceContext | null
 }
 
+// Why: Gitea issues reuse the shared GitLab work-item shapes on the Task page,
+// so its preload surface mirrors `gl` (issue subset) with the same selector.
+type GiteaAuthDiagnostic = {
+  configured: boolean
+  authenticated: boolean
+  account: string | null
+  baseUrl: string | null
+  tokenConfigured: boolean
+}
+
 type GitHubRepoSelectorArgs = {
   repoPath: string
   repoId?: string | null
@@ -1924,6 +1934,42 @@ export type PreloadApi = {
         path: string
         iid: number
         type: 'issue' | 'mr'
+      }
+    ) => Promise<Omit<GitLabWorkItem, 'repoId'> | null>
+  }
+  // Gitea task source (issues). Rows/details/comments reuse the shared GitLab
+  // work-item types; Gitea is issues-only (no MRs/pipelines/todos here).
+  gitea: {
+    diagnoseAuth: () => Promise<GiteaAuthDiagnostic>
+    listIssues: (
+      args: GitLabRepoSelectorArgs & {
+        state?: 'opened' | 'closed' | 'all'
+        assignee?: string
+        limit?: number
+      }
+    ) => Promise<{ items: GitLabWorkItem[]; error?: ClassifiedError }>
+    listLabels: (args: GitLabRepoSelectorArgs) => Promise<string[]>
+    updateIssue: (
+      args: GitLabRepoSelectorArgs & {
+        number: number
+        updates: GitLabIssueUpdate
+      }
+    ) => Promise<{ ok: true } | { ok: false; error: string }>
+    addIssueComment: (
+      args: GitLabRepoSelectorArgs & {
+        number: number
+        body: string
+      }
+    ) => Promise<GitLabCommentResult>
+    workItemDetails: (
+      args: GitLabRepoSelectorArgs & {
+        iid: number
+        type: 'issue' | 'mr'
+      }
+    ) => Promise<GitLabWorkItemDetails | null>
+    workItemByPath: (
+      args: GitLabRepoSelectorArgs & {
+        iid: number
       }
     ) => Promise<Omit<GitLabWorkItem, 'repoId'> | null>
   }

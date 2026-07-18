@@ -12938,7 +12938,9 @@
         "noGitLabMrsTitle": "No hay merge requests de GitLab",
         "noGitLabMrsDescription": "Ningún MR de GitLab coincide con este filtro.",
         "noGitLabWorkTitle": "No hay trabajo de GitLab",
-        "noGitLabWorkDescription": "Ningún trabajo de GitLab coincide con este filtro."
+        "noGitLabWorkDescription": "Ningún trabajo de GitLab coincide con este filtro.",
+        "noGiteaIssuesTitle": "No Gitea issues",
+        "noGiteaIssuesDescription": "No Gitea issues match this filter."
       },
       "taskSourceContextSummary": {
         "sourceUnavailable": "Origen {{value0}} no disponible: {{value1}}",
@@ -13181,6 +13183,9 @@
           "undo": "Deshacer",
           "widthOption": "{{value0}} px"
         }
+      },
+      "taskPageLocalizedOptions": {
+        "gitea": "Gitea"
       }
     },
     "i18n": {

@@ -52,6 +52,10 @@ type Props = {
   repoPath: string | null
   repoId?: string | null
   sourceContext?: TaskSourceContext | null
+  // Why: Gitea reuses this dialog for its issues. Issue detail/comment calls
+  // route to the gitea preload namespace; MR-only actions never fire for Gitea
+  // (its items are always type 'issue').
+  provider?: 'gitlab' | 'gitea'
   onClose: () => void
   onCreateWorkspace?: (item: GitLabWorkItem) => void
 }
@@ -326,9 +330,13 @@ export default function GitLabItemDialog({
   repoPath,
   repoId,
   sourceContext,
+  provider = 'gitlab',
   onClose,
   onCreateWorkspace
 }: Props): React.JSX.Element {
+  // Why: shared issue read/comment surface — Gitea routes to window.api.gitea,
+  // GitLab keeps window.api.gl. MR-only mutations always use gl directly.
+  const issueApi = provider === 'gitea' ? window.api.gitea : window.api.gl
   const [details, setDetails] = useState<GitLabWorkItemDetails | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -394,7 +402,7 @@ export default function GitLabItemDialog({
     let stale = false
     setLoading(true)
     setError(null)
-    void window.api.gl
+    void issueApi
       .workItemDetails({ ...repoSelector, iid: item.number, type: item.type })
       .then((data) => {
         if (stale) {
@@ -419,7 +427,7 @@ export default function GitLabItemDialog({
     return () => {
       stale = true
     }
-  }, [item, repoSelector, refreshNonce])
+  }, [issueApi, item, repoSelector, refreshNonce])
 
   // Why: clear item-scoped dialog state when the sheet target changes. The
   // top-level comment draft is reconciled during render so it cannot flash stale.
@@ -917,7 +925,7 @@ export default function GitLabItemDialog({
               iid: item.number,
               body: bodyState.body
             })
-          : await window.api.gl.addIssueComment({
+          : await issueApi.addIssueComment({
               ...repoSelector,
               number: item.number,
               body: bodyState.body
@@ -940,7 +948,7 @@ export default function GitLabItemDialog({
         setCommentSubmitting(false)
       }
     }
-  }, [commentDraft, item, itemId, repoSelector, mountedRef, handleRefresh])
+  }, [commentDraft, issueApi, item, itemId, repoSelector, mountedRef, handleRefresh])
   const canSubmitInlineComment = hasBoundedCommentBodyText(inlineCommentBody)
   const canSubmitComment = hasBoundedCommentBodyText(commentDraft)
 

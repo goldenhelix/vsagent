@@ -107,8 +107,68 @@ function requestJson<T>(
   return requestJsonAtBase(configuredApiBaseUrl(repo), path, options)
 }
 
+// Why: the issue list has to tell "empty result" from "permission denied /
+// not found" so the Task page can surface a real error instead of a bare
+// "No issues" — surface the HTTP status the plain reader swallows.
+export type GiteaJsonResult<T> = { ok: true; data: T } | { ok: false; status: number | null }
+
+export async function requestGiteaJsonResult<T>(
+  repo: GiteaRepoRef,
+  path: string,
+  options: RequestOptions = {}
+): Promise<GiteaJsonResult<T>> {
+  const config = getAuthConfig()
+  try {
+    const response = await fetch(apiUrl(configuredApiBaseUrl(repo), path, options.searchParams), {
+      headers: {
+        Accept: 'application/json',
+        ...authHeaders(config)
+      },
+      signal: AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS)
+    })
+    if (!response.ok) {
+      await cancelUnreadResponseBody(response)
+      return { ok: false, status: response.status }
+    }
+    return { ok: true, data: (await response.json()) as T }
+  } catch {
+    return { ok: false, status: null }
+  }
+}
+
 function encodedRepoPath(repo: GiteaRepoRef): string {
   return `${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}`
+}
+
+// Why: the sibling issue module needs the exact same token, base-URL, and
+// repo-path wiring — export it here so there is one source of truth instead
+// of a third private copy alongside pull-request-creation.ts.
+export function giteaRepoPathSegment(repo: GiteaRepoRef): string {
+  return encodedRepoPath(repo)
+}
+
+export function giteaApiBaseUrlForRepo(repo: GiteaRepoRef): string {
+  return configuredApiBaseUrl(repo)
+}
+
+export function giteaAuthRequestHeaders(): Record<string, string> {
+  return authHeaders(getAuthConfig())
+}
+
+export function buildGiteaApiUrl(
+  repo: GiteaRepoRef,
+  path: string,
+  searchParams?: RequestOptions['searchParams']
+): URL {
+  return apiUrl(configuredApiBaseUrl(repo), path, searchParams)
+}
+
+export function requestGiteaJson<T>(
+  repo: GiteaRepoRef,
+  path: string,
+  options: RequestOptions = {}
+): Promise<T | null> {
+  return requestJson(repo, path, options)
 }
 
 function giteaPullRequestScanKey(repo: GiteaRepoRef): string {

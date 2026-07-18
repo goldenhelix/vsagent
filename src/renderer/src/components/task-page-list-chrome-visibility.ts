@@ -26,6 +26,10 @@ export function shouldHideTaskPageListChrome({
       return hasGitHubDetail
     case 'gitlab':
       return hasGitLabDetail
+    case 'gitea':
+      // Why: Gitea reuses the GitLab item dialog + selection state, so its
+      // open-detail signal is the same hasGitLabDetail flag.
+      return hasGitLabDetail
     case 'jira':
       return hasJiraDetail
     case 'linear':

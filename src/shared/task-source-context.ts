@@ -8,7 +8,7 @@ import {
 } from './execution-host'
 import type { GlobalSettings, ProjectProviderIdentity, Repo } from './types'
 
-export type TaskProvider = 'github' | 'gitlab' | 'linear' | 'jira'
+export type TaskProvider = 'github' | 'gitlab' | 'gitea' | 'linear' | 'jira'
 
 export type GitHubTaskProviderIdentity = ProjectProviderIdentity & {
   provider: 'github'
@@ -19,6 +19,16 @@ export type GitLabTaskProviderIdentity = {
   projectId?: string | null
   namespace?: string | null
   project?: string | null
+  webUrl?: string | null
+}
+
+// Why: Gitea's REST is GitHub-shaped, so its identity is flat owner/repo, but
+// self-hosted instances live on arbitrary hosts so the host travels with it.
+export type GiteaTaskProviderIdentity = {
+  provider: 'gitea'
+  owner?: string | null
+  repo?: string | null
+  host?: string | null
   webUrl?: string | null
 }
 
@@ -40,6 +50,7 @@ export type JiraTaskProviderIdentity = {
 export type TaskProviderIdentity =
   | GitHubTaskProviderIdentity
   | GitLabTaskProviderIdentity
+  | GiteaTaskProviderIdentity
   | LinearTaskProviderIdentity
   | JiraTaskProviderIdentity
 
@@ -180,6 +191,7 @@ function normalizeTaskProvider(value: string): TaskProvider | null {
   switch (value) {
     case 'github':
     case 'gitlab':
+    case 'gitea':
     case 'linear':
     case 'jira':
       return value
@@ -212,6 +224,8 @@ function providerIdentityCachePart(identity: TaskProviderIdentity | null | undef
       return [identity.owner, identity.repo].join('/')
     case 'gitlab':
       return identity.projectId ?? [identity.namespace, identity.project].filter(Boolean).join('/')
+    case 'gitea':
+      return [identity.host, identity.owner, identity.repo].filter(Boolean).join('/')
     case 'linear':
       return [identity.workspaceId, identity.teamId ?? identity.teamKey].filter(Boolean).join('/')
     case 'jira':

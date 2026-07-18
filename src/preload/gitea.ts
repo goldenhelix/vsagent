@@ -1,0 +1,43 @@
+/* Gitea preload bindings — split out of `src/preload/index.ts` (like
+   `./gitlab`) so adding or changing a `gitea.*` channel doesn't surface as a
+   merge conflict on every upstream sync of the central preload file. Composed
+   back into `api.gitea` from `index.ts`. */
+import { ipcRenderer } from 'electron'
+import type { TaskSourceContext } from '../shared/task-source-context'
+import type { GitLabIssueUpdate } from '../shared/types'
+
+type GiteaRepoSelectorArgs = {
+  repoPath: string
+  repoId?: string | null
+  sourceContext?: TaskSourceContext | null
+}
+
+export const giteaApi = {
+  diagnoseAuth: (): Promise<unknown> => ipcRenderer.invoke('gitea:diagnoseAuth'),
+
+  listIssues: (
+    args: GiteaRepoSelectorArgs & {
+      state?: 'opened' | 'closed' | 'all'
+      assignee?: string
+      limit?: number
+    }
+  ): Promise<{ items: unknown[]; error?: unknown }> => ipcRenderer.invoke('gitea:listIssues', args),
+
+  listLabels: (args: GiteaRepoSelectorArgs): Promise<string[]> =>
+    ipcRenderer.invoke('gitea:listLabels', args),
+
+  updateIssue: (
+    args: GiteaRepoSelectorArgs & { number: number; updates: GitLabIssueUpdate }
+  ): Promise<unknown> => ipcRenderer.invoke('gitea:updateIssue', args),
+
+  addIssueComment: (
+    args: GiteaRepoSelectorArgs & { number: number; body: string }
+  ): Promise<unknown> => ipcRenderer.invoke('gitea:addIssueComment', args),
+
+  workItemDetails: (
+    args: GiteaRepoSelectorArgs & { iid: number; type: 'issue' | 'mr' }
+  ): Promise<unknown> => ipcRenderer.invoke('gitea:workItemDetails', args),
+
+  workItemByPath: (args: GiteaRepoSelectorArgs & { iid: number }): Promise<unknown> =>
+    ipcRenderer.invoke('gitea:workItemByPath', args)
+}

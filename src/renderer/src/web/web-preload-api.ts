@@ -382,6 +382,24 @@ type WebGitLabRuntimeMethod =
   | 'gitlab.jobTrace'
   | 'gitlab.retryJob'
   | 'gitlab.workItemByPath'
+type WebGiteaApi = NonNullable<PreloadApi['gitea']>
+type WebGiteaResult<K extends keyof WebGiteaApi> = Awaited<ReturnType<WebGiteaApi[K]>>
+type WebGiteaRouteKey =
+  | 'diagnoseAuth'
+  | 'listIssues'
+  | 'listLabels'
+  | 'updateIssue'
+  | 'addIssueComment'
+  | 'workItemDetails'
+  | 'workItemByPath'
+type WebGiteaRuntimeMethod =
+  | 'gitea.diagnoseAuth'
+  | 'gitea.listIssues'
+  | 'gitea.listLabels'
+  | 'gitea.updateIssue'
+  | 'gitea.addIssueComment'
+  | 'gitea.workItemDetails'
+  | 'gitea.workItemByPath'
 type WebKeybindingDocument = {
   version: 1
   keybindings: KeybindingOverrides
@@ -462,6 +480,16 @@ export const GITLAB_WEB_RPC_METHODS = {
   retryJob: 'gitlab.retryJob',
   workItemByPath: 'gitlab.workItemByPath'
 } as const satisfies Record<WebGitLabRouteKey, WebGitLabRuntimeMethod>
+
+export const GITEA_WEB_RPC_METHODS = {
+  diagnoseAuth: 'gitea.diagnoseAuth',
+  listIssues: 'gitea.listIssues',
+  listLabels: 'gitea.listLabels',
+  updateIssue: 'gitea.updateIssue',
+  addIssueComment: 'gitea.addIssueComment',
+  workItemDetails: 'gitea.workItemDetails',
+  workItemByPath: 'gitea.workItemByPath'
+} as const satisfies Record<WebGiteaRouteKey, WebGiteaRuntimeMethod>
 
 const WEB_KEYBINDING_PLATFORMS: readonly KeybindingPlatform[] = ['darwin', 'linux', 'win32']
 const webKeybindingListeners = new Set<(snapshot: KeybindingFileSnapshot) => void>()
@@ -723,6 +751,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     emulator: createEmulatorApi(),
     gh: createGitHubApi(),
     gl: createGitLabApi(),
+    gitea: createGiteaApi(),
     hostedReview: createRuntimeNamespaceApi('hostedReview'),
     linear: createRuntimeNamespaceApi('linear'),
     hooks: createHooksApi(),
@@ -2351,6 +2380,29 @@ function createGitLabApi(): WebGitLabApi {
   } satisfies WebGitLabApi
 
   return gitLabApi
+}
+
+function createGiteaApi(): WebGiteaApi {
+  const route = <Result>(method: WebGiteaRuntimeMethod, args?: unknown): Promise<Result> =>
+    callRuntimeResult<Result>(method, mapRepoPathArg(args))
+
+  const giteaApi = {
+    diagnoseAuth: () => route<WebGiteaResult<'diagnoseAuth'>>(GITEA_WEB_RPC_METHODS.diagnoseAuth),
+    listIssues: (args) =>
+      route<WebGiteaResult<'listIssues'>>(GITEA_WEB_RPC_METHODS.listIssues, args),
+    listLabels: (args) =>
+      route<WebGiteaResult<'listLabels'>>(GITEA_WEB_RPC_METHODS.listLabels, args),
+    updateIssue: (args) =>
+      route<WebGiteaResult<'updateIssue'>>(GITEA_WEB_RPC_METHODS.updateIssue, args),
+    addIssueComment: (args) =>
+      route<WebGiteaResult<'addIssueComment'>>(GITEA_WEB_RPC_METHODS.addIssueComment, args),
+    workItemDetails: (args) =>
+      route<WebGiteaResult<'workItemDetails'>>(GITEA_WEB_RPC_METHODS.workItemDetails, args),
+    workItemByPath: (args) =>
+      route<WebGiteaResult<'workItemByPath'>>(GITEA_WEB_RPC_METHODS.workItemByPath, args)
+  } satisfies WebGiteaApi
+
+  return giteaApi
 }
 
 function createRuntimeNamespaceApi(prefix: string): never {

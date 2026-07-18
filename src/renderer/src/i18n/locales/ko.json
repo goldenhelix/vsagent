@@ -12938,7 +12938,9 @@
         "noGitLabMrsTitle": "GitLab MR 없음",
         "noGitLabMrsDescription": "이 필터와 일치하는 GitLab MR이 없습니다.",
         "noGitLabWorkTitle": "GitLab 작업 없음",
-        "noGitLabWorkDescription": "이 필터와 일치하는 GitLab 작업이 없습니다."
+        "noGitLabWorkDescription": "이 필터와 일치하는 GitLab 작업이 없습니다.",
+        "noGiteaIssuesTitle": "No Gitea issues",
+        "noGiteaIssuesDescription": "No Gitea issues match this filter."
       },
       "taskSourceContextSummary": {
         "sourceUnavailable": "{{value0}} 소스를 사용할 수 없음: {{value1}}",
@@ -13181,6 +13183,9 @@
           "undo": "실행 취소",
           "widthOption": "{{value0}} px"
         }
+      },
+      "taskPageLocalizedOptions": {
+        "gitea": "Gitea"
       }
     },
     "i18n": {

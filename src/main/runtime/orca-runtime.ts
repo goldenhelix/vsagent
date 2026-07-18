@@ -439,6 +439,15 @@ import {
 import { getGlabKnownHosts } from '../gitlab/gl-utils'
 import { getWorkItemDetails as getGitLabWorkItemDetails } from '../gitlab/work-item-details'
 import {
+  getGiteaIssueDetails,
+  getGiteaWorkItemByPath as getGiteaIssueWorkItem,
+  listGiteaIssues,
+  listGiteaLabels,
+  type GiteaIssueListState
+} from '../gitea/issues'
+import { addGiteaIssueComment, updateGiteaIssue } from '../gitea/issue-mutations'
+import { getGiteaAuthStatus } from '../gitea/client'
+import {
   normalizeGitLabIssueListArgs,
   normalizeGitLabMRListState,
   normalizeGitLabPositiveInteger,
@@ -14056,6 +14065,113 @@ export class OrcaRuntimeService {
       )
     }
     return result
+  }
+
+  async listGiteaRepoIssues(
+    repoSelector: string,
+    state?: GiteaIssueListState,
+    assignee?: string,
+    limit?: number
+  ): Promise<{
+    items: GitLabWorkItem[]
+    error?: Awaited<ReturnType<typeof listGiteaIssues>>['error']
+  }> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    // Why: Gitea issue filters reuse GitLab's opened/closed/all + "@me" contract
+    // so the Task page source lookup is shared between the two providers.
+    const normalized = normalizeGitLabIssueListArgs({ state, assignee, limit })
+    const result = await listGiteaIssues(
+      repo.path,
+      normalized.limit,
+      normalized.state,
+      normalized.assignee,
+      repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+    // Why: Gitea issue rows share the GitLabWorkItem shape with GitLab on the
+    // Task page; stamp Orca's repo.id here (the client stays repo-id agnostic).
+    const items: GitLabWorkItem[] = result.items.map((issue) => ({
+      id: `gitea-issue-${repo.id}-${issue.number}`,
+      type: 'issue' as const,
+      number: issue.number,
+      title: issue.title,
+      state: issue.state,
+      url: issue.url,
+      labels: issue.labels,
+      updatedAt: issue.updatedAt ?? '',
+      author: issue.author ?? null,
+      repoId: repo.id
+    }))
+    return { items, ...(result.error ? { error: result.error } : {}) }
+  }
+
+  async diagnoseGiteaAuth(): Promise<Awaited<ReturnType<typeof getGiteaAuthStatus>>> {
+    return getGiteaAuthStatus()
+  }
+
+  async listGiteaRepoLabels(repoSelector: string): Promise<string[]> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return listGiteaLabels(
+      repo.path,
+      repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async updateGiteaRepoIssue(
+    repoSelector: string,
+    issueNumber: number,
+    updates: GitLabIssueUpdate
+  ): Promise<Awaited<ReturnType<typeof updateGiteaIssue>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return updateGiteaIssue(
+      repo.path,
+      issueNumber,
+      updates,
+      repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async addGiteaRepoIssueComment(
+    repoSelector: string,
+    issueNumber: number,
+    body: string
+  ): Promise<Awaited<ReturnType<typeof addGiteaIssueComment>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return addGiteaIssueComment(
+      repo.path,
+      issueNumber,
+      body,
+      repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async getGiteaRepoWorkItemDetails(
+    repoSelector: string,
+    iid: number
+  ): Promise<Awaited<ReturnType<typeof getGiteaIssueDetails>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return getGiteaIssueDetails(
+      repo.path,
+      iid,
+      repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async getGiteaRepoWorkItemByPath(
+    repoSelector: string,
+    iid: number
+  ): Promise<Awaited<ReturnType<typeof getGiteaIssueWorkItem>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return getGiteaIssueWorkItem(
+      repo.path,
+      iid,
+      repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
   }
 
   async getRepoIssue(

@@ -410,6 +410,17 @@ function getGitLabWorkItemWorkspaceSeed(item: GitLabWorkItem): string {
   )
 }
 
+function getGiteaWorkItemWorkspaceSeed(item: GitLabWorkItem): string {
+  return (
+    getLinkedWorkItemWorkspaceName({
+      type: item.type,
+      provider: 'gitea',
+      number: item.number,
+      title: item.title
+    })?.seedName ?? getLinkedWorkItemSuggestedName(item)
+  )
+}
+
 function getJiraIssueWorkspaceSeed(issue: JiraIssue): string {
   return (
     getLinkedWorkItemWorkspaceName({
@@ -424,7 +435,7 @@ function getJiraIssueWorkspaceSeed(issue: JiraIssue): string {
 
 function getTaskPageRepoSourceContext(
   repo: Repo | null | undefined,
-  provider: 'github' | 'gitlab',
+  provider: 'github' | 'gitlab' | 'gitea',
   gitlabProjectRef?: GitLabProjectRef | null
 ): TaskSourceContext | null {
   if (!repo) {
@@ -3237,6 +3248,10 @@ export default function TaskPage(): React.JSX.Element {
         preferredVisibleTaskProviders,
         {
           gitlabInstalled: preflightStatusCurrent && preflightStatus?.glab?.installed === true,
+          // Why: Gitea is available once a token is configured (ORCA_GITEA_TOKEN);
+          // per-repo "has a Gitea remote" is surfaced as an availability notice.
+          giteaConfigured:
+            preflightStatusCurrent && preflightStatus?.gitea?.tokenConfigured === true,
           linearConnected: linearConnected === true
         },
         defaultTaskSource
@@ -3246,7 +3261,8 @@ export default function TaskPage(): React.JSX.Element {
       linearConnected,
       preferredVisibleTaskProviders,
       preflightStatusCurrent,
-      preflightStatus?.glab?.installed
+      preflightStatus?.glab?.installed,
+      preflightStatus?.gitea?.tokenConfigured
     ]
   )
   const sourceOptions = getSourceOptions()
@@ -3316,7 +3332,7 @@ export default function TaskPage(): React.JSX.Element {
   )
   const taskSourceRepoContexts = useMemo(
     () =>
-      taskSource === 'github' || taskSource === 'gitlab'
+      taskSource === 'github' || taskSource === 'gitlab' || taskSource === 'gitea'
         ? selectedRepos
             .map((repo) => getTaskPageRepoSourceContext(repo, taskSource))
             .filter((context): context is TaskSourceContext => context !== null)
@@ -3350,7 +3366,7 @@ export default function TaskPage(): React.JSX.Element {
     [hostRegistryById]
   )
   const runtimeTaskSourceHostIds = useMemo(() => {
-    if (taskSource !== 'github' && taskSource !== 'gitlab') {
+    if (taskSource !== 'github' && taskSource !== 'gitlab' && taskSource !== 'gitea') {
       return []
     }
     const hostIds = new Set<TaskSourceContext['hostId']>()
@@ -3423,7 +3439,8 @@ export default function TaskPage(): React.JSX.Element {
   }, [runtimeTaskSourceHostIds])
   const getTaskPickerRepoHostLabel = useCallback(
     (repo: Repo): string | null => {
-      const provider = taskSource === 'gitlab' ? 'gitlab' : 'github'
+      const provider =
+        taskSource === 'gitlab' ? 'gitlab' : taskSource === 'gitea' ? 'gitea' : 'github'
       const context = getTaskPageRepoSourceContext(repo, provider)
       const hostId = context?.hostId ?? repo.executionHostId ?? 'local'
       return hostRegistryById.get(hostId)?.label ?? null
@@ -3431,7 +3448,7 @@ export default function TaskPage(): React.JSX.Element {
     [hostRegistryById, taskSource]
   )
   const taskSourceHostAvailability = useMemo<TaskSourceHostAvailability[]>(() => {
-    if (taskSource !== 'github' && taskSource !== 'gitlab') {
+    if (taskSource !== 'github' && taskSource !== 'gitlab' && taskSource !== 'gitea') {
       return []
     }
     return [
@@ -3536,7 +3553,7 @@ export default function TaskPage(): React.JSX.Element {
     Partial<Record<TaskProvider, TaskSourceAvailabilityNotice>>
   >(() => {
     const availabilityForContexts = (
-      provider: Extract<TaskProvider, 'github' | 'gitlab'>,
+      provider: Extract<TaskProvider, 'github' | 'gitlab' | 'gitea'>,
       contexts: readonly TaskSourceContext[]
     ): TaskSourceHostAvailability[] => [
       ...contexts.flatMap((context) => {
@@ -3582,6 +3599,18 @@ export default function TaskPage(): React.JSX.Element {
             'gitlab',
             selectedRepos
               .map((repo) => getTaskPageRepoSourceContext(repo, 'gitlab'))
+              .filter((context): context is TaskSourceContext => context !== null)
+          )
+        }) ?? undefined,
+      gitea:
+        getTaskSourceAvailabilityNotice({
+          providerLabel: labelFor('gitea'),
+          sourceCount: selectedRepos.length,
+          hostLabelById,
+          hostAvailability: availabilityForContexts(
+            'gitea',
+            selectedRepos
+              .map((repo) => getTaskPageRepoSourceContext(repo, 'gitea'))
               .filter((context): context is TaskSourceContext => context !== null)
           )
         }) ?? undefined,
@@ -3741,14 +3770,21 @@ export default function TaskPage(): React.JSX.Element {
   const [gitlabView, setGitlabView] = useState<'issues' | 'mrs' | 'todos'>('mrs')
   const [gitlabTodos, setGitlabTodos] = useState<GitLabTodo[]>([])
   const [gitlabTodosLoading, setGitlabTodosLoading] = useState(false)
+  // Why: Gitea is issues-only on the Task page; force the shared GitLab view to
+  // 'issues' so the MR/todos sub-views and their fetches never run for Gitea.
+  useEffect(() => {
+    if (taskSource === 'gitea' && gitlabView !== 'issues') {
+      setGitlabView('issues')
+    }
+  }, [taskSource, gitlabView])
   const gitlabEmptyState = useMemo(
     () =>
       getRepoBackedTaskEmptyState({
-        provider: 'gitlab',
+        provider: taskSource === 'gitea' ? 'gitea' : 'gitlab',
         selectedRepoCount: selectedRepos.length,
         gitlabView
       }),
-    [gitlabView, selectedRepos.length]
+    [taskSource, gitlabView, selectedRepos.length]
   )
 
   const gitlabFilterIsValid =
@@ -3911,15 +3947,23 @@ export default function TaskPage(): React.JSX.Element {
     if (!gitlabDialogItem) {
       return null
     }
+    // Why: Gitea shares this GitLab dialog state; keep the source-context
+    // provider aligned with the active tab so the dialog routes to gitea.*.
+    const workItemProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
     if (
-      pageData.openGitLabSourceContext?.provider === 'gitlab' &&
+      pageData.openGitLabSourceContext?.provider === workItemProvider &&
       pageData.openGitLabWorkItem?.id === gitlabDialogItem.id &&
       pageData.openGitLabWorkItem.repoId === gitlabDialogItem.repoId
     ) {
       return pageData.openGitLabSourceContext
     }
-    return getTaskPageRepoSourceContext(gitlabDialogRepo, 'gitlab', gitlabDialogItem.projectRef)
+    return getTaskPageRepoSourceContext(
+      gitlabDialogRepo,
+      workItemProvider,
+      gitlabDialogItem.projectRef
+    )
   }, [
+    taskSource,
     gitlabDialogItem,
     gitlabDialogRepo,
     pageData.openGitLabSourceContext,
@@ -3965,21 +4009,24 @@ export default function TaskPage(): React.JSX.Element {
 
   const openGitLabDetailPage = useCallback(
     (item: GitLabWorkItem) => {
+      // Why: Gitea reuses this GitLab detail flow; preserve the active tab so a
+      // Gitea row doesn't bounce the source selector back to GitLab.
+      const workItemProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
       openTaskPage(
         {
-          taskSource: 'gitlab',
+          taskSource: workItemProvider,
           preselectedRepoId: item.repoId,
           openGitLabWorkItem: item,
           openGitLabSourceContext: getTaskPageRepoSourceContext(
             repoMap.get(item.repoId),
-            'gitlab',
+            workItemProvider,
             item.projectRef
           )
         },
         { recordTasksInteraction: false }
       )
     },
-    [openTaskPage, repoMap]
+    [openTaskPage, repoMap, taskSource]
   )
 
   const patchTaskPageWorkItemRows = useCallback(
@@ -4929,19 +4976,28 @@ export default function TaskPage(): React.JSX.Element {
   // errors are isolated per tab and the backend doesn't need a combined
   // merge+sort that can hide failures.
   useEffect(() => {
-    if (taskSource !== 'gitlab') {
+    // Why: Gitea reuses this GitLab list state/effect but is issues-only, so it
+    // shares the 'issues' view path and routes to the gitea preload namespace.
+    if (taskSource !== 'gitlab' && taskSource !== 'gitea') {
       return
     }
-    if (gitlabView === 'todos') {
+    // Why: Gitea is issues-only; pin the view so a stale 'mrs'/'todos' value
+    // (before the view-sync effect runs) can't trigger a GitLab MR/todo fetch.
+    const effectiveGitlabView = taskSource === 'gitea' ? 'issues' : gitlabView
+    if (effectiveGitlabView === 'todos') {
       return
     }
     const activeIssueFilter =
-      gitlabView === 'issues' && isGitLabIssueFilter(activeGitlabFilter) ? activeGitlabFilter : null
+      effectiveGitlabView === 'issues' && isGitLabIssueFilter(activeGitlabFilter)
+        ? activeGitlabFilter
+        : null
     const activeMRFilter =
-      gitlabView === 'mrs' && isGitLabMRFilter(activeGitlabFilter) ? activeGitlabFilter : null
+      effectiveGitlabView === 'mrs' && isGitLabMRFilter(activeGitlabFilter)
+        ? activeGitlabFilter
+        : null
     if (
-      (gitlabView === 'issues' && !activeIssueFilter) ||
-      (gitlabView === 'mrs' && !activeMRFilter)
+      (effectiveGitlabView === 'issues' && !activeIssueFilter) ||
+      (effectiveGitlabView === 'mrs' && !activeMRFilter)
     ) {
       return
     }
@@ -4958,15 +5014,17 @@ export default function TaskPage(): React.JSX.Element {
     setGitlabLoading(true)
     setGitlabError(null)
 
+    const issueProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
+    const issueApi = taskSource === 'gitea' ? window.api.gitea : window.api.gl
     const fetchItems =
-      gitlabView === 'issues'
+      effectiveGitlabView === 'issues'
         ? (repo: (typeof eligibleRepos)[0]) => {
             const isAssignedToMe = activeIssueFilter === 'assigned-to-me'
-            return window.api.gl
+            return issueApi
               .listIssues({
                 repoPath: repo.path,
                 repoId: repo.id,
-                sourceContext: getTaskPageRepoSourceContext(repo, 'gitlab'),
+                sourceContext: getTaskPageRepoSourceContext(repo, issueProvider),
                 state: 'opened',
                 assignee: isAssignedToMe ? '@me' : undefined,
                 limit: 50
@@ -6810,8 +6868,13 @@ export default function TaskPage(): React.JSX.Element {
 
   const openComposerForGitLabItem = useCallback(
     (item: GitLabWorkItem): void => {
+      // Why: Gitea reuses this GitLab "start work" flow; stamp the linked task +
+      // source context with the active provider so the persisted worktree link
+      // and later lookups target the right forge.
+      const workItemProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
       const linkedWorkItem: LinkedWorkItemSummary = {
         type: item.type,
+        provider: workItemProvider,
         number: item.number,
         title: item.title,
         url: item.url
@@ -6820,15 +6883,18 @@ export default function TaskPage(): React.JSX.Element {
         linkedWorkItem,
         taskSourceContext: getTaskPageRepoSourceContext(
           repoMap.get(item.repoId),
-          'gitlab',
+          workItemProvider,
           item.projectRef
         ),
-        prefilledName: getGitLabWorkItemWorkspaceSeed(item),
+        prefilledName:
+          workItemProvider === 'gitea'
+            ? getGiteaWorkItemWorkspaceSeed(item)
+            : getGitLabWorkItemWorkspaceSeed(item),
         initialRepoId: item.repoId,
         telemetrySource: 'sidebar'
       })
     },
-    [openModal, repoMap]
+    [openModal, repoMap, taskSource]
   )
 
   const handleUseGitLabItem = useCallback(
@@ -9070,31 +9136,35 @@ export default function TaskPage(): React.JSX.Element {
                       </div>
                     </div>
                   </div>
-                ) : taskSource === 'gitlab' ? (
+                ) : taskSource === 'gitlab' || taskSource === 'gitea' ? (
                   <>
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <div className="flex items-center gap-1 text-xs">
-                        {(['issues', 'mrs', 'todos'] as const).map((view) => {
-                          const active = gitlabView === view
-                          const label =
-                            view === 'issues' ? 'Issues' : view === 'mrs' ? 'MRs' : 'My Todos'
-                          return (
-                            <button
-                              key={view}
-                              type="button"
-                              onClick={() => setGitlabView(view)}
-                              className={cn(
-                                'rounded-md border px-2.5 py-1 text-xs transition',
-                                active
-                                  ? 'border-foreground/40 bg-foreground/90 text-background'
-                                  : 'border-border/50 bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                              )}
-                            >
-                              {label}
-                            </button>
-                          )
-                        })}
-                      </div>
+                      {/* Why: Gitea is issues-only, so hide the GitLab issues/MRs/todos
+                          view switch and show just the issue list. */}
+                      {taskSource === 'gitea' ? null : (
+                        <div className="flex items-center gap-1 text-xs">
+                          {(['issues', 'mrs', 'todos'] as const).map((view) => {
+                            const active = gitlabView === view
+                            const label =
+                              view === 'issues' ? 'Issues' : view === 'mrs' ? 'MRs' : 'My Todos'
+                            return (
+                              <button
+                                key={view}
+                                type="button"
+                                onClick={() => setGitlabView(view)}
+                                className={cn(
+                                  'rounded-md border px-2.5 py-1 text-xs transition',
+                                  active
+                                    ? 'border-foreground/40 bg-foreground/90 text-background'
+                                    : 'border-border/50 bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                                )}
+                              >
+                                {label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
                       <div className="min-w-0 w-full sm:w-[200px]">
                         <TaskProjectSourceCombobox
                           groups={taskPickerGroups}
@@ -9900,7 +9970,7 @@ export default function TaskPage(): React.JSX.Element {
                 </div>
               </div>
             </div>
-          ) : taskSource === 'gitlab' ? (
+          ) : taskSource === 'gitlab' || taskSource === 'gitea' ? (
             <div className="flex min-h-0 max-h-full flex-col rounded-md border border-t-0 border-border/50 bg-muted/50 overflow-hidden rounded-t-none shadow-sm">
               <div className="flex-none grid grid-cols-[80px_minmax(0,3fr)_120px_110px_50px] gap-3 border-b border-border/50 px-3 py-2 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
                 <span>{translate('auto.components.TaskPage.eb10c32872', 'ID')}</span>
@@ -12644,6 +12714,9 @@ export default function TaskPage(): React.JSX.Element {
         repoPath={gitlabDialogRepo?.path ?? null}
         repoId={gitlabDialogItem?.repoId ?? null}
         sourceContext={gitlabDialogSourceContext}
+        // Why: Gitea reuses this dialog; route its issue detail/comment calls to
+        // the gitea preload namespace instead of gl.*.
+        provider={gitlabDialogSourceContext?.provider === 'gitea' ? 'gitea' : 'gitlab'}
         onCreateWorkspace={(item) => {
           setGitlabDialogItem(null)
           handleUseGitLabItem(item)
