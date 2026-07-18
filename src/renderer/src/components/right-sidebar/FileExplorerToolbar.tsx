@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { WorktreeOpenInMenuItems } from '@/components/sidebar/WorktreeOpenInMenu'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
 
@@ -169,7 +170,9 @@ export function FileExplorerToolbar({
               )}
             </DropdownMenuCheckboxItem>
           ) : null}
-          <DropdownMenuSeparator />
+          {/* Why (VSAgent web): the "Open in" entries render nothing in the
+              browser client, so drop their separator to avoid an orphan divider. */}
+          {!isVSAgentWebMode() && <DropdownMenuSeparator />}
           <WorktreeOpenInMenuItems
             worktreePath={worktreePath}
             connectionId={connectionId}

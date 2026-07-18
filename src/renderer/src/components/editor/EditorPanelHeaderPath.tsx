@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 import type { OpenFile } from '@/store/slices/editor'
 import { CLOSE_ALL_CONTEXT_MENUS_EVENT } from '../tab-bar/SortableTab'
@@ -192,8 +193,10 @@ export function EditorPanelHeaderPath({
               <DropdownMenuShortcut>{markdownPreviewShortcutLabel}</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
-          {canShowMarkdownPreview && <DropdownMenuSeparator />}
-          {!isVirtualEditorTab && (
+          {/* Why (VSAgent web): reveal opens the server host's file manager, which
+              is meaningless from the browser client — hide it and its separator. */}
+          {canShowMarkdownPreview && !isVSAgentWebMode() && <DropdownMenuSeparator />}
+          {!isVirtualEditorTab && !isVSAgentWebMode() && (
             <DropdownMenuItem onSelect={onOpenContainingFolder}>
               <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
               {revealLabel}

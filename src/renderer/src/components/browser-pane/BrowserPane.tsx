@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { getConnectionId } from '@/lib/connection-context'
 import { detectLanguage } from '@/lib/language-detect'
@@ -5317,28 +5318,41 @@ function BrowserPagePane({
                       </Button>
                     ) : download.status === 'completed' ? (
                       <>
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          className="h-6 shrink-0 gap-1"
-                          onClick={() => {
-                            void handleOpenDownloadedFile(download)
-                          }}
-                        >
-                          <ExternalLink className="size-3" />
-                          {translate('auto.components.browser.pane.BrowserPane.756bfc25c9', 'Open')}
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          className="h-6 shrink-0 gap-1"
-                          onClick={() => {
-                            void handleShowDownloadedFile(download)
-                          }}
-                        >
-                          <FolderOpen className="size-3" />
-                          {translate('auto.components.browser.pane.BrowserPane.09a9489aa5', 'Show')}
-                        </Button>
+                        {/* Why (VSAgent web): downloads land on the server host, so
+                            opening/revealing them there is meaningless from the
+                            browser client — hide both; "Dismiss" stays. */}
+                        {!isVSAgentWebMode() && (
+                          <>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className="h-6 shrink-0 gap-1"
+                              onClick={() => {
+                                void handleOpenDownloadedFile(download)
+                              }}
+                            >
+                              <ExternalLink className="size-3" />
+                              {translate(
+                                'auto.components.browser.pane.BrowserPane.756bfc25c9',
+                                'Open'
+                              )}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              className="h-6 shrink-0 gap-1"
+                              onClick={() => {
+                                void handleShowDownloadedFile(download)
+                              }}
+                            >
+                              <FolderOpen className="size-3" />
+                              {translate(
+                                'auto.components.browser.pane.BrowserPane.09a9489aa5',
+                                'Show'
+                              )}
+                            </Button>
+                          </>
+                        )}
                         <Button
                           size="icon-xs"
                           variant="ghost"

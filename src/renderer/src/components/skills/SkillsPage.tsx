@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { useAppStore } from '@/store'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import type {
@@ -97,24 +98,26 @@ function SkillCard({ skill }: { skill: DiscoveredSkill }): React.JSX.Element {
               </p>
             )}
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="shrink-0"
-                onClick={() => {
-                  void revealSkill()
-                }}
-              >
-                <FolderOpen className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>
-              {translate('auto.components.skills.SkillsPage.dc4c3328ee', 'Reveal file')}
-            </TooltipContent>
-          </Tooltip>
+          {/* Why (VSAgent web): reveal opens the server host's file manager, which
+              is meaningless from the browser client — hide the button there. */}
+          {!isVSAgentWebMode() && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0"
+                  onClick={() => void revealSkill()}
+                >
+                  <FolderOpen className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>
+                {translate('auto.components.skills.SkillsPage.dc4c3328ee', 'Reveal file')}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <div className="grid gap-2 text-[11px] text-muted-foreground md:grid-cols-[1fr_auto_auto] md:items-center">

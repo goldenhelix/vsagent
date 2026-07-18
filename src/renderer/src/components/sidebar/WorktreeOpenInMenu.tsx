@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAppStore } from '@/store'
 import { isLocalPathOpenBlocked, showLocalPathOpenBlockedToast } from '@/lib/local-path-open-guard'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { getLocalFileManagerLabel } from '@/lib/local-file-manager-label'
 import { OpenInApplicationIcon } from '@/lib/open-in-app-catalog'
 import type { ShellOpenLocalPathFailureReason } from '../../../../shared/shell-open-types'
@@ -144,9 +145,14 @@ export function WorktreeOpenInMenuItems({
   connectionId,
   disabled,
   labelPrefix = ''
-}: WorktreeOpenInMenuItemsProps): React.JSX.Element {
+}: WorktreeOpenInMenuItemsProps): React.JSX.Element | null {
   const openInWorktreePath = useOpenInWorktreePath({ worktreePath, connectionId })
   const openInApplications = useAppStore((s) => s.settings?.openInApplications ?? [])
+  // Why (VSAgent web): these entries launch editors/file managers on the server
+  // host, which is meaningless from the browser client — render nothing there.
+  if (isVSAgentWebMode()) {
+    return null
+  }
   const fileManagerLabel = getLocalFileManagerLabel()
   const entries = getWorktreeOpenInEntries(openInApplications, fileManagerLabel)
 
@@ -180,7 +186,12 @@ export function WorktreeOpenInSubMenu({
   worktreePath,
   connectionId,
   disabled
-}: WorktreeOpenInMenuItemsProps): React.JSX.Element {
+}: WorktreeOpenInMenuItemsProps): React.JSX.Element | null {
+  // Why (VSAgent web): hide the whole "Open in" submenu (server-side editors and
+  // file manager) in the browser client.
+  if (isVSAgentWebMode()) {
+    return null
+  }
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger disabled={disabled}>

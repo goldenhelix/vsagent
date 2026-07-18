@@ -48,6 +48,7 @@ import { STATUS_LABELS } from './status-display'
 import type { TreeNode } from './file-explorer-types'
 import { useFileExplorerRowDrag } from './useFileExplorerRowDrag'
 import { isLocalPathOpenBlocked, showLocalPathOpenBlockedToast } from '@/lib/local-path-open-guard'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
 import { CLOSE_ALL_CONTEXT_MENUS_EVENT } from '@/components/tab-bar/SortableTab'
@@ -778,29 +779,33 @@ export function FileExplorerRow({
             ) : null}
           </ContextMenuItem>
         )}
-        <ContextMenuItem
-          onSelect={() => {
-            const state = useAppStore.getState()
-            const activeWorktree = Object.values(state.worktreesByRepo)
-              .flat()
-              .find((worktree) => worktree.id === activeWorktreeId)
-            const activeRepo = activeWorktree
-              ? state.repos.find((repo) => repo.id === activeWorktree.repoId)
-              : null
-            if (
-              isLocalPathOpenBlocked(state.settings, {
-                connectionId: activeRepo?.connectionId ?? null
-              })
-            ) {
-              showLocalPathOpenBlockedToast()
-              return
-            }
-            window.api.shell.openPath(node.path)
-          }}
-        >
-          <ExternalLink />
-          {revealLabel}
-        </ContextMenuItem>
+        {/* Why (VSAgent web): reveal opens the server host's file manager, which
+            is meaningless from the browser client — hide it there. */}
+        {!isVSAgentWebMode() && (
+          <ContextMenuItem
+            onSelect={() => {
+              const state = useAppStore.getState()
+              const activeWorktree = Object.values(state.worktreesByRepo)
+                .flat()
+                .find((worktree) => worktree.id === activeWorktreeId)
+              const activeRepo = activeWorktree
+                ? state.repos.find((repo) => repo.id === activeWorktree.repoId)
+                : null
+              if (
+                isLocalPathOpenBlocked(state.settings, {
+                  connectionId: activeRepo?.connectionId ?? null
+                })
+              ) {
+                showLocalPathOpenBlockedToast()
+                return
+              }
+              window.api.shell.openPath(node.path)
+            }}
+          >
+            <ExternalLink />
+            {revealLabel}
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => onStartRename(node)}>
           <Pencil />

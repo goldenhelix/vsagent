@@ -12,6 +12,7 @@ import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { SetupGuideSidebarEntry } from './SetupGuideSidebarEntry'
 import { SidebarTaskNavButton } from './SidebarTaskNavButton'
 import { HideSidebarMenu } from './sidebar-nav-controls'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 
 export { getSetupGuideSidebarEntryReady, shouldShowSetupGuideEntry } from './SetupGuideSidebarEntry'
@@ -25,7 +26,10 @@ export function shouldShowAgentsButton(
 export function shouldShowMobileButton(
   settings: Pick<GlobalSettings, 'showMobileButton'> | null | undefined
 ): boolean {
-  return settings?.showMobileButton !== false
+  // Why (VSAgent web): the "Orca Mobile" nav entry opens the desktop-host pairing/
+  // companion panel, which is noise in the browser client — hide it there, reusing
+  // the existing sidebar-visibility gate.
+  return !isVSAgentWebMode() && settings?.showMobileButton !== false
 }
 
 export function shouldShowAutomationsButton(
