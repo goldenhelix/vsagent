@@ -1,0 +1,315 @@
+# Installing VSAgent on Linux
+
+VSAgent ships upstream Orca's native `serve` mode as a self-hosted Linux x64
+web service. A single Electron process runs headless on the server; it exposes
+one port that carries both the runtime WebSocket API and the browser web
+client (`/web-index.html`). Users open VSAgent in any browser — no desktop app
+to distribute.
+
+This page covers:
+
+- How access works (pairing URLs)
+- The one-liner install
+- Manual install (download + extract)
+- Upgrade flow
+- Managing the systemd user service
+- Firewall + reverse-proxy notes
+
+## How access works: pairing URLs
+
+On every start, `serve` prints two lines:
+
+```
+Orca server ready: ws://0.0.0.0:6768
+Web client URL: http://<host>:6768/web-index.html#pairing=<token…>
+```
+
+The **web client URL embeds a pairing token** in the URL fragment (it never
+hits proxy logs or Referer headers). Opening it in a browser pairs that
+browser with the server.
+
+- Each `serve` start mints a **new** pairing offer, so the printed URL differs
+  across restarts.
+- Browsers that already paired **stay valid** across restarts — you only need
+  the current URL to pair a *new* browser/device.
+- The launcher records the most recent URL to
+  `${XDG_STATE_HOME:-~/.local/state}/vsagent/web-url`, so you can always
+  recover it without scrolling journald:
+
+```bash
+cat ~/.local/state/vsagent/web-url
+```
+
+## Prerequisites
+
+- Linux x64 (Debian 12+ / Ubuntu 22.04+ / RHEL 9+; glibc new enough for
+  Electron 43)
+- **Node.js 24** (`node --version`) — used for `pnpm install` and the native
+  rebuild; the running service uses the bundled Electron binary
+- `pnpm` — bootstrapped automatically by the installer via corepack if absent
+- A build toolchain (`gcc`, `g++`, `make`, `python3`) — `node-pty` is rebuilt
+  against the bundled Electron ABI on install
+- Electron's shared libraries. On Debian/Ubuntu:
+
+  ```bash
+  sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libgtk-3-0 libasound2t64 unzip
+  ```
+
+- **Xvfb — optional but recommended.** With Xvfb installed
+  (`sudo apt-get install xvfb`), serve runs a virtual display and in-app
+  browser panes work. Without it, serve falls back to a display-less headless
+  boot: terminals and agents work fully, browser panes are off.
+- Outbound HTTPS to `github.com` for the download step
+- Port 6768 reachable from the user's network (override with `--port`)
+
+## One-liner install
+
+```bash
+curl -fsSL https://github.com/goldenhelix/vsagent/releases/latest/download/install.sh | bash
+```
+
+The script:
+
+1. Downloads the latest `vsagent-linux-x64-*.tar.gz` from GitHub Releases.
+2. Unpacks it into `~/.local/share/vsagent`.
+3. Runs `pnpm install --prod` to materialise `node_modules`, fetch the
+   Electron binary, and rebuild `node-pty` against Electron's ABI.
+4. Symlinks `~/.local/bin/vsagent` (serve launcher) and `~/.local/bin/orca`
+   (the Orca CLI).
+5. Writes a systemd **user** unit at `~/.config/systemd/user/vsagent.service`,
+   starts it, and prints the tokenized web client URL.
+
+### Flags
+
+Pass flags by feeding the script directly:
+
+```bash
+curl -fsSL https://github.com/goldenhelix/vsagent/releases/latest/download/install.sh \
+  | bash -s -- --port=9000 --no-systemd
+```
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--version=vX.Y.Z` | latest | Pin to a specific release tag. Accepts `v1.2.3` or `1.2.3`. |
+| `--port=N` | `6768` | The serve port (WebSocket runtime + web client over HTTP, same port). Becomes `VSAGENT_PORT`. |
+| `--pairing-address=HOST` | auto | Hostname/IP written into printed pairing / web client URLs. Set it to the DNS name users will actually reach (e.g. behind a proxy). Becomes `VSAGENT_PAIRING_ADDRESS`. |
+| `--install-dir=DIR` | `~/.local/share/vsagent` | Where the unpacked tarball lives. Also `VSAGENT_HOME` env. |
+| `--repo=owner/repo` | `goldenhelix/vsagent` | Override the release source (forks / mirrors). |
+| `--no-systemd` | off | Skip writing/enabling the unit. Run under tmux, supervisord, etc. |
+| `--no-start` | off | Don't start the service at the end. |
+
+Note: serve binds `0.0.0.0` on the chosen port. Restrict exposure with a
+firewall or a reverse proxy (below); `--pairing-address` only changes the
+address *advertised* in URLs, not the bind.
+
+### Running long after logout
+
+systemd user services stop when your last login session ends, unless
+**lingering** is enabled. One-time, requires sudo:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+## Manual install
+
+```bash
+# 1. Pick a version
+TAG=v0.6.0
+VER=${TAG#v}
+
+# 2. Download + verify
+curl -fSL -o vsagent.tar.gz \
+  https://github.com/goldenhelix/vsagent/releases/download/$TAG/vsagent-linux-x64-${VER}.tar.gz
+curl -fSL -o vsagent.tar.gz.sha256 \
+  https://github.com/goldenhelix/vsagent/releases/download/$TAG/vsagent-linux-x64-${VER}.tar.gz.sha256
+sha256sum -c vsagent.tar.gz.sha256
+
+# 3. Extract (the tarball contains a vsagent/ top-level dir)
+mkdir -p ~/.local/share
+tar -xzf vsagent.tar.gz -C ~/.local/share
+
+# 4. Install runtime deps (one-time per host / per upgrade)
+cd ~/.local/share/vsagent
+pnpm install --prod --no-frozen-lockfile
+
+# 5. Run (prints the web client URL on startup)
+VSAGENT_PORT=6768 ./scripts/vsagent-serve
+```
+
+The launcher is a thin wrapper around:
+
+```bash
+cd <install-dir>
+node_modules/electron/dist/electron <install-dir> --serve --serve-port $VSAGENT_PORT \
+  [--serve-pairing-address $VSAGENT_PAIRING_ADDRESS]
+```
+
+plus capture of the printed `Web client URL:` line into
+`${XDG_STATE_HOME:-~/.local/state}/vsagent/web-url`. Pass `--json` to get the
+machine-readable ready line (`--serve-json`) instead of the human output.
+
+To turn that into a permanent service, copy `scripts/vsagent.service`,
+substitute `__PORT__`, `__PAIRING_ADDRESS__`, and `__INSTALL_DIR__`, and drop
+it at `~/.config/systemd/user/vsagent.service`.
+
+## Tarball layout
+
+```
+vsagent/
+├── out/                 built artifacts (main, preload, renderer, cli,
+│                        shared, relay, web — web-index.html lives here)
+├── scripts/             vsagent-serve (launcher), vsagent.service (systemd
+│                        template), install.sh (upgrades)
+├── config/
+│   ├── scripts/         rebuild-native-deps.mjs + the strict Electron
+│   │                    installer (run by postinstall)
+│   └── patches/         pnpm patches (node-pty, …)
+├── resources/           runtime-loaded assets (skills metadata, icons)
+├── package.json         slimmed runtime manifest (electron is a runtime dep)
+├── pnpm-lock.yaml
+└── VERSION
+```
+
+`node_modules` is not shipped — `pnpm install --prod` builds it on the host so
+Electron and native modules match the local ABI.
+
+## Upgrades
+
+Re-run the installer:
+
+```bash
+curl -fsSL https://github.com/goldenhelix/vsagent/releases/latest/download/install.sh | bash
+```
+
+Idempotency notes:
+
+- The install dir contents are replaced wholesale, **but** `node_modules` is
+  preserved across upgrades so `pnpm install --prod` only resolves diffs.
+- The systemd unit is regenerated from the shipped template.
+- The service is restarted at the end; a fresh web client URL is printed (and
+  recorded to the state file). Already-paired browsers stay signed in.
+
+Pin a specific version with `--version=v1.2.3` to roll back.
+
+## systemd management
+
+```bash
+systemctl --user status vsagent          # current state
+systemctl --user restart vsagent         # bounce the service
+systemctl --user stop vsagent
+systemctl --user disable --now vsagent   # disable and stop
+journalctl --user -u vsagent -f          # follow logs
+cat ~/.local/state/vsagent/web-url       # current web client URL
+```
+
+The unit ships with `MemoryHigh=8G` / `MemoryMax=16G` and
+`Restart=on-failure`: a leak or crash gets the service restarted before it can
+exhaust the host. Tune the limits in
+`~/.config/systemd/user/vsagent.service` to your deployment's RAM.
+
+Server state (workspaces, settings, pairing trust) lives under Electron's
+user-data dir (`~/.config/orca` by default), not the install dir — wiping the
+install dir does not log users out.
+
+## Firewall
+
+The default port is **6768**:
+
+```bash
+# Debian / Ubuntu
+sudo ufw allow 6768/tcp
+
+# RHEL / Fedora
+sudo firewall-cmd --add-port=6768/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+For internet-facing deployments put VSAgent behind a TLS-terminating reverse
+proxy and firewall the serve port so it's only reachable from the proxy.
+
+## Reverse proxy (nginx)
+
+Everything (runtime WebSocket + web client HTTP) is on the one serve port, so
+a single proxied location with WebSocket upgrade headers suffices. Set
+`--pairing-address=vsagent.example.com` at install time so printed URLs point
+at the proxy:
+
+```nginx
+upstream vsagent {
+  server 127.0.0.1:6768;
+  keepalive 32;
+}
+
+server {
+  listen 443 ssl http2;
+  server_name vsagent.example.com;
+
+  ssl_certificate     /etc/letsencrypt/live/vsagent.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/vsagent.example.com/privkey.pem;
+
+  # Large terminals / file transfers benefit from a bigger buffer.
+  client_max_body_size 100m;
+  proxy_read_timeout 1d;
+  proxy_send_timeout 1d;
+
+  location / {
+    proxy_pass http://vsagent;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # WebSocket upgrade
+    proxy_set_header Upgrade    $http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
+}
+```
+
+The web client is built with relative asset URLs, so serving it under a path
+prefix (e.g. `location /vsagent/`) also works.
+
+## Uninstall
+
+```bash
+systemctl --user disable --now vsagent
+rm -f ~/.config/systemd/user/vsagent.service
+systemctl --user daemon-reload
+
+rm -rf ~/.local/share/vsagent
+rm -f  ~/.local/bin/vsagent ~/.local/bin/orca
+rm -rf ~/.local/state/vsagent
+
+# Optional: drop server state too. WARNING: deletes all workspaces,
+# settings, and pairing trust.
+rm -rf ~/.config/orca
+```
+
+## Troubleshooting
+
+- **"The SUID sandbox helper binary was found, but is not configured
+  correctly" / instant crash at boot** — the kernel restricts unprivileged
+  user namespaces (Ubuntu 24.04 AppArmor default). Either
+  `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (persist in
+  `/etc/sysctl.d/`), or run the service with `ELECTRON_DISABLE_SANDBOX=1` in
+  the unit's `Environment=` lines.
+- **"node-pty was compiled against a different Node.js version"** — re-run
+  `pnpm install --prod` inside the install dir; its postinstall rebuilds
+  node-pty against the bundled Electron ABI.
+- **"Electron failed to install correctly"** — re-run `pnpm install --prod`;
+  the shipped postinstall runs a strict Electron installer that re-downloads
+  and repairs a partial install (it needs `unzip` on the host).
+- **Browser panes don't open** — install Xvfb
+  (`sudo apt-get install xvfb`) and restart the service; look for the
+  `[serve] Xvfb not found` warning in journald to confirm this is the cause.
+- **Lost the web client URL** — `cat ~/.local/state/vsagent/web-url`, or
+  `journalctl --user -u vsagent | grep "Web client URL"`.
+- **Address already in use** — another process owns the port. Pick a new one
+  (`--port=9000` and re-run the installer) or stop the other process.
+- **`node not found`** — install Node 24 first (e.g. via NodeSource:
+  `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash -` then
+  `sudo apt install nodejs`) and re-run the installer.

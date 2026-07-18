@@ -8,6 +8,12 @@ import { createServer as createHttpServer, type Server as HttpServer } from 'nod
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { RpcTransport } from './transport'
 import { createStaticWebClientHandler } from './static-web-client-handler'
+import {
+  attachServeUpgradeRouting,
+  composeServeRequestListener,
+  type ExtraHttpHandler,
+  type ExtraUpgradeHandler
+} from './serve-http-handler-chain'
 
 const MAX_WS_MESSAGE_BYTES = 1024 * 1024
 // Why: desktop remote-host clients can legitimately hold many concurrent
@@ -59,6 +65,11 @@ export type WebSocketTransportOptions = {
   // silently steal the pin (issue #8535). Default auto/desktop keeps
   // fallback-first for STA-1511 pairing stability.
   preferPinnedPort?: boolean
+  // Why: the webpreview reverse proxy (VSAgent fork) shares this HTTP server;
+  // it is consulted before the static web-client handler.
+  extraHttpHandler?: ExtraHttpHandler
+  // Why: webpreview WS tunnels (VNC, HMR) must bypass the RPC WebSocketServer.
+  extraUpgradeHandler?: ExtraUpgradeHandler
 }
 
 export class WebSocketTransport implements RpcTransport {
@@ -71,6 +82,8 @@ export class WebSocketTransport implements RpcTransport {
   private readonly staticRoot: string | undefined
   private readonly fallbackPort: number | undefined
   private readonly preferPinnedPort: boolean
+  private readonly extraHttpHandler: WebSocketTransportOptions['extraHttpHandler']
+  private readonly extraUpgradeHandler: WebSocketTransportOptions['extraUpgradeHandler']
   private httpServer: HttpsServer | HttpServer | null = null
   private wss: WebSocketServer | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
@@ -96,7 +109,9 @@ export class WebSocketTransport implements RpcTransport {
     preAuthTimeoutMs,
     staticRoot,
     fallbackPort,
-    preferPinnedPort
+    preferPinnedPort,
+    extraHttpHandler,
+    extraUpgradeHandler
   }: WebSocketTransportOptions) {
     this.host = host
     this.port = port
@@ -107,6 +122,8 @@ export class WebSocketTransport implements RpcTransport {
     this.staticRoot = staticRoot
     this.fallbackPort = fallbackPort
     this.preferPinnedPort = preferPinnedPort === true
+    this.extraHttpHandler = extraHttpHandler
+    this.extraUpgradeHandler = extraUpgradeHandler
   }
 
   onMessage(handler: WebSocketMessageHandler): void {
@@ -202,9 +219,10 @@ export class WebSocketTransport implements RpcTransport {
   }
 
   private createHttpServer(): HttpServer | HttpsServer {
-    const requestListener = this.staticRoot
+    const staticListener = this.staticRoot
       ? createStaticWebClientHandler(this.staticRoot)
       : undefined
+    const requestListener = composeServeRequestListener(this.extraHttpHandler, staticListener)
     return this.tlsCert && this.tlsKey
       ? createHttpsServer({ cert: this.tlsCert, key: this.tlsKey }, requestListener)
       : createHttpServer(requestListener)
@@ -224,10 +242,13 @@ export class WebSocketTransport implements RpcTransport {
       })
     })
 
+    // Why: noServer + explicit upgrade routing lets the webpreview WS tunnel
+    // claim its own upgrades; a server-attached WSS would grab every upgrade.
     const wss = new WebSocketServer({
-      server: httpServer,
+      noServer: true,
       maxPayload: MAX_WS_MESSAGE_BYTES
     })
+    attachServeUpgradeRouting(httpServer, wss, this.extraUpgradeHandler)
 
     wss.on('connection', (ws) => {
       if (wss.clients.size > MAX_WS_CONNECTIONS) {

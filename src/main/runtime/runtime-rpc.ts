@@ -16,6 +16,13 @@ import { errorResponse } from './rpc/errors'
 import type { RpcMessageContext, RpcTransport } from './rpc/transport'
 import { UnixSocketTransport } from './rpc/unix-socket-transport'
 import { WebSocketTransport } from './rpc/ws-transport'
+import {
+  handleLeakedPreviewRequest,
+  handleWebPreview,
+  handleWebPreviewUpgrade,
+  isWebPreviewPath,
+  isWebPreviewUpgrade
+} from '../webpreview/proxy'
 import { readWsFallbackPort, writeWsFallbackPort } from './rpc/ws-fallback-port-store'
 import type { WebSocket } from 'ws'
 import { DeviceRegistry, type DeviceScope } from './device-registry'
@@ -874,7 +881,25 @@ export class OrcaRuntimeRpcServer {
           // caller explicitly pinned a port (serve --port). wsPort 0 means
           // the caller wants a random port (E2E) — don't pin it.
           ...(this.wsPort !== 0 ? { fallbackPort: readWsFallbackPort(this.userDataPath) } : {}),
-          ...(this.preferPinnedWsPort ? { preferPinnedPort: true } : {})
+          ...(this.preferPinnedWsPort ? { preferPinnedPort: true } : {}),
+          // Why (VSAgent fork): the webpreview reverse proxy serves in-app
+          // browser iframes for web clients on the same origin as the web
+          // client bundle. Session ids are unguessable 128-bit capabilities
+          // minted only over the authenticated webpreview.* RPC methods.
+          extraHttpHandler: async (req, res) => {
+            if (isWebPreviewPath(req.url)) {
+              await handleWebPreview(req, res)
+              return true
+            }
+            return handleLeakedPreviewRequest(req, res)
+          },
+          extraUpgradeHandler: (req, socket, head) => {
+            if (!isWebPreviewUpgrade(req)) {
+              return false
+            }
+            handleWebPreviewUpgrade(req, socket, head)
+            return true
+          }
         })
         const mobileSocketWiring = new MobileSocketWiring({
           deviceRegistry: this.deviceRegistry,
