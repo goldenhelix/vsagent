@@ -31,8 +31,13 @@ export function deriveEndpointFromRequest(req: IncomingMessage): string | null {
   if (!host) {
     return null
   }
+  // Why: a TLS proxy advertises wss via X-Forwarded-Proto; a direct HTTPS serve
+  // (--serve-https, no proxy) has no such header, so also treat an encrypted
+  // socket as wss so browsers dial wss:// and avoid mixed-content blocking.
   const forwardedProto = headerValue(req, 'x-forwarded-proto')
-  const scheme = forwardedProto === 'https' || forwardedProto === 'wss' ? 'wss' : 'ws'
+  const directlyEncrypted = Boolean(req.socket && 'encrypted' in req.socket && req.socket.encrypted)
+  const scheme =
+    forwardedProto === 'https' || forwardedProto === 'wss' || directlyEncrypted ? 'wss' : 'ws'
   const prefix = headerValue(req, 'x-forwarded-prefix')
   const path = prefix && prefix !== '/' ? (prefix.startsWith('/') ? prefix : `/${prefix}`) : ''
   try {

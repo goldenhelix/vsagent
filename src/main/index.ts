@@ -1391,6 +1391,9 @@ type ServeOptions = {
   mobilePairing: boolean
   recipeJson: boolean
   projectRoot: string | null
+  https: boolean
+  tlsCertPath: string | null
+  tlsKeyPath: string | null
 }
 
 function getServeOptions(argv = process.argv): ServeOptions {
@@ -1418,7 +1421,13 @@ function getServeOptions(argv = process.argv): ServeOptions {
     noPairing: argv.includes('--serve-no-pairing'),
     mobilePairing: argv.includes('--serve-mobile-pairing'),
     recipeJson: argv.includes('--serve-recipe-json'),
-    projectRoot: valueAfter('--serve-project-root')
+    projectRoot: valueAfter('--serve-project-root'),
+    // Why (VSAgent fork): serve over TLS directly (wss:// + https://) so a
+    // container can expose HTTPS with no reverse proxy. Self-signed by default;
+    // --serve-cert/--serve-key supply an operator-provided certificate.
+    https: argv.includes('--serve-https'),
+    tlsCertPath: valueAfter('--serve-cert'),
+    tlsKeyPath: valueAfter('--serve-key')
   }
 }
 
@@ -2204,6 +2213,13 @@ app.whenReady().then(async () => {
           // port over a stale STA-1511 fallback (issue #8535). Default 6768 /
           // dev 6769 keep fallback-first so mobile pairings stay stable.
           preferPinnedWsPort: true
+        }
+      : {}),
+    ...(serveOptions?.https
+      ? {
+          serveTls: true,
+          ...(serveOptions.tlsCertPath ? { serveTlsCertPath: serveOptions.tlsCertPath } : {}),
+          ...(serveOptions.tlsKeyPath ? { serveTlsKeyPath: serveOptions.tlsKeyPath } : {})
         }
       : {}),
     webClientRoot: getBundledWebClientRoot()

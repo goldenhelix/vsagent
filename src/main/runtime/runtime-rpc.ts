@@ -5,7 +5,8 @@
 // one on-disk file. Method handling lives in `rpc/` and transport specifics
 // live in `rpc/unix-socket-transport.ts` and `rpc/ws-transport.ts`.
 import { randomBytes } from 'node:crypto'
-import { readdirSync, rmSync } from 'node:fs'
+import { readdirSync, readFileSync, rmSync } from 'node:fs'
+import { loadOrCreateTlsCertificate } from './tls-certificate'
 import { join } from 'node:path'
 import type { RuntimeMetadata, RuntimeTransportMetadata } from '../../shared/runtime-bootstrap'
 import type { OrcaRuntimeService } from './orca-runtime'
@@ -66,6 +67,12 @@ type OrcaRuntimeRpcServerOptions = {
   // order can prefer the pin over a stale STA-1511 fallback (issue #8535).
   preferPinnedWsPort?: boolean
   webClientRoot?: string
+  // Why (VSAgent fork): serve the WebSocket/web-client over TLS (wss:// +
+  // https://) so containerized deployments can expose HTTPS directly without a
+  // reverse proxy. Uses a cached self-signed cert unless explicit paths are set.
+  serveTls?: boolean
+  serveTlsCertPath?: string
+  serveTlsKeyPath?: string
   // Why: test-only overrides for the two time-bound constants below.
   // Production callers must not pass these — defaults are set by the design
   // doc (§3.1) and changing them in production would weaken the admission
@@ -305,6 +312,7 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'gitea.listIssues',
   'gitea.diagnoseAuth',
   'gitea.listLabels',
+  'gitea.listMilestones',
   'gitea.updateIssue',
   'gitea.addIssueComment',
   'gitea.workItemDetails',
@@ -472,6 +480,9 @@ export class OrcaRuntimeRpcServer {
   private readonly wsPort: number
   private readonly preferPinnedWsPort: boolean
   private readonly webClientRoot: string | undefined
+  private readonly serveTls: boolean
+  private readonly serveTlsCertPath: string | undefined
+  private readonly serveTlsKeyPath: string | undefined
   private readonly authToken = randomBytes(24).toString('hex')
   private readonly keepaliveIntervalMs: number
   private readonly longPollCap: number
@@ -505,6 +516,9 @@ export class OrcaRuntimeRpcServer {
     wsPort = DEFAULT_WS_PORT,
     preferPinnedWsPort = false,
     webClientRoot,
+    serveTls = false,
+    serveTlsCertPath,
+    serveTlsKeyPath,
     keepaliveIntervalMs = KEEPALIVE_INTERVAL_MS,
     longPollCap = LONG_POLL_CAP
   }: OrcaRuntimeRpcServerOptions) {
@@ -517,6 +531,9 @@ export class OrcaRuntimeRpcServer {
     this.wsPort = wsPort
     this.preferPinnedWsPort = preferPinnedWsPort
     this.webClientRoot = webClientRoot
+    this.serveTls = serveTls
+    this.serveTlsCertPath = serveTlsCertPath
+    this.serveTlsKeyPath = serveTlsKeyPath
     this.keepaliveIntervalMs = keepaliveIntervalMs
     this.longPollCap = longPollCap
     this.relayRevokeOutbox = new RelayRevokeOutbox(userDataPath)
@@ -524,6 +541,23 @@ export class OrcaRuntimeRpcServer {
 
   getDeviceRegistry(): DeviceRegistry | null {
     return this.deviceRegistry
+  }
+
+  // Why (VSAgent fork): resolve the TLS material for --serve-https. Explicit
+  // cert/key paths win (operator-provided cert); otherwise fall back to a
+  // cached self-signed cert so a container can expose HTTPS with zero setup.
+  private resolveServeTlsMaterial(): { cert: string; key: string } | undefined {
+    if (!this.serveTls) {
+      return undefined
+    }
+    if (this.serveTlsCertPath && this.serveTlsKeyPath) {
+      return {
+        cert: readFileSync(this.serveTlsCertPath, 'utf-8'),
+        key: readFileSync(this.serveTlsKeyPath, 'utf-8')
+      }
+    }
+    const generated = loadOrCreateTlsCertificate(this.userDataPath)
+    return { cert: generated.cert, key: generated.key }
   }
 
   getTlsFingerprint(): string | null {
@@ -905,11 +939,15 @@ export class OrcaRuntimeRpcServer {
         this.deviceRegistry = new DeviceRegistry(this.userDataPath)
         this.e2eeKeypair = loadOrCreateE2EEKeypair(this.userDataPath)
         const openPairingConfig = readOpenPairingConfig()
+        const serveTlsMaterial = this.resolveServeTlsMaterial()
 
         const wsTransport = new WebSocketTransport({
           host: '0.0.0.0',
           port: this.wsPort,
           staticRoot: this.webClientRoot,
+          ...(serveTlsMaterial
+            ? { tlsCert: serveTlsMaterial.cert, tlsKey: serveTlsMaterial.key }
+            : {}),
           // Why: keep the fallback port stable across restarts so paired
           // devices' stored endpoints stay valid (STA-1511) — the transport
           // binds a persisted fallback before the preferred port unless the
@@ -984,7 +1022,9 @@ export class OrcaRuntimeRpcServer {
         activeTransports.push(wsTransport)
         transportsMeta.push({
           kind: 'websocket',
-          endpoint: `ws://0.0.0.0:${wsTransport.resolvedPort}`
+          // Why: wss:// when serving TLS so the pairing endpoint and derived
+          // https:// web-client URL match the actual scheme (see createWebClientUrl).
+          endpoint: `${serveTlsMaterial ? 'wss' : 'ws'}://0.0.0.0:${wsTransport.resolvedPort}`
         })
       } catch (error) {
         // Why: WebSocket transport is supplementary — the runtime must still

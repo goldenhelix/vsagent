@@ -10,11 +10,13 @@ function fakeReq(args: {
   url?: string
   method?: string
   headers?: Record<string, string>
+  encrypted?: boolean
 }): IncomingMessage {
   return {
     url: args.url ?? '/',
     method: args.method ?? 'GET',
-    headers: args.headers ?? { host: 'devserver:6800' }
+    headers: args.headers ?? { host: 'devserver:6800' },
+    socket: { encrypted: args.encrypted ?? false }
   } as unknown as IncomingMessage
 }
 
@@ -87,6 +89,12 @@ describe('deriveEndpointFromRequest', () => {
         })
       )
     ).toBe('wss://vsw.example.com/agent')
+  })
+
+  it('upgrades to wss on a direct HTTPS (encrypted) socket without a proxy header', () => {
+    expect(
+      deriveEndpointFromRequest(fakeReq({ headers: { host: '127.0.0.1:6801' }, encrypted: true }))
+    ).toBe('wss://127.0.0.1:6801')
   })
 
   it('returns null without a host', () => {
