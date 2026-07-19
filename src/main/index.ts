@@ -100,6 +100,7 @@ import {
   shouldBypassSingleInstanceLock,
   shouldSkipSingleInstanceLock
 } from './startup/single-instance-lock'
+import { reclaimStaleSingletonLock } from './startup/reclaim-stale-singleton-lock'
 import { startEventLoopStallProbe } from './startup/event-loop-stall-probe'
 import { startMainThreadChurnProbe } from './diagnostics/main-thread-churn-probe'
 import {
@@ -597,6 +598,14 @@ function recordAgentStateCrashBreadcrumb(agentType: string, state: string): void
 // hook endpoint files are namespaced per dev instance when the hook server
 // starts below. Packaged Orca keeps the lock to protect against the corruption
 // documented in PR #1326 / issue #1312.
+// Why (VSAgent fork): a serve container restart leaves a stale Chromium
+// SingletonLock on persistent userData volumes (new hostname per container),
+// which reads as "profile in use" and kills the launch via a confusing X11
+// crash. Reclaim provably-dead locks before acquisition.
+const singletonReclaim = reclaimStaleSingletonLock({
+  userDataPath: app.getPath('userData'),
+  isServeMode
+})
 const bypassSingleInstanceLock = shouldBypassSingleInstanceLock({
   isDev: is.dev,
   isServeMode
@@ -619,14 +628,23 @@ if (startupDiagnosticsEnabled) {
   logStartupDiagnostic('single-instance-lock-result', {
     acquired: hasSingleInstanceLock,
     bypassed: bypassSingleInstanceLock,
-    skippedForDev: skipSingleInstanceLock
+    skippedForDev: skipSingleInstanceLock,
+    staleLockReclaimed: singletonReclaim.reclaimed,
+    staleLockReason: singletonReclaim.reason
   })
 }
 if (!hasSingleInstanceLock) {
   // Why: if Electron returns a false negative here, packaged macOS launches
   // otherwise look like silent crashes. `open --stderr` can capture this line.
   logSingleInstanceLockFailure()
-  app.quit()
+  if (isServeMode) {
+    // Why: app.quit() lets Ozone/X11 platform init keep running on a headless
+    // host and die with a misleading SIGTRAP (exit 133) before the quit lands.
+    // Exit immediately so the diagnostic above is the last word.
+    app.exit(1)
+  } else {
+    app.quit()
+  }
 }
 
 // Why: when the lock is held by another process, we've already called
