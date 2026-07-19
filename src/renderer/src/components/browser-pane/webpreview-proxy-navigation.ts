@@ -65,37 +65,24 @@ export function releaseWebPreviewSession(id: string): void {
   void window.api.webPreview?.delete({ id }).catch(() => {})
 }
 
-// Navigate an already-mounted iframe to the typed proxy path. A bare reload()
-// would replay whatever path the page client-routed to — wrong the moment the
-// session was retargeted to a new origin (stale-path leak). replace() of an
-// identical URL still refetches, covering the same-URL-retyped case.
+// Navigate an already-mounted iframe to the typed proxy path. Assigning .src
+// navigates reliably when the attribute differs; when it already equals nextSrc
+// (same URL retyped, or the page SPA-routed away so the src attribute is stale
+// relative to the live location) an about:blank round-trip forces a fresh fetch
+// of the TYPED path — never a reload of whatever path the page wandered to
+// (the stale-path leak). Using .src (not contentWindow.location) avoids relying
+// on cross-document navigation of the live location, which did not reliably
+// repaint the frame.
 export function navigateProxyIframe(ifr: HTMLIFrameElement | null, nextSrc: string): void {
   if (!ifr) {
     return
   }
-  try {
-    ifr.contentWindow?.location?.replace(nextSrc)
-  } catch {
+  if (ifr.getAttribute('src') === nextSrc) {
     ifr.src = 'about:blank'
     requestAnimationFrame(() => {
       ifr.src = nextSrc
     })
+    return
   }
-}
-
-// True when a nav ping (whose reporting page baked in the session origin at
-// response time) belongs to the session's CURRENT origin. Pings from a page
-// predating an address-bar origin change must not relabel the tab.
-export function isNavPingForOrigin(
-  upstreamUrl: string,
-  sessionOrigin: string | undefined
-): boolean {
-  if (!sessionOrigin) {
-    return true
-  }
-  try {
-    return new URL(upstreamUrl).origin === sessionOrigin
-  } catch {
-    return false
-  }
+  ifr.src = nextSrc
 }

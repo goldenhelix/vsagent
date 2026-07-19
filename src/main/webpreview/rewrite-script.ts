@@ -72,24 +72,10 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
         if (parsed.origin === targetParsed.origin || (isWs && parsed.host === targetParsed.host)) {
           return P + parsed.pathname + parsed.search + parsed.hash;
         }
-        // Why: the iframe's actual document origin is the GATEWAY (since
-        // the proxy serves the page from our host). Pages routinely build
-        // URLs from \`location.origin\`, \`window.origin\`, or absolute
-        // strings hard-coded against what they THINK is their origin —
-        // and that comes out as gateway-origin from inside the iframe.
-        // If we let those through to _ext, _ext fetches the gateway root,
-        // which returns the renderer's index.html, and the entire app
-        // renders recursively inside the iframe. Treat gateway-origin
-        // URLs the same as target-origin URLs: rewrite to a proxy-path
-        // so the request lands on the configured upstream.
-        //
-        // Pages often build the URL by concatenating onto \`location.href\`
-        // or \`location.pathname\`, which ALREADY contains our proxy prefix
-        // (because the iframe's real path IS the proxy path). If we
-        // blindly re-prepend, we get \`<P>/<P>/<path>\` — a double-prefix
-        // URL that the gateway can't route, so its SPA fallback serves
-        // the renderer's index.html and the app loads recursively. Strip
-        // the existing prefix before re-prepending.
+        // Why: the iframe's document origin IS the gateway, so pages that
+        // build URLs from location.origin come out gateway-origin. Route those
+        // to a proxy path (not _ext, which would recursively serve the renderer
+        // app). Strip an existing proxy prefix first to avoid a <P>/<P> double.
         if (parsed.origin === location.origin || (isWs && parsed.host === location.host)) {
           var pn = parsed.pathname;
           if (pn === P || pn.startsWith(P + '/')) {
@@ -299,6 +285,33 @@ export function buildRewriteScript(opts: { prefix: string; targetOrigin: string 
   postNav();
   window.addEventListener('hashchange', postNav);
   window.addEventListener('popstate', postNav);
+
+  // Why: static cross-origin <a href> clicks (e.g. a link to github.com from
+  // another site) otherwise navigate the iframe STRAIGHT to that origin —
+  // server rewriting only touches root-relative paths, so the browser follows
+  // the raw absolute href, skipping the proxy. The unproxied page then has no
+  // rewriter, emits no nav ping (address bar freezes), and the target's
+  // X-Frame-Options can block it ("refused to connect"). Intercept plain
+  // cross-origin link clicks and hand them to the renderer, which retargets
+  // the proxy session — same effect as typing the new address.
+  document.addEventListener('click', function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var t = e.target;
+    var a = t && t.closest ? t.closest('a[href]') : null;
+    if (!a || a.hasAttribute('download')) return;
+    var href = a.getAttribute('href');
+    if (!href || href.charAt(0) === '#') return;
+    var abs;
+    try { abs = new URL(href, document.baseURI); } catch (e2) { return; }
+    if (abs.protocol !== 'http:' && abs.protocol !== 'https:') return;
+    var to;
+    try { to = new URL(TO); } catch (e3) { return; }
+    // Same-origin (target) and gateway-origin links already resolve to proxy
+    // paths via server/runtime rewriting — let the browser navigate them.
+    if (abs.origin === to.origin || abs.origin === location.origin) return;
+    e.preventDefault();
+    try { realParent.postMessage({ type: 'orca-webpreview-navigate', url: abs.toString() }, '*'); } catch (e4) {}
+  }, true);
   // history.pushState / replaceState don't fire popstate — patch them.
   // Why: SPA routers (VitePress, etc.) push BASE-RELATIVE urls like
   // "/foo" that omit our proxy prefix. r() governs every other URL the page

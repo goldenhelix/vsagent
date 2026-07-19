@@ -32,7 +32,6 @@ import {
   deriveOriginFromInput,
   derivePathFromInput,
   isBlankBrowserUrl,
-  isNavPingForOrigin,
   navigateProxyIframe,
   releaseWebPreviewSession,
   type WebPreviewSession
@@ -152,10 +151,12 @@ function WebBrowserPagePane({ page }: { page: BrowserPage }): React.JSX.Element 
         setSession(s)
         const nextIframeSrc = s.proxyPath + path
         if (iframeSrc === nextIframeSrc) {
-          // Why: React won't touch an unchanged src attribute, so the iframe
-          // never refetches (same URL typed twice, Back across a redirect that
-          // maps to the same proxy path). Navigate explicitly to the TYPED
-          // path — see navigateProxyIframe for the stale-path rationale.
+          // Why: React won't re-set an unchanged src attribute, so the iframe
+          // never refetches — this is the "typed a URL, Enter does nothing"
+          // case (same URL retyped, or the page SPA-routed away leaving this
+          // state stale while the live location moved). Force the TYPED path
+          // via navigateProxyIframe's about:blank round-trip — never a reload
+          // of whatever path the page wandered to (stale-path leak).
           navigateProxyIframe(iframeRef.current, nextIframeSrc)
         } else {
           setIframeSrc(nextIframeSrc)
@@ -195,17 +196,28 @@ function WebBrowserPagePane({ page }: { page: BrowserPage }): React.JSX.Element 
         return
       }
       const data = e.data
-      if (!data || typeof data !== 'object' || data.type !== 'orca-webpreview-nav') {
+      if (!data || typeof data !== 'object') {
+        return
+      }
+      // A cross-origin top-level link click, forwarded by the injected script:
+      // retarget the proxy session to the new site (like typing a new address)
+      // so it loads proxied — rewritten, nav-tracked, and X-Frame-Options safe.
+      if (data.type === 'orca-webpreview-navigate' && typeof data.url === 'string') {
+        void navigate(data.url)
+        return
+      }
+      if (data.type !== 'orca-webpreview-nav') {
         return
       }
       if (typeof data.upstreamUrl !== 'string') {
         return
       }
-      // Why: pings from a page predating an address-bar origin change must
-      // not relabel the tab (teardown popstate, late SPA route).
-      if (!isNavPingForOrigin(data.upstreamUrl, sessionRef.current?.targetOrigin)) {
-        return
-      }
+      // Why: reflect wherever the page actually is (SPA routes, server-side
+      // redirects that retargeted the session origin). We deliberately do NOT
+      // filter by the client's session origin — the server can retarget on a
+      // redirect, leaving that copy stale, which would drop legitimate pings
+      // and freeze the address bar. A late ping from an outgoing page is
+      // superseded by the next real load's echo.
       const next = data.upstreamUrl
       setDisplayedUrl(next)
       // Don't overwrite the user's typing while the address bar is focused.
@@ -238,7 +250,7 @@ function WebBrowserPagePane({ page }: { page: BrowserPage }): React.JSX.Element 
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [pushHistory, page.id, setBrowserPageUrl, historyIdx, syncTitleToStore])
+  }, [navigate, pushHistory, page.id, setBrowserPageUrl, historyIdx, syncTitleToStore])
 
   // First mount: load the page's stored URL, or focus the address bar for
   // blank (new) tabs the way desktop tabs do.
