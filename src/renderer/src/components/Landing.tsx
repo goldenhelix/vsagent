@@ -13,6 +13,8 @@ import { ShortcutKeyCombo } from './ShortcutKeyCombo'
 import { useShortcutKeyDetails, type ShortcutKeyComboDetails } from '@/hooks/useShortcutLabel'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import logo from '../../../../resources/logo.svg'
+import vsagentLogo from '../../../../resources/vsagent.svg'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 import {
   getLandingPreflightIssues,
@@ -230,6 +232,8 @@ function PreflightBanner({
 export default function Landing(): React.JSX.Element {
   const repos = useAppStore((s) => s.repos)
   const openModal = useAppStore((s) => s.openModal)
+  // Why (VSAgent fork): the web deployment is branded VSAgent, not Orca.
+  const isVSAgentBrand = isVSAgentWebMode()
 
   const createTargetLabel =
     repos.length > 0 && repos.every((repo) => isGitRepoKind(repo)) ? 'Worktree' : 'Workspace'
@@ -322,13 +326,17 @@ export default function Landing(): React.JSX.Element {
             style={{ backgroundColor: '#12181e' }}
           >
             <img
-              src={logo}
-              alt={translate('auto.components.Landing.520304a067', 'Orca logo')}
+              src={isVSAgentBrand ? vsagentLogo : logo}
+              alt={
+                isVSAgentBrand
+                  ? 'VSAgent logo'
+                  : translate('auto.components.Landing.520304a067', 'Orca logo')
+              }
               className="size-12"
             />
           </div>
           <h1 className="text-4xl font-bold text-foreground tracking-tight">
-            {translate('auto.components.Landing.6ca6ff404e', 'ORCA')}
+            {isVSAgentBrand ? 'VSAgent' : translate('auto.components.Landing.6ca6ff404e', 'ORCA')}
           </h1>
 
           {preflightIssues.length > 0 && <PreflightBanner issues={preflightIssues} repos={repos} />}
