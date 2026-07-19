@@ -4,7 +4,9 @@ import { defineMethod, type RpcMethod } from '../core'
 import { OptionalString, requiredString } from '../schemas'
 
 const ProjectHostSetupExistingFolder = z.object({
-  projectId: requiredString('Missing project ID'),
+  // Why (VSAgent fork): optional — omitted means "use the identity derived
+  // from the folder" (idempotent open-this-folder upsert).
+  projectId: OptionalString,
   hostId: requiredString('Missing host ID').transform((value, ctx) => {
     const hostId = normalizeExecutionHostId(value)
     if (!hostId) {

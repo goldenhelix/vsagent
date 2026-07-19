@@ -60,7 +60,26 @@ export VSAGENT_MANAGED_INSTALL=1
 # systemd users can always recover the URL. exec keeps electron as the service
 # main process (signals, exit code) while the process substitution filters.
 # The ready line is also rebranded here (VSAgent) without an upstream diff.
+# Why: VSAGENT_OPEN_FOLDER imports the given folder(s) as projects once the
+# server is ready — the container passes the user-picked folder and it appears
+# in every paired browser. Colon-separated for multiple. Idempotent: the
+# upsert dedupes by path, identity and git-vs-folder kind are derived.
+open_folders() {
+  local folder
+  IFS=':' read -ra _folders <<<"${VSAGENT_OPEN_FOLDER}"
+  for folder in "${_folders[@]}"; do
+    [[ -z "$folder" ]] && continue
+    if out=$("$SCRIPT_DIR/vsagent-cli" project setup-existing-folder \
+      --host local --path "$folder" --json 2>&1); then
+      printf '[vsagent-serve] opened project folder %s\n' "$folder"
+    else
+      printf '[vsagent-serve] failed to open project folder %s: %s\n' "$folder" "$out" >&2
+    fi
+  done
+}
+
 exec "$ELECTRON" "$INSTALL_DIR" "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} > >(
+  OPENED_FOLDERS=0
   while IFS= read -r line; do
     case "$line" in
       'Orca server ready: '*) line="VSAgent server ready: ${line#Orca server ready: }" ;;
@@ -70,6 +89,10 @@ exec "$ELECTRON" "$INSTALL_DIR" "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} > >(
       'Web client URL: '*)
         printf '%s\n' "${line#Web client URL: }" >"$WEB_URL_FILE"
         printf '[vsagent-serve] web client URL saved to %s\n' "$WEB_URL_FILE"
+        if [[ -n "${VSAGENT_OPEN_FOLDER:-}" && "$OPENED_FOLDERS" -eq 0 ]]; then
+          OPENED_FOLDERS=1
+          open_folders &
+        fi
         ;;
     esac
   done

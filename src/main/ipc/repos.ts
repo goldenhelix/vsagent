@@ -1299,10 +1299,13 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
       invalidateAuthorizedRootsCache()
       notifyReposChanged(mainWindow)
       emitRepoAdded('folder_picker', result.alreadyExisted)
+      // Why (VSAgent fork): a missing projectId means "use the identity
+      // derived from the folder" — the align check then trivially passes.
       const aligned = alignRepoWithRequestedProject(
         store,
         result.repo,
-        args.projectId,
+        args.projectId ??
+          getProjectHostSetupForRepo(store.getProjectHostSetups(), result.repo).projectId,
         args.setupMethod
       )
       if (result.alreadyExisted) {

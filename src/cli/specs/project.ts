@@ -25,10 +25,14 @@ export const PROJECT_COMMAND_SPECS: CommandSpec[] = [
     path: ['project', 'setup-existing-folder'],
     summary: 'Make a project available on a host by importing an existing folder',
     usage:
-      'orca project setup-existing-folder --project <id> --host <host-id> --path <path> [--kind git|folder] [--display-name <name>] [--json]',
+      'orca project setup-existing-folder --host <host-id> --path <path> [--project <id>] [--kind git|folder] [--display-name <name>] [--json]',
     allowedFlags: [...GLOBAL_FLAGS, 'project', 'host', 'path', 'kind', 'display-name'],
-    notes: ['For remote runtimes, --path must be an absolute path on the remote server.'],
+    notes: [
+      'For remote runtimes, --path must be an absolute path on the remote server.',
+      'Without --project, the project identity is derived from the folder (idempotent upsert); --kind is auto-detected from the presence of .git when omitted.'
+    ],
     examples: [
+      'orca project setup-existing-folder --host local --path /data/my-scripts --json',
       'orca project setup-existing-folder --project github:stablyai/orca --host local --path ~/orca',
       'orca project setup-existing-folder --project github:stablyai/orca --host runtime:gpu --path /home/me/orca --kind git --json'
     ]

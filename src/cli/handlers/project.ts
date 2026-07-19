@@ -54,8 +54,11 @@ export const PROJECT_HANDLERS: Record<string, CommandHandler> = {
   },
   'project setup-existing-folder': async ({ flags, client, cwd, json }) => {
     const rawPath = getRequiredStringFlag(flags, 'path')
+    // Why (VSAgent fork): --project is optional — omitted means "use the
+    // identity derived from the folder" (idempotent open-this-folder upsert).
+    const projectId = getOptionalStringFlag(flags, 'project')
     const args: ProjectHostSetupExistingFolderArgs = {
-      projectId: getRequiredStringFlag(flags, 'project'),
+      ...(projectId ? { projectId } : {}),
       hostId: getRequiredStringFlag(flags, 'host') as ProjectHostSetupExistingFolderArgs['hostId'],
       path: resolveRepoPathArgument(rawPath, cwd, client.isRemote, 'Remote project setup'),
       kind: getOptionalRepoKind(flags),

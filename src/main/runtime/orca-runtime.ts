@@ -12290,9 +12290,14 @@ export class OrcaRuntimeService {
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
-    let repo = await this.addRepo(args.path, args.kind === 'folder' ? 'folder' : 'git', args.hostId)
+    // Why (VSAgent fork): auto-detect git vs folder when the caller doesn't
+    // say — server-side deployments import arbitrary user-picked paths.
+    const kind = args.kind ?? (isGitRepo(args.path) ? 'git' : 'folder')
+    let repo = await this.addRepo(args.path, kind === 'folder' ? 'folder' : 'git', args.hostId)
     let setup = getProjectHostSetupForRepo(this.listProjectHostSetups(), repo)
-    if (setup.projectId !== args.projectId) {
+    // Why (VSAgent fork): no projectId means "use the derived identity" — the
+    // idempotent open-this-folder upsert (identity can't be known in advance).
+    if (args.projectId && setup.projectId !== args.projectId) {
       const existingProject = this.listProjects().find((project) => project.id === args.projectId)
       if (
         !existingProject?.providerIdentity ||

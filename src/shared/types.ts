@@ -157,7 +157,9 @@ export type ProjectHostSetup = {
 }
 
 export type ProjectHostSetupExistingFolderArgs = {
-  projectId: string
+  /** Why (VSAgent fork): optional — when omitted, the identity derived from
+   *  the imported folder is used (idempotent "open this folder" upsert). */
+  projectId?: string
   hostId: ExecutionHostId
   path: string
   kind?: RepoKind
