@@ -2636,6 +2636,35 @@ describe('Store', () => {
     expect(store.getSettings().visibleTaskProviders).toEqual(['gitlab', 'jira', 'gitea'])
   })
 
+  it('round-trips sidebar hide flags (showTasksButton / showAutomationsButton)', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [],
+      worktreeMeta: {},
+      settings: { showTasksButton: false, showAutomationsButton: false },
+      ui: {},
+      githubCache: { pr: {}, issue: {} },
+      workspaceSession: {}
+    })
+    const store = await createStore()
+    expect(store.getSettings().showTasksButton).toBe(false)
+    expect(store.getSettings().showAutomationsButton).toBe(false)
+
+    // Missing keys stay default-on.
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [],
+      worktreeMeta: {},
+      settings: {},
+      ui: {},
+      githubCache: { pr: {}, issue: {} },
+      workspaceSession: {}
+    })
+    const defaults = await createStore()
+    expect(defaults.getSettings().showTasksButton).toBe(true)
+    expect(defaults.getSettings().showAutomationsButton).toBe(true)
+  })
+
   it('preserves a deliberate Jira provider opt-out after migration', async () => {
     writeDataFile({
       schemaVersion: 1,

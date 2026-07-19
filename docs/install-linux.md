@@ -61,6 +61,13 @@ cat ~/.local/state/vsagent/web-url
   (`sudo apt-get install xvfb`), serve runs a virtual display and in-app
   browser panes work. Without it, serve falls back to a display-less headless
   boot: terminals and agents work fully, browser panes are off.
+- **GL/Mesa libraries — required for the display-less fallback.** The Ozone
+  headless boot still initializes GPU-process GL through Mesa; without these
+  the serve segfaults at startup even in headless mode:
+
+  ```bash
+  sudo apt-get install -y libgl1 libegl1 libgles2 libglx-mesa0 libgl1-mesa-dri
+  ```
 - Outbound HTTPS to `github.com` for the download step
 - Port 6768 reachable from the user's network (override with `--port`)
 

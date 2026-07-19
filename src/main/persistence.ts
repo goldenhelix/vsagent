@@ -3217,6 +3217,11 @@ export class Store {
             // Why: missing means default-on, and the value must round-trip
             // unchanged on non-mac hosts; the darwin consumers gate the effect.
             showMenuBarIcon: parsed.settings?.showMenuBarIcon !== false,
+            // Why: these were persisted by "Hide from sidebar" (and seeded by
+            // server deployments) but never read back here, so hiding reset on
+            // every restart. Default-on; false only when explicitly false.
+            showTasksButton: parsed.settings?.showTasksButton !== false,
+            showAutomationsButton: parsed.settings?.showAutomationsButton !== false,
             uiLanguage: normalizeUiLanguage(parsed.settings?.uiLanguage),
             defaultTaskSource: taskProviderSettings.defaultTaskSource,
             visibleTaskProviders: taskProviderSettings.visibleTaskProviders,

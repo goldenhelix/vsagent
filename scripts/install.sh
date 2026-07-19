@@ -125,6 +125,15 @@ if [[ -z "${DISPLAY:-}" ]] && ! command -v Xvfb >/dev/null 2>&1; then
   warn "Xvfb not found: browser panes will be unavailable. Install it (apt-get install xvfb) to enable them."
 fi
 
+# --------- required for display-less boot: GL/Mesa ---------
+# The Ozone headless fallback still initializes GPU-process GL through Mesa;
+# without libGL/libEGL the serve segfaults at startup even in headless mode.
+if command -v ldconfig >/dev/null 2>&1; then
+  if ! ldconfig -p 2>/dev/null | grep -q 'libGL\.so\.1'; then
+    warn "libGL not found: display-less serve will crash at boot. Install GL/Mesa (apt-get install libgl1 libegl1 libgles2 libglx-mesa0 libgl1-mesa-dri)."
+  fi
+fi
+
 # --------- resolve version ---------
 if [[ "$VERSION" == "latest" ]]; then
   # GitHub redirects /releases/latest/download/<asset> to the newest release.
