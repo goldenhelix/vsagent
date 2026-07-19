@@ -388,6 +388,7 @@ type WebGiteaRouteKey =
   | 'diagnoseAuth'
   | 'listIssues'
   | 'listLabels'
+  | 'listMilestones'
   | 'updateIssue'
   | 'addIssueComment'
   | 'workItemDetails'
@@ -396,6 +397,7 @@ type WebGiteaRuntimeMethod =
   | 'gitea.diagnoseAuth'
   | 'gitea.listIssues'
   | 'gitea.listLabels'
+  | 'gitea.listMilestones'
   | 'gitea.updateIssue'
   | 'gitea.addIssueComment'
   | 'gitea.workItemDetails'
@@ -485,6 +487,7 @@ export const GITEA_WEB_RPC_METHODS = {
   diagnoseAuth: 'gitea.diagnoseAuth',
   listIssues: 'gitea.listIssues',
   listLabels: 'gitea.listLabels',
+  listMilestones: 'gitea.listMilestones',
   updateIssue: 'gitea.updateIssue',
   addIssueComment: 'gitea.addIssueComment',
   workItemDetails: 'gitea.workItemDetails',
@@ -2392,6 +2395,8 @@ function createGiteaApi(): WebGiteaApi {
       route<WebGiteaResult<'listIssues'>>(GITEA_WEB_RPC_METHODS.listIssues, args),
     listLabels: (args) =>
       route<WebGiteaResult<'listLabels'>>(GITEA_WEB_RPC_METHODS.listLabels, args),
+    listMilestones: (args) =>
+      route<WebGiteaResult<'listMilestones'>>(GITEA_WEB_RPC_METHODS.listMilestones, args),
     updateIssue: (args) =>
       route<WebGiteaResult<'updateIssue'>>(GITEA_WEB_RPC_METHODS.updateIssue, args),
     addIssueComment: (args) =>

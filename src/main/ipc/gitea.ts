@@ -14,7 +14,8 @@ import {
   getGiteaIssueDetails,
   getGiteaWorkItemByPath,
   listGiteaIssues,
-  listGiteaLabels
+  listGiteaLabels,
+  listGiteaMilestones
 } from '../gitea/issues'
 import { addGiteaIssueComment, updateGiteaIssue } from '../gitea/issue-mutations'
 import type { GitLabWorkItem } from '../../shared/types'
@@ -67,7 +68,12 @@ export function registerGiteaHandlers(store: Store): void {
     'gitea:listIssues',
     async (
       _event,
-      args: GiteaRepoSelectorArgs & { state?: string; assignee?: string; limit?: number }
+      args: GiteaRepoSelectorArgs & {
+        state?: string
+        assignee?: string
+        limit?: number
+        milestone?: string
+      }
     ) => {
       const repo = assertRegisteredRepo(args, store)
       const normalized = normalizeGitLabIssueListArgs(args)
@@ -76,6 +82,7 @@ export function registerGiteaHandlers(store: Store): void {
         normalized.limit,
         normalized.state,
         normalized.assignee,
+        args.milestone?.trim() || undefined,
         repo.connectionId ?? null,
         ...localGitOptionArgs(store, repo)
       )
@@ -98,6 +105,15 @@ export function registerGiteaHandlers(store: Store): void {
   ipcMain.handle('gitea:listLabels', async (_event, args: GiteaRepoSelectorArgs) => {
     const repo = assertRegisteredRepo(args, store)
     return listGiteaLabels(repo.path, repo.connectionId ?? null, ...localGitOptionArgs(store, repo))
+  })
+
+  ipcMain.handle('gitea:listMilestones', async (_event, args: GiteaRepoSelectorArgs) => {
+    const repo = assertRegisteredRepo(args, store)
+    return listGiteaMilestones(
+      repo.path,
+      repo.connectionId ?? null,
+      ...localGitOptionArgs(store, repo)
+    )
   })
 
   ipcMain.handle(

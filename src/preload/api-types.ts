@@ -1946,9 +1946,11 @@ export type PreloadApi = {
         state?: 'opened' | 'closed' | 'all'
         assignee?: string
         limit?: number
+        milestone?: string
       }
     ) => Promise<{ items: GitLabWorkItem[]; error?: ClassifiedError }>
     listLabels: (args: GitLabRepoSelectorArgs) => Promise<string[]>
+    listMilestones: (args: GitLabRepoSelectorArgs) => Promise<{ id: number; title: string }[]>
     updateIssue: (
       args: GitLabRepoSelectorArgs & {
         number: number

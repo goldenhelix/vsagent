@@ -16,9 +16,12 @@ import {
   mapGiteaIssueInfo,
   mapGiteaIssueToWorkItemDetail,
   mapGiteaLabelNames,
+  mapGiteaMilestones,
+  type GiteaMilestone,
   type RawGiteaComment,
   type RawGiteaIssue,
-  type RawGiteaLabel
+  type RawGiteaLabel,
+  type RawGiteaMilestone
 } from './issue-mappers'
 import { getGiteaRepoRef, type GiteaRepoRef } from './repository-ref'
 
@@ -90,6 +93,7 @@ export async function listGiteaIssues(
   limit = 20,
   state: GiteaIssueListState = 'opened',
   assignee?: string,
+  milestone?: string,
   connectionId?: string | null,
   localGitOptions: LocalGitExecOptions = {}
 ): Promise<GiteaIssueListResult> {
@@ -115,6 +119,11 @@ export async function listGiteaIssues(
     if (login) {
       searchParams.assigned_by = login
     }
+  }
+  // Why: Gitea's `milestones` param accepts comma-separated titles (unique per
+  // repo); a single selected title scopes the issue list server-side.
+  if (milestone) {
+    searchParams.milestones = milestone
   }
 
   const result = await requestGiteaJsonResult<RawGiteaIssue[]>(
@@ -207,6 +216,26 @@ export async function listGiteaLabels(
     return []
   }
   return mapGiteaLabelNames(await fetchGiteaLabelObjects(repo))
+}
+
+export async function listGiteaMilestones(
+  repoPath: string,
+  connectionId?: string | null,
+  localGitOptions: LocalGitExecOptions = {}
+): Promise<GiteaMilestone[]> {
+  const repo = await resolveGiteaRepo(repoPath, connectionId, localGitOptions)
+  if (!repo) {
+    return []
+  }
+  const raw = await requestGiteaJson<RawGiteaMilestone[]>(
+    repo,
+    `/repos/${giteaRepoPathSegment(repo)}/milestones`,
+    {
+      searchParams: { state: 'open', page: 1, limit: LABEL_PAGE_LIMIT },
+      timeoutMs: GITEA_ISSUE_READ_TIMEOUT_MS
+    }
+  )
+  return mapGiteaMilestones(raw)
 }
 
 /**

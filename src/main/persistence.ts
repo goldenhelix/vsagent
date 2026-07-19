@@ -3035,11 +3035,22 @@ export class Store {
         })
         const visibleTaskProvidersDefaultedForJira =
           parsed.settings?.visibleTaskProvidersDefaultedForJira === true
-        const migratedVisibleTaskProviders = visibleTaskProvidersDefaultedForJira
+        const jiraMigratedVisibleTaskProviders = visibleTaskProvidersDefaultedForJira
           ? rawTaskProviderSettings.visibleTaskProviders
           : rawTaskProviderSettings.visibleTaskProviders.includes('jira')
             ? rawTaskProviderSettings.visibleTaskProviders
             : [...rawTaskProviderSettings.visibleTaskProviders, 'jira' as const]
+        // Why: Gitea was added to the provider list after these profiles were
+        // written, and had no settings toggle, so a saved list can never have
+        // deliberately excluded it. Backfill it once (guarded by the flag) so
+        // token-configured Gitea reaches the Tasks picker; later removals stick.
+        const visibleTaskProvidersDefaultedForGitea =
+          parsed.settings?.visibleTaskProvidersDefaultedForGitea === true
+        const migratedVisibleTaskProviders = visibleTaskProvidersDefaultedForGitea
+          ? jiraMigratedVisibleTaskProviders
+          : jiraMigratedVisibleTaskProviders.includes('gitea')
+            ? jiraMigratedVisibleTaskProviders
+            : [...jiraMigratedVisibleTaskProviders, 'gitea' as const]
         const taskProviderSettings = normalizeTaskProviderSettings({
           visibleTaskProviders: migratedVisibleTaskProviders,
           defaultTaskSource: rawTaskProviderSettings.defaultTaskSource
@@ -3061,6 +3072,9 @@ export class Store {
           this.loadNeedsSave = true
         }
         if (!visibleTaskProvidersDefaultedForJira) {
+          this.loadNeedsSave = true
+        }
+        if (!visibleTaskProvidersDefaultedForGitea) {
           this.loadNeedsSave = true
         }
         const claudeAgentTeamsDefaultDisabledMigrated =
@@ -3207,6 +3221,7 @@ export class Store {
             defaultTaskSource: taskProviderSettings.defaultTaskSource,
             visibleTaskProviders: taskProviderSettings.visibleTaskProviders,
             visibleTaskProvidersDefaultedForJira: true,
+            visibleTaskProvidersDefaultedForGitea: true,
             terminalShortcutPolicy: normalizeTerminalShortcutPolicy(
               parsed.settings?.terminalShortcutPolicy
             ),
@@ -5318,6 +5333,7 @@ export class Store {
       sanitizedUpdates.visibleTaskProviders = taskProviderSettings.visibleTaskProviders
       if ('visibleTaskProviders' in updates) {
         sanitizedUpdates.visibleTaskProvidersDefaultedForJira = true
+        sanitizedUpdates.visibleTaskProvidersDefaultedForGitea = true
       }
     }
     if ('autoRenameBranchFromWork' in updates || 'autoRenameBranchFromWorkDefaultedOn' in updates) {

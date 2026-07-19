@@ -69,6 +69,18 @@ export function mapGiteaLabelNames(labels: RawGiteaLabel[] | null | undefined): 
     .filter((name): name is string => typeof name === 'string' && name.length > 0)
 }
 
+export type GiteaMilestone = { id: number; title: string }
+
+export function mapGiteaMilestones(
+  milestones: readonly RawGiteaMilestone[] | null | undefined
+): GiteaMilestone[] {
+  return (milestones ?? [])
+    .map((m) =>
+      m && typeof m.id === 'number' && m.title?.trim() ? { id: m.id, title: m.title.trim() } : null
+    )
+    .filter((m): m is GiteaMilestone => m !== null)
+}
+
 /** Single-issue shape used by pasted-URL lookups and detail fetches. */
 export function mapGiteaIssueInfo(raw: RawGiteaIssue): GitLabIssueInfo | null {
   if (typeof raw.number !== 'number' || !raw.html_url) {

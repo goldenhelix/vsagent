@@ -1,4 +1,4 @@
-import { Check, Github, Gitlab } from 'lucide-react'
+import { Check, Coffee, Github, Gitlab } from 'lucide-react'
 import type { GlobalSettings, TaskProvider } from '../../../../shared/types'
 import {
   TASK_PROVIDERS,
@@ -49,6 +49,21 @@ const TASK_PROVIDER_OPTIONS: readonly {
       )
     },
     Icon: ({ className }) => <Gitlab className={className} />
+  },
+  {
+    id: 'gitea',
+    get label() {
+      return translate('auto.components.settings.TasksPane.gitea.label', 'Gitea')
+    },
+    get description() {
+      return translate(
+        'auto.components.settings.TasksPane.gitea.desc',
+        'Show Gitea in the Tasks source picker and sidebar shortcuts. Requires a server-configured token (ORCA_GITEA_TOKEN).'
+      )
+    },
+    // Why: no dedicated Gitea brand mark ships here; the Coffee mug echoes
+    // Gitea's tea-cup identity and renders reliably at icon sizes.
+    Icon: ({ className }) => <Coffee className={className} />
   },
   {
     id: 'linear',
@@ -120,6 +135,7 @@ export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.J
             'source',
             'github',
             'gitlab',
+            'gitea',
             'linear',
             'jira',
             'atlassian',

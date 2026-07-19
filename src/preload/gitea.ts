@@ -20,11 +20,15 @@ export const giteaApi = {
       state?: 'opened' | 'closed' | 'all'
       assignee?: string
       limit?: number
+      milestone?: string
     }
   ): Promise<{ items: unknown[]; error?: unknown }> => ipcRenderer.invoke('gitea:listIssues', args),
 
   listLabels: (args: GiteaRepoSelectorArgs): Promise<string[]> =>
     ipcRenderer.invoke('gitea:listLabels', args),
+
+  listMilestones: (args: GiteaRepoSelectorArgs): Promise<{ id: number; title: string }[]> =>
+    ipcRenderer.invoke('gitea:listMilestones', args),
 
   updateIssue: (
     args: GiteaRepoSelectorArgs & { number: number; updates: GitLabIssueUpdate }

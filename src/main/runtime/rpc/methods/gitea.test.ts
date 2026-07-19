@@ -15,6 +15,7 @@ describe('gitea RPC methods', () => {
       diagnoseGiteaAuth: vi.fn().mockResolvedValue({ configured: true }),
       listGiteaRepoIssues: vi.fn().mockResolvedValue({ items: [] }),
       listGiteaRepoLabels: vi.fn().mockResolvedValue(['bug']),
+      listGiteaRepoMilestones: vi.fn().mockResolvedValue([{ id: 1, title: 'v1.0' }]),
       updateGiteaRepoIssue: vi.fn().mockResolvedValue({ ok: true }),
       addGiteaRepoIssueComment: vi.fn().mockResolvedValue({ ok: true }),
       getGiteaRepoWorkItemDetails: vi.fn().mockResolvedValue({ body: 'Details' }),
@@ -28,10 +29,12 @@ describe('gitea RPC methods', () => {
         repo: 'id:repo-1',
         state: 'opened',
         assignee: '@me',
-        limit: 50
+        limit: 50,
+        milestone: 'v1.0'
       })
     )
     await dispatcher.dispatch(makeRequest('gitea.listLabels', { repo: 'id:repo-1' }))
+    await dispatcher.dispatch(makeRequest('gitea.listMilestones', { repo: 'id:repo-1' }))
     await dispatcher.dispatch(
       makeRequest('gitea.updateIssue', {
         repo: 'id:repo-1',
@@ -50,8 +53,15 @@ describe('gitea RPC methods', () => {
     await dispatcher.dispatch(makeRequest('gitea.workItemByPath', { repo: 'id:repo-1', iid: 7 }))
 
     expect(runtime.diagnoseGiteaAuth).toHaveBeenCalledWith()
-    expect(runtime.listGiteaRepoIssues).toHaveBeenCalledWith('id:repo-1', 'opened', '@me', 50)
+    expect(runtime.listGiteaRepoIssues).toHaveBeenCalledWith(
+      'id:repo-1',
+      'opened',
+      '@me',
+      50,
+      'v1.0'
+    )
     expect(runtime.listGiteaRepoLabels).toHaveBeenCalledWith('id:repo-1')
+    expect(runtime.listGiteaRepoMilestones).toHaveBeenCalledWith('id:repo-1')
     expect(runtime.updateGiteaRepoIssue).toHaveBeenCalledWith('id:repo-1', 7, {
       state: 'closed',
       title: 'Done',

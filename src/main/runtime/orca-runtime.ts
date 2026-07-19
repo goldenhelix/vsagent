@@ -443,6 +443,7 @@ import {
   getGiteaWorkItemByPath as getGiteaIssueWorkItem,
   listGiteaIssues,
   listGiteaLabels,
+  listGiteaMilestones,
   type GiteaIssueListState
 } from '../gitea/issues'
 import { addGiteaIssueComment, updateGiteaIssue } from '../gitea/issue-mutations'
@@ -14071,7 +14072,8 @@ export class OrcaRuntimeService {
     repoSelector: string,
     state?: GiteaIssueListState,
     assignee?: string,
-    limit?: number
+    limit?: number,
+    milestone?: string
   ): Promise<{
     items: GitLabWorkItem[]
     error?: Awaited<ReturnType<typeof listGiteaIssues>>['error']
@@ -14085,6 +14087,9 @@ export class OrcaRuntimeService {
       normalized.limit,
       normalized.state,
       normalized.assignee,
+      // Why: milestone is a free-text repo title, not a GitLab flag, so it is
+      // threaded around normalizeGitLabIssueListArgs (which is GitLab-scoped).
+      milestone?.trim() || undefined,
       repo.connectionId ?? null,
       ...this.getLocalGitExecutionOptionArgs(repo)
     )
@@ -14112,6 +14117,17 @@ export class OrcaRuntimeService {
   async listGiteaRepoLabels(repoSelector: string): Promise<string[]> {
     const repo = await this.resolveRepoSelector(repoSelector)
     return listGiteaLabels(
+      repo.path,
+      repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async listGiteaRepoMilestones(
+    repoSelector: string
+  ): Promise<Awaited<ReturnType<typeof listGiteaMilestones>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return listGiteaMilestones(
       repo.path,
       repo.connectionId ?? null,
       ...this.getLocalGitExecutionOptionArgs(repo)

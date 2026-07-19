@@ -47,8 +47,10 @@ import { getLocalPreflightContext, localPreflightContextKey } from '@/lib/local-
 import { getProviderRuntimeContextKey } from '@/lib/provider-runtime-context'
 import {
   getSettingsFocusedExecutionHostId,
+  LOCAL_EXECUTION_HOST_ID,
   parseExecutionHostId
 } from '../../../shared/execution-host'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import { Input } from '@/components/ui/input'
@@ -340,6 +342,7 @@ import {
   type JiraPrioritiesBySite
 } from './jira-issue-sorter'
 import { TaskPageJiraSortControls } from './task-page-jira-sort-controls'
+import { filterGitLabItemsBySearch } from './task-page-gitlab-item-search'
 import {
   normalizeVisibleTaskProviders,
   restoreAvailableDefaultTaskProvider,
@@ -3144,7 +3147,26 @@ export default function TaskPage(): React.JSX.Element {
   const linearConnected = linearStatusCurrent && linearStatus.connected
   const jiraConnected = jiraStatusCurrent && jiraStatus.connected
   const submitShortcutLabel = getScreenSubmitShortcutLabel()
-  const eligibleRepos = useMemo(() => repos.filter((repo) => isGitRepoKind(repo)), [repos])
+  const eligibleRepos = useMemo(() => {
+    const gitRepos = repos.filter((repo) => isGitRepoKind(repo))
+    if (!isVSAgentWebMode()) {
+      return gitRepos
+    }
+    // Why (VSAgent fork): in web mode the serve host is the only host, but the
+    // same repo can appear as a phantom local-host entry AND the real runtime
+    // entry — showing "Local Mac, Orca Server · 2 projects" and double-fetching
+    // its issues. Drop the local-host copy, but only when a non-local entry for
+    // the same path exists, so a repo known only locally still appears.
+    const nonLocalPaths = new Set(
+      gitRepos
+        .filter((repo) => getRepoExecutionHostId(repo) !== LOCAL_EXECUTION_HOST_ID)
+        .map((repo) => repo.path)
+    )
+    return gitRepos.filter(
+      (repo) =>
+        getRepoExecutionHostId(repo) !== LOCAL_EXECUTION_HOST_ID || !nonLocalPaths.has(repo.path)
+    )
+  }, [repos])
 
   // Why: initial selection resolution honors (1) an explicit preselection from
   // the caller, (2) the persisted defaultRepoSelection (null = sticky-all,
@@ -3755,6 +3777,14 @@ export default function TaskPage(): React.JSX.Element {
   // from `window.api.gl.listMRs` / `listIssues` for the primary repo.
   const [gitlabFilter, setGitlabFilter] = useState<GitLabTaskFilter | GitLabIssueFilter>('opened')
   const [gitlabItems, setGitlabItems] = useState<GitLabWorkItem[]>([])
+  // Why: client-side keyword filter over the already-loaded issue/MR list
+  // (title / #number / labels / author) — parity with the GitHub list search,
+  // but local so it needs no extra fetch on the GitLab/Gitea issues path.
+  const [gitlabSearchInput, setGitlabSearchInput] = useState('')
+  // Why: Gitea milestone filter is server-side (milestone isn't shown on rows),
+  // keyed on the milestone TITLE ('all' = no filter). Milestones are per-repo.
+  const [giteaMilestones, setGiteaMilestones] = useState<{ id: number; title: string }[]>([])
+  const [activeGiteaMilestone, setActiveGiteaMilestone] = useState<string>('all')
   const [gitlabLoading, setGitlabLoading] = useState(false)
   const [gitlabError, setGitlabError] = useState<string | null>(null)
   const [gitlabRefreshNonce, setGitlabRefreshNonce] = useState(0)
@@ -3801,14 +3831,14 @@ export default function TaskPage(): React.JSX.Element {
   }
 
   const displayedGitLabItems = useMemo(() => {
-    if (gitlabView === 'issues') {
-      return gitlabItems.filter((item) => item.type === 'issue')
-    }
-    if (gitlabView === 'mrs') {
-      return gitlabItems.filter((item) => item.type === 'mr')
-    }
-    return gitlabItems
-  }, [gitlabItems, gitlabView])
+    const byView =
+      gitlabView === 'issues'
+        ? gitlabItems.filter((item) => item.type === 'issue')
+        : gitlabView === 'mrs'
+          ? gitlabItems.filter((item) => item.type === 'mr')
+          : gitlabItems
+    return filterGitLabItemsBySearch(byView, gitlabSearchInput)
+  }, [gitlabItems, gitlabView, gitlabSearchInput])
 
   const [taskSearchInput, setTaskSearchInput] = useState(initialTaskQuery)
   const [appliedTaskSearch, setAppliedTaskSearch] = useState(initialTaskQuery)
@@ -5027,7 +5057,12 @@ export default function TaskPage(): React.JSX.Element {
                 sourceContext: getTaskPageRepoSourceContext(repo, issueProvider),
                 state: 'opened',
                 assignee: isAssignedToMe ? '@me' : undefined,
-                limit: 50
+                limit: 50,
+                // Why: milestone is Gitea-only and server-side; spread so it's
+                // omitted for the GitLab path (whose listIssues has no milestone).
+                ...(taskSource === 'gitea' && activeGiteaMilestone !== 'all'
+                  ? { milestone: activeGiteaMilestone }
+                  : {})
               })
               .then((result) => {
                 const typed = result as {
@@ -5065,7 +5100,11 @@ export default function TaskPage(): React.JSX.Element {
         if (stale) {
           return
         }
-        const merged: GitLabWorkItem[] = []
+        // Why: the same underlying repo can be selected as two project entries
+        // (e.g. one checkout per host), so one Gitea/GitLab issue arrives from
+        // two per-repo fetches. Dedup by the fully-qualified item URL — stable
+        // across repo entries, unlike the repo-scoped `id` — so it renders once.
+        const mergedByKey = new Map<string, GitLabWorkItem>()
         const errs: string[] = []
         for (const r of results) {
           if (r.status !== 'fulfilled') {
@@ -5073,12 +5112,17 @@ export default function TaskPage(): React.JSX.Element {
             continue
           }
           for (const item of r.value.items) {
-            merged.push({ ...item, repoId: r.value.repoId })
+            const withRepo = { ...item, repoId: r.value.repoId }
+            const key = item.url || withRepo.id
+            if (!mergedByKey.has(key)) {
+              mergedByKey.set(key, withRepo)
+            }
           }
           if (r.value.error) {
             errs.push(r.value.error.message)
           }
         }
+        const merged = [...mergedByKey.values()]
         merged.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
         setGitlabItems(merged)
         // Why: only surface an error banner when EVERY eligible repo failed.
@@ -5097,7 +5141,50 @@ export default function TaskPage(): React.JSX.Element {
       stale = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedReposKey encodes the only selectedRepos fields read above; keying off the array ref would re-run on every parent render.
-  }, [taskSource, gitlabView, activeGitlabFilter, gitlabRefreshNonce, selectedReposKey])
+  }, [
+    taskSource,
+    gitlabView,
+    activeGitlabFilter,
+    activeGiteaMilestone,
+    gitlabRefreshNonce,
+    selectedReposKey
+  ])
+
+  // Why: Gitea milestones are per-repo, so fetch them for the primary selected
+  // repo to populate the milestone dropdown. Reset a stale selection to 'all'
+  // when the repo changes so a title from one project isn't sent to another.
+  useEffect(() => {
+    if (taskSource !== 'gitea' || !primaryRepo?.path) {
+      setGiteaMilestones([])
+      return
+    }
+    let stale = false
+    void window.api.gitea
+      .listMilestones({
+        repoPath: primaryRepo.path,
+        repoId: primaryRepo.id,
+        sourceContext: getTaskPageRepoSourceContext(primaryRepo, 'gitea')
+      })
+      .then((milestones) => {
+        if (stale) {
+          return
+        }
+        const list = Array.isArray(milestones) ? milestones : []
+        setGiteaMilestones(list)
+        setActiveGiteaMilestone((current) =>
+          current !== 'all' && !list.some((m) => m.title === current) ? 'all' : current
+        )
+      })
+      .catch(() => {
+        if (!stale) {
+          setGiteaMilestones([])
+        }
+      })
+    return () => {
+      stale = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- primaryRepo fields are captured via selectedReposKey.
+  }, [taskSource, selectedReposKey])
 
   // Why: Todos fetch lives in its own effect — different trigger
   // condition from the project view (no chip filter dependence) and a
@@ -9234,6 +9321,65 @@ export default function TaskPage(): React.JSX.Element {
                                 })
                               : null}
                           </div>
+                          {taskSource === 'gitea' && giteaMilestones.length > 0 ? (
+                            <Select
+                              value={activeGiteaMilestone}
+                              onValueChange={(value) => {
+                                setActiveGiteaMilestone(value)
+                                setGitlabRefreshNonce((n) => n + 1)
+                              }}
+                            >
+                              <SelectTrigger className="h-8 w-[170px] rounded-md border-border/50 bg-transparent text-xs font-medium shadow-sm">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">
+                                  {translate(
+                                    'auto.components.TaskPage.gitea.allMilestones',
+                                    'All milestones'
+                                  )}
+                                </SelectItem>
+                                {giteaMilestones.map((m) => (
+                                  <SelectItem key={m.id} value={m.title}>
+                                    {m.title}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : null}
+                          <div className="relative min-w-0 flex-1 basis-56">
+                            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                              data-gitlab-items-search-input
+                              value={gitlabSearchInput}
+                              onChange={(e) => setGitlabSearchInput(e.target.value)}
+                              placeholder={
+                                taskSource === 'gitea'
+                                  ? translate(
+                                      'auto.components.TaskPage.gitea.searchIssues',
+                                      'Search issues...'
+                                    )
+                                  : translate(
+                                      'auto.components.TaskPage.gitlab.searchItems',
+                                      'Search items...'
+                                    )
+                              }
+                              className="h-8 rounded-md border-border/50 bg-background pl-8 pr-8 text-xs"
+                            />
+                            {gitlabSearchInput ? (
+                              <button
+                                type="button"
+                                aria-label={translate(
+                                  'auto.components.TaskPage.b797bdd7c3',
+                                  'Clear search'
+                                )}
+                                onClick={() => setGitlabSearchInput('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
+                              >
+                                <X className="size-4" />
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                         <div
                           className="flex shrink-0 items-center gap-2"
@@ -10020,7 +10166,12 @@ export default function TaskPage(): React.JSX.Element {
                     </p>
                   </div>
                 ) : null}
-                <div className="divide-y divide-border/50">
+                {/* Why: the client-side search shrinks this list without the
+                    refetch/shimmer cycle that view & filter changes go through,
+                    and React fails to reconcile the shared `.divide-y` children
+                    (stale rows linger). Re-key the container on the query so it
+                    remounts cleanly and the rows always match the filter. */}
+                <div className="divide-y divide-border/50" key={`gitea-list-${gitlabSearchInput}`}>
                   {displayedGitLabItems.map((item) => (
                     // Why: row uses a <div role="button"> rather than a
                     // <button> because it nests an inner button for

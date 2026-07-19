@@ -12,7 +12,8 @@ const EmptyParams = z.object({}).optional().default({})
 const IssuesList = RepoSelector.extend({
   state: z.unknown().optional(),
   assignee: OptionalString,
-  limit: OptionalFiniteNumber
+  limit: OptionalFiniteNumber,
+  milestone: OptionalString
 })
 
 // Why: mirrors GitLabIssueUpdate so the shared issue dialog/editing path is
@@ -55,7 +56,8 @@ export const GITEA_METHODS: RpcMethod[] = [
         params.repo,
         normalized.state,
         normalized.assignee,
-        normalized.limit
+        normalized.limit,
+        params.milestone
       )
     }
   }),
@@ -68,6 +70,11 @@ export const GITEA_METHODS: RpcMethod[] = [
     name: 'gitea.listLabels',
     params: RepoSelector,
     handler: async (params, { runtime }) => runtime.listGiteaRepoLabels(params.repo)
+  }),
+  defineMethod({
+    name: 'gitea.listMilestones',
+    params: RepoSelector,
+    handler: async (params, { runtime }) => runtime.listGiteaRepoMilestones(params.repo)
   }),
   defineMethod({
     name: 'gitea.updateIssue',

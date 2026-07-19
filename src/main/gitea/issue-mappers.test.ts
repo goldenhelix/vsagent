@@ -7,6 +7,7 @@ import {
   mapGiteaIssueState,
   mapGiteaIssueToWorkItem,
   mapGiteaLabelNames,
+  mapGiteaMilestones,
   type RawGiteaIssue
 } from './issue-mappers'
 
@@ -42,6 +43,17 @@ describe('Gitea issue mappers', () => {
 
   it('extracts label names, skipping blanks', () => {
     expect(mapGiteaLabelNames([{ name: 'bug' }, { name: '  ' }, { name: null }])).toEqual(['bug'])
+  })
+
+  it('maps milestones to {id,title}, dropping blanks and missing ids', () => {
+    expect(
+      mapGiteaMilestones([
+        { id: 3, title: '  v1.0  ' },
+        { id: 4, title: '  ' },
+        { title: 'no-id' },
+        null
+      ])
+    ).toEqual([{ id: 3, title: 'v1.0' }])
   })
 
   it('maps a single issue to the shared GitLabIssueInfo shape', () => {
