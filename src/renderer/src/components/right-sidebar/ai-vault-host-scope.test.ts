@@ -2,15 +2,19 @@
 
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store/types'
 import type { AiVaultSessionResumeTargetState } from './ai-vault-session-resume'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import {
   buildAiVaultHostScopeOptions,
   buildRuntimeAiVaultHostScopeOptions,
   useAiVaultExecutionHostScope
 } from './ai-vault-host-scope'
 import type { ExecutionHostScope } from '../../../../shared/execution-host'
+
+// Default: native mode (local host present). Web-mode cases opt in per-test.
+vi.mock('@/lib/vsagent-web-mode', () => ({ isVSAgentWebMode: vi.fn(() => false) }))
 
 type HostScopeResult = ReturnType<typeof useAiVaultExecutionHostScope>
 
@@ -188,6 +192,22 @@ describe('buildAiVaultHostScopeOptions', () => {
     ).toEqual([
       { id: 'local', label: expect.any(String) },
       { id: 'runtime:remote-server', label: 'remote-server' },
+      { id: 'all', label: 'All hosts' }
+    ])
+  })
+
+  it('omits the phantom local host in VSAgent web mode', () => {
+    vi.mocked(isVSAgentWebMode).mockReturnValueOnce(true)
+    const runtimeHostOptions = buildRuntimeAiVaultHostScopeOptions([
+      { id: 'remote-server', name: 'Orca Server' }
+    ])
+    expect(
+      buildAiVaultHostScopeOptions({
+        activeExecutionHostScope: 'runtime:remote-server',
+        runtimeHostOptions
+      })
+    ).toEqual([
+      { id: 'runtime:remote-server', label: 'Orca Server' },
       { id: 'all', label: 'All hosts' }
     ])
   })

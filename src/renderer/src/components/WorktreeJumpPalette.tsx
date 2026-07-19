@@ -78,6 +78,7 @@ import {
 } from '@/components/browser-pane/browser-focus'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
 import { buildSidebarHostOptions } from '@/components/sidebar/sidebar-host-options'
+import { dropLocalHostByKindInWebMode } from '@/lib/vsagent-web-mode-hosts'
 import { getPaletteHostBadge, type PaletteHostBadge } from '@/components/cmd-j/palette-host-badge'
 import { useSettingsNavigationMetadata } from '@/hooks/useSettingsNavigationMetadata'
 import { runWorktreeDelete } from '@/components/sidebar/delete-worktree-flow'
@@ -455,15 +456,17 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   // the same registry the sidebar host-scope strip builds so labels stay in sync.
   const hostOptions = useMemo(
     () =>
-      buildSidebarHostOptions({
-        repos,
-        sshTargetLabels,
-        sshConnectionStates,
-        settings,
-        runtimeEnvironments,
-        runtimeStatusByEnvironmentId,
-        hostLabelOverrides
-      }),
+      dropLocalHostByKindInWebMode(
+        buildSidebarHostOptions({
+          repos,
+          sshTargetLabels,
+          sshConnectionStates,
+          settings,
+          runtimeEnvironments,
+          runtimeStatusByEnvironmentId,
+          hostLabelOverrides
+        })
+      ),
     [
       repos,
       sshTargetLabels,

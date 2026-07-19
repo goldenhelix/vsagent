@@ -138,6 +138,7 @@ import {
 import { useFolderWorkspaceComposerPathStatus } from '@/components/sidebar/folder-workspace-composer-path-status'
 import { submitFolderWorkspaceCreate } from '@/components/sidebar/folder-workspace-composer-submit'
 import { buildExecutionHostRegistry } from '../../../shared/execution-host-registry'
+import { dropLocalHostByIdInWebMode } from '@/lib/vsagent-web-mode-hosts'
 import {
   normalizeExecutionHostId,
   parseExecutionHostId,
@@ -802,15 +803,17 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       : null
   const hostOptions = useMemo(
     () =>
-      buildExecutionHostRegistry({
-        repos,
-        settings,
-        sshTargetLabels,
-        sshConnectionStates,
-        runtimeEnvironments,
-        runtimeStatusByEnvironmentId,
-        hostLabelOverrides: getHostDisplayLabelOverrides(settings)
-      }),
+      dropLocalHostByIdInWebMode(
+        buildExecutionHostRegistry({
+          repos,
+          settings,
+          sshTargetLabels,
+          sshConnectionStates,
+          runtimeEnvironments,
+          runtimeStatusByEnvironmentId,
+          hostLabelOverrides: getHostDisplayLabelOverrides(settings)
+        })
+      ),
     [
       repos,
       settings,

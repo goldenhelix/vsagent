@@ -272,6 +272,7 @@ import { addHostSectionRows, type HostHeaderRow, type HostSectionRow } from './h
 import { orderHostSectionOptions } from './host-section-order'
 import { useHostHeaderDrag } from './host-header-drag'
 import { buildSidebarHostOptions } from './sidebar-host-options'
+import { dropLocalHostByKindInWebMode } from '@/lib/vsagent-web-mode-hosts'
 import { HostSectionHeaderMenu } from './HostSectionHeaderMenu'
 import { ProjectHeaderActions } from './ProjectHeaderActions'
 import { translate } from '@/i18n/i18n'
@@ -5832,15 +5833,17 @@ const WorktreeList = React.memo(function WorktreeList({
   const hostLabelOverrides = useMemo(() => getHostDisplayLabelOverrides(settings), [settings])
   const hostOptions = useMemo(
     () =>
-      buildSidebarHostOptions({
-        repos,
-        sshTargetLabels,
-        sshConnectionStates,
-        settings,
-        runtimeEnvironments,
-        runtimeStatusByEnvironmentId,
-        hostLabelOverrides
-      }),
+      dropLocalHostByKindInWebMode(
+        buildSidebarHostOptions({
+          repos,
+          sshTargetLabels,
+          sshConnectionStates,
+          settings,
+          runtimeEnvironments,
+          runtimeStatusByEnvironmentId,
+          hostLabelOverrides
+        })
+      ),
     [
       repos,
       sshTargetLabels,

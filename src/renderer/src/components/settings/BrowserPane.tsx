@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import type { GlobalSettings } from '../../../../shared/types'
 import { useAppStore } from '../../store'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { matchesSettingsSearch } from './settings-search'
 import { getBrowserPaneSearchEntries, getBrowserLinkRoutingDescription } from './browser-search'
 import { getBrowserUsePaneSearchEntries } from './browser-use-search'
@@ -115,7 +116,7 @@ export function BrowserPane({
         runtimeStatusByEnvironmentId,
         hostLabelOverrides
       })
-        .filter((host) => host.kind === 'local' || host.kind === 'runtime')
+        .filter((host) => host.kind === 'runtime' || (host.kind === 'local' && !isVSAgentWebMode()))
         .map((host) => ({
           id: host.id,
           label: host.label,
