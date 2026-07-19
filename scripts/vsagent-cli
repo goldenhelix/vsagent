@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# VSAgent CLI launcher: runs the bundled CLI on the BUNDLED Electron runtime
+# (ELECTRON_RUN_AS_NODE), so no system `node` is required and no ambient-node
+# ABI can leak in. Installed as `vsagent` (and the `orca` compat alias) by
+# scripts/install.sh. `vsagent serve [...]` works through the CLI's native
+# serve command, which spawns ORCA_APP_EXECUTABLE exported below.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+INSTALL_DIR="$(dirname "$(dirname "$SELF")")"
+ELECTRON="$INSTALL_DIR/node_modules/electron/dist/electron"
+CLI="$INSTALL_DIR/out/cli/index.js"
+
+if [[ ! -x "$ELECTRON" ]]; then
+  echo "vsagent: bundled Electron runtime missing at $ELECTRON (re-run install.sh)" >&2
+  exit 1
+fi
+
+# Default the data dir to the stable vsagent location; respect explicit pins.
+export VSAGENT_DATA_DIR="${VSAGENT_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/vsagent}"
+# Compat: older CLI builds resolve the runtime via ORCA_USER_DATA_PATH.
+export ORCA_USER_DATA_PATH="${ORCA_USER_DATA_PATH:-$VSAGENT_DATA_DIR}"
+
+# Let `vsagent serve` (and other app-launching commands) find the runtime.
+if [[ -z "${ORCA_APP_EXECUTABLE:-}" ]]; then
+  export ORCA_APP_EXECUTABLE="$ELECTRON"
+  export ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT=1
+fi
+
+# Brand the CLI's help output as vsagent (one seam in src/cli/help.ts).
+export VSAGENT_BRAND_CLI=1
+
+# Why: NODE_OPTIONS could inject incompatible flags into the Electron-as-Node
+# runtime; stash them the same way the in-app dev launcher does.
+export ORCA_NODE_OPTIONS="${NODE_OPTIONS-}"
+export ORCA_NODE_REPL_EXTERNAL_MODULE="${NODE_REPL_EXTERNAL_MODULE-}"
+unset NODE_OPTIONS NODE_REPL_EXTERNAL_MODULE
+
+ELECTRON_RUN_AS_NODE=1 exec "$ELECTRON" "$CLI" "$@"

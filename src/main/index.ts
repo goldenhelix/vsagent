@@ -101,6 +101,7 @@ import {
   shouldSkipSingleInstanceLock
 } from './startup/single-instance-lock'
 import { reclaimStaleSingletonLock } from './startup/reclaim-stale-singleton-lock'
+import { applyVSAgentEnvAliases } from '../shared/vsagent-env-aliases'
 import { startEventLoopStallProbe } from './startup/event-loop-stall-probe'
 import { startMainThreadChurnProbe } from './diagnostics/main-thread-churn-probe'
 import {
@@ -435,6 +436,10 @@ function maybeAutoRenameBranchOnFirstWorkFromHook(event: {
     }
   )
 }
+
+// Why (VSAgent fork): map VSAGENT_* env aliases onto their ORCA_* targets
+// before any env-dependent startup logic reads them.
+applyVSAgentEnvAliases()
 
 const devInstanceIdentity = getDevInstanceIdentity(is.dev)
 const devAgentHookEndpointNamespace = devInstanceIdentity.isDev
@@ -2291,7 +2296,13 @@ app.whenReady().then(async () => {
     // is added by the dispatcher below). Windows is excluded — there install() would
     // only mutate the persistent user-registry PATH without helping the current
     // serve's child terminals. Best-effort: a failure must not block serve start.
-    if (process.platform === 'darwin' || process.platform === 'linux') {
+    // Why (VSAgent fork): tarball installs manage the CLI launchers themselves
+    // (install.sh links vsagent/orca to the bundled-runtime launcher); the
+    // serve process must not race or overwrite them.
+    if (
+      process.env.VSAGENT_MANAGED_INSTALL !== '1' &&
+      (process.platform === 'darwin' || process.platform === 'linux')
+    ) {
       try {
         // Why: serve is headless — never let a missing-write-permission fallback
         // pop an osascript admin prompt (it would hang serve on a GUI host). Skip

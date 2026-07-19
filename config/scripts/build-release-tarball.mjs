@@ -165,6 +165,7 @@ stagePath('out')
 
 // Launcher + install/upgrade scripts.
 stageFile('scripts/vsagent-serve')
+stageFile('scripts/vsagent-cli')
 stageFile('scripts/vsagent.service')
 stageFile('scripts/install.sh')
 

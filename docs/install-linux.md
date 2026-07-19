@@ -83,8 +83,11 @@ The script:
 2. Unpacks it into `~/.local/share/vsagent`.
 3. Runs `pnpm install --prod` to materialise `node_modules`, fetch the
    Electron binary, and rebuild `node-pty` against Electron's ABI.
-4. Symlinks `~/.local/bin/vsagent` (serve launcher) and `~/.local/bin/orca`
-   (the Orca CLI).
+4. Symlinks `~/.local/bin/vsagent` (the CLI — `vsagent status`,
+   `vsagent serve`, `vsagent file open`, ... — running on the bundled Electron
+   runtime, no system Node required), `~/.local/bin/orca` (compat alias for
+   the same CLI), and `~/.local/bin/vsagent-serve` (the server launcher used
+   by the systemd unit).
 5. Writes a systemd **user** unit at `~/.config/systemd/user/vsagent.service`,
    starts it, and prints the tokenized web client URL.
 
@@ -110,6 +113,20 @@ curl -fsSL https://github.com/goldenhelix/vsagent/releases/latest/download/insta
 Note: serve binds `0.0.0.0` on the chosen port. Restrict exposure with a
 firewall or a reverse proxy (below); `--pairing-address` only changes the
 address *advertised* in URLs, not the bind.
+
+### Environment variables
+
+| Var | Meaning |
+| --- | --- |
+| `VSAGENT_DATA_DIR` | Absolute path for all server + CLI state (profiles, pairing trust, runtime metadata). Default for a tarball install: `~/.config/vsagent` — the CLI resolves the same dir, so `vsagent status` finds the server with no configuration. Keep it short: unix sockets under it break past ~107 bytes. |
+| `VSAGENT_PORT`, `VSAGENT_PAIRING_ADDRESS` | Serve launcher port / advertised address (see Flags). |
+| `VSAGENT_SERVE_OPEN_PAIRING=1` | Trusted-proxy mode: `GET /` redirects with an embedded pairing offer (see Reverse proxy). |
+| `VSAGENT_SERVE_PAIRING_PROXY_SECRET` | Header-gated variant of open pairing. |
+| `VSAGENT_GITEA_TOKEN`, `VSAGENT_GITEA_API_BASE_URL` | Gitea task-source auth. |
+| `VSAGENT_TELEMETRY_DISABLED=1`, `VSAGENT_DIAGNOSTICS_DISABLED=1` | Disable telemetry/diagnostics (container images usually want both). |
+
+Legacy `ORCA_*` spellings of these keep working; when both are set, the
+`VSAGENT_*` value wins.
 
 ### Running long after logout
 
@@ -287,7 +304,7 @@ VSWarehouse auth), the tokenized pairing URL adds nothing — whoever can reach
 the port is already trusted. Set:
 
 ```ini
-Environment=ORCA_SERVE_OPEN_PAIRING=1
+Environment=VSAGENT_SERVE_OPEN_PAIRING=1
 ```
 
 on the systemd unit (or export it before launching `vsagent-serve`). Then
@@ -306,7 +323,7 @@ fragment; only `/` redirects.
 
 If the serve port is reachable by machines that should NOT get access (shared
 LAN without a firewall), use the header-gated variant instead: set
-`ORCA_SERVE_PAIRING_PROXY_SECRET=<random>` on the service and have only the
+`VSAGENT_SERVE_PAIRING_PROXY_SECRET=<random>` on the service and have only the
 proxy inject the matching header:
 
 ```nginx

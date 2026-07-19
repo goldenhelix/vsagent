@@ -8,6 +8,9 @@ vi.mock('electron', () => {
   return {
     app: {
       getPath: vi.fn((name: string) => paths.get(name) ?? ''),
+      // Why: a dev-checkout-like app path (no VERSION marker), so the VSAgent
+      // install resolver stays inert and upstream expectations hold.
+      getAppPath: vi.fn(() => '/tmp/dev-checkout'),
       setPath: vi.fn((name: string, value: string) => {
         paths.set(name, value)
       }),

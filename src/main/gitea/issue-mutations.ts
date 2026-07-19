@@ -18,6 +18,7 @@ import {
   type RawGiteaComment,
   type RawGiteaIssue
 } from './issue-mappers'
+import { cancelUnreadResponseBody } from '../lib/unread-response-body'
 import type { GiteaRepoRef } from './repository-ref'
 import {
   fetchGiteaLabelObjects,
@@ -55,6 +56,9 @@ async function giteaDelete(repo: GiteaRepoRef, path: string): Promise<void> {
     headers: giteaAuthRequestHeaders(),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS)
   })
+  // Why: undici crashes the process on unread response bodies (orca#8695);
+  // DELETE responses are unread on every path, so always cancel.
+  await cancelUnreadResponseBody(response)
   if (!response.ok) {
     throw new HostedReviewApiRequestError(response.statusText, { status: response.status })
   }

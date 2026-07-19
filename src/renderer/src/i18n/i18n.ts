@@ -8,6 +8,7 @@ import { initReactI18next } from 'react-i18next'
 
 import en from './locales/en.json'
 import { isPseudoLocalizationLocale, pseudoLocalizeString } from './pseudo-localization'
+import { isVSAgentWebMode } from '../lib/vsagent-web-mode'
 import { DEFAULT_LOCALE, resolveUiLocale } from './supported-languages'
 import type { SupportedUiLocale } from '../../../shared/ui-locale'
 import type { UiLanguage } from '../../../shared/ui-language'
@@ -74,7 +75,12 @@ void i18n
 
 export function translate(key: string, fallback: string, options?: TOptions): string {
   const value = i18n.t(key, { defaultValue: fallback, ...options })
-  return isPseudoLocalizationLocale(i18n.language) ? pseudoLocalizeString(value) : value
+  const localized = isPseudoLocalizationLocale(i18n.language) ? pseudoLocalizeString(value) : value
+  // Why (VSAgent fork): rebrand every user-visible product-name mention in the
+  // web client at the one seam all strings pass through — covers current and
+  // future upstream copy. Word-boundary + case-sensitive so lowercase `orca`
+  // command/path references stay accurate.
+  return isVSAgentWebMode() ? localized.replace(/\bOrca\b/g, 'VSAgent') : localized
 }
 
 export async function setRendererUiLanguage(language: UiLanguage): Promise<void> {

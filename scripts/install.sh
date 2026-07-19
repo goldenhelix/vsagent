@@ -196,14 +196,13 @@ log "installing production dependencies (this may take a few minutes)…"
 
 # --------- launcher symlinks ---------
 mkdir -p "$BIN_DIR"
-chmod +x "$INSTALL_DIR/scripts/vsagent-serve" 2>/dev/null || true
-ln -snf "$INSTALL_DIR/scripts/vsagent-serve" "$BIN_DIR/vsagent"
-# Why: out/cli/index.js is upstream's real `orca` CLI (orca serve/open/...),
-# not the web launcher — link it under its own name.
-if [[ -f "$INSTALL_DIR/out/cli/index.js" ]]; then
-  chmod +x "$INSTALL_DIR/out/cli/index.js" 2>/dev/null || true
-  ln -snf "$INSTALL_DIR/out/cli/index.js" "$BIN_DIR/orca"
-fi
+chmod +x "$INSTALL_DIR/scripts/vsagent-serve" "$INSTALL_DIR/scripts/vsagent-cli" 2>/dev/null || true
+# `vsagent` is the CLI (vsagent serve / status / file open ...), running on the
+# BUNDLED Electron runtime — no system node required. `orca` stays as a compat
+# alias. The server launcher keeps its own name for systemd/service use.
+ln -snf "$INSTALL_DIR/scripts/vsagent-cli" "$BIN_DIR/vsagent"
+ln -snf "$INSTALL_DIR/scripts/vsagent-cli" "$BIN_DIR/orca"
+ln -snf "$INSTALL_DIR/scripts/vsagent-serve" "$BIN_DIR/vsagent-serve"
 
 # --------- systemd unit ---------
 if [[ "$USE_SYSTEMD" -eq 1 ]]; then

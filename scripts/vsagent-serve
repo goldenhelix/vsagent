@@ -51,12 +51,20 @@ WEB_URL_FILE="$STATE_DIR/web-url"
 # relative to the install dir, and runtime skill assets load from cwd/resources.
 cd "$INSTALL_DIR"
 
+# Why: install.sh links the `vsagent`/`orca` CLI launchers; skip the serve
+# process's own CLI self-install so it can't race or hijack them.
+export VSAGENT_MANAGED_INSTALL=1
+
 # Why: the printed "Web client URL" carries the pairing token, and journald may
 # rotate past it. Mirror stdout while recording that line to a state file so
 # systemd users can always recover the URL. exec keeps electron as the service
 # main process (signals, exit code) while the process substitution filters.
+# The ready line is also rebranded here (VSAgent) without an upstream diff.
 exec "$ELECTRON" "$INSTALL_DIR" "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} > >(
   while IFS= read -r line; do
+    case "$line" in
+      'Orca server ready: '*) line="VSAgent server ready: ${line#Orca server ready: }" ;;
+    esac
     printf '%s\n' "$line"
     case "$line" in
       'Web client URL: '*)

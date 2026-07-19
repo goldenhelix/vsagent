@@ -17,7 +17,8 @@ const AUDITED_GLOBAL_FETCH_LINES = new Map<string, number>([
   // HTTP call sites — body consumed or cancelled on every path, including !ok
   ['main/azure-devops/azure-devops-api-request.ts', 1],
   ['main/bitbucket/client.ts', 1],
-  ['main/gitea/client.ts', 1],
+  ['main/gitea/client.ts', 2],
+  ['main/gitea/issue-mutations.ts', 1],
   ['main/orca-profiles/profile-cloud-client.ts', 1],
   ['main/orca-profiles/profile-cloud-org-members-client.ts', 1],
   ['main/rate-limits/codex-fetcher.ts', 3],
@@ -33,7 +34,8 @@ const AUDITED_GLOBAL_FETCH_LINES = new Map<string, number>([
   ['main/ipc/worktree-remote.ts', 2],
   ['relay/git-handler.ts', 1],
   // fetch mentioned only in a comment
-  ['main/ipc/feedback.ts', 1]
+  ['main/ipc/feedback.ts', 1],
+  ['main/webpreview/rewrite-script.ts', 1]
 ])
 
 // A line is a hit when it calls bare `fetch(` or touches `globalThis.fetch` /

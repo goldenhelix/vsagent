@@ -13,6 +13,11 @@ import { reportCliError } from './format'
 import { printHelp } from './help'
 import { RuntimeClient } from './runtime-client'
 import { COMMAND_SPECS } from './specs'
+import { applyVSAgentEnvAliases } from '../shared/vsagent-env-aliases'
+
+// Why (VSAgent fork): map VSAGENT_* env aliases onto their ORCA_* targets
+// before any command reads the environment.
+applyVSAgentEnvAliases()
 
 export { COMMAND_SPECS } from './specs'
 export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selectors'

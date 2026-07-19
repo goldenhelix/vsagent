@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getVersionManagerBinPaths } from '../codex-cli/command'
 import { getMainE2EConfig } from '../e2e-config'
+import { resolveVSAgentUserDataDir } from './vsagent-user-data'
 
 const DEV_PARENT_SHUTDOWN_GRACE_MS = 3000
 const HTTP1_COMPATIBILITY_ENV_VAR = 'ORCA_DISABLE_HTTP2'
@@ -184,6 +185,18 @@ export function configureDevUserDataPath(isDev: boolean): void {
     // and session state from leaking between tests through the shared dev
     // profile while still leaving the user's real packaged profile untouched.
     app.setPath('userData', e2eConfig.userDataDir)
+    return
+  }
+
+  // Why (VSAgent fork): a VSAgent install (tarball VERSION marker) gets one
+  // stable dir shared with the CLI — see resolveVSAgentUserDataDir. E2E stays
+  // highest so upstream's test-isolation contract is untouched.
+  const vsagentDir = resolveVSAgentUserDataDir({
+    appPath: app.getAppPath(),
+    appDataPath: app.getPath('appData')
+  })
+  if (vsagentDir) {
+    app.setPath('userData', vsagentDir)
     return
   }
 
