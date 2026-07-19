@@ -9,7 +9,7 @@
 //
 // Flow: extract tarball → `pnpm install --prod` → boot scripts/vsagent-serve
 // (the exact production launcher) with an isolated HOME → assert
-// GET /web-index.html returns 200, the log contains "Orca server ready", and
+// GET /web-index.html returns 200, the log contains the server-ready line, and
 // the launcher recorded the "Web client URL" to the vsagent state file.
 //
 // No display flags are passed: the app's own headless fallback (or Xvfb if
@@ -202,7 +202,9 @@ while (Number(process.hrtime.bigint() - start) / 1e6 < BOOT_TIMEOUT_MS) {
   if (exited !== null) {
     die(`vsagent-serve exited before becoming ready (${exited})`, bootLog)
   }
-  if (bootLog.includes('Orca server ready') && (await probeWebClient())) {
+  // Why: vsagent-serve rebrands the ready line; accept both spellings so the
+  // smoke also passes against an unfiltered `electron . --serve` boot.
+  if (/(VSAgent|Orca) server ready/.test(bootLog) && (await probeWebClient())) {
     ready = true
     break
   }
