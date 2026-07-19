@@ -785,7 +785,10 @@ function App(): React.JSX.Element {
     }
     // Why: this rollout is for users who are still in first-run onboarding.
     // Existing profiles are locally classified once and never auto-toured.
-    actions.setContextualToursAutoEligible(shouldShowOnboarding(onboarding))
+    // Why (VSAgent fork): the upstream tips are desktop-centric (split panes,
+    // worktree branches, "bring your logins into Orca"), so suppress all
+    // auto-tours in the web client until we ship VSAgent-tailored ones.
+    actions.setContextualToursAutoEligible(!isVSAgentWebMode() && shouldShowOnboarding(onboarding))
   }, [actions, contextualToursAutoEligible, onboarding, onboardingLoaded, persistedUIReady])
 
   useEffect(() => {
@@ -814,6 +817,12 @@ function App(): React.JSX.Element {
   }, [persistedUIReady])
 
   useEffect(() => {
+    // Why (VSAgent fork): the app-open feature tips (orca-cli install, the
+    // Cmd-J "jump to a worktree" palette) are desktop-centric, so don't auto-
+    // open them in the web client. We can ship VSAgent-tailored tips later.
+    if (isVSAgentWebMode()) {
+      return
+    }
     const featureTipsDecision = getFeatureTipsAppOpenDecision({
       activeModal,
       cliInstalled: featureTipCliInstalled,

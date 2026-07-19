@@ -390,7 +390,9 @@ export default function Landing(): React.JSX.Element {
         </div>
       </div>
 
-      {showGitHubSupportFooter && (
+      {/* Why (VSAgent fork): the "Star/Open GitHub" nag points at the upstream
+          Orca repo, which is irrelevant in the VSAgent web deployment. */}
+      {showGitHubSupportFooter && !isVSAgentBrand && (
         <div className="absolute bottom-6 left-0 right-0 flex justify-center">
           <GitHubStarButton hasRepos={repos.length > 0} />
         </div>
