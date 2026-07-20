@@ -716,7 +716,11 @@ function getMixedHostContextLabels(
   group: WorktreeGroupEntry,
   repoMap: Map<string, Repo>,
   projectIndex: ProjectGroupingIndex | null,
-  hostLabelById: ReadonlyMap<string, string> | undefined
+  hostLabelById: ReadonlyMap<string, string> | undefined,
+  // Why: with more than one connected host anywhere in the sidebar, a
+  // single-host group is still ambiguous — tag every row, not just groups
+  // that mix hosts internally.
+  forceWhenSidebarSpansHosts = false
 ): Map<string, string> | undefined {
   const labelsByRepoId = new Map<string, string>()
   const uniqueLabels = new Set<string>()
@@ -728,7 +732,10 @@ function getMixedHostContextLabels(
     labelsByRepoId.set(repoId, label)
     uniqueLabels.add(label)
   }
-  return uniqueLabels.size > 1 ? labelsByRepoId : undefined
+  if (uniqueLabels.size > 1) {
+    return labelsByRepoId
+  }
+  return forceWhenSidebarSpansHosts && labelsByRepoId.size > 0 ? labelsByRepoId : undefined
 }
 
 function getHostWorktreeCounts(
@@ -1208,6 +1215,20 @@ export function buildRows(
     groupsToAppend: OrderedGroupEntry[],
     projectGroupDepth = 0
   ): void => {
+    // Why: count distinct host labels across everything being rendered so
+    // per-row host tags appear whenever the sidebar spans multiple hosts.
+    const sidebarHostLabels = new Set<string>()
+    if (groupBy === 'repo') {
+      for (const [, group] of groupsToAppend) {
+        for (const repoId of group.repoIds) {
+          const label = getRepoHostLabel(repoId, repoMap, projectIndex, hostLabelById)
+          if (label) {
+            sidebarHostLabels.add(label)
+          }
+        }
+      }
+    }
+    const sidebarSpansHosts = sidebarHostLabels.size > 1
     for (const [key, group] of groupsToAppend) {
       const isCollapsed = collapsedGroups.has(key)
       const repo = group.repo
@@ -1294,7 +1315,13 @@ export function buildRows(
         const items = groupBy === 'repo' ? orderMainWorktreeFirst(group.items) : group.items
         const hostContextLabelByRepoId =
           groupBy === 'repo'
-            ? getMixedHostContextLabels(group, repoMap, projectIndex, hostLabelById)
+            ? getMixedHostContextLabels(
+                group,
+                repoMap,
+                projectIndex,
+                hostLabelById,
+                sidebarSpansHosts
+              )
             : undefined
         if (groupBy === 'repo') {
           appendWorktreeRows(result, items, repoMap, lineageById, worktreeMap, {
