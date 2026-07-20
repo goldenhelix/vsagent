@@ -125,6 +125,7 @@ describe('serveOrcaApp', () => {
       serveOrcaApp({
         json: true,
         port: '6768',
+        host: '100.64.1.20',
         pairingAddress: '100.64.1.20',
         mobilePairing: true
       })
@@ -137,6 +138,8 @@ describe('serveOrcaApp', () => {
         '--serve-json',
         '--serve-port',
         '6768',
+        '--serve-host',
+        '100.64.1.20',
         '--serve-pairing-address',
         '100.64.1.20',
         '--serve-mobile-pairing'

@@ -57,6 +57,17 @@ function getOptionalServePort(flags: Map<string, string | boolean>): string | nu
   return rawPort
 }
 
+function getOptionalServeHost(flags: Map<string, string | boolean>): string | null {
+  if (!flags.has('host')) {
+    return null
+  }
+  const rawHost = flags.get('host')
+  if (typeof rawHost !== 'string' || rawHost.length === 0) {
+    throw new RuntimeClientError('invalid_argument', 'Missing value for --host.')
+  }
+  return rawHost
+}
+
 export const CORE_HANDLERS: Record<string, CommandHandler> = {
   'claude-teams': async ({ client, rawArgs }) => {
     if (process.platform === 'win32') {
@@ -119,9 +130,11 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       )
     }
     const port = getOptionalServePort(flags)
+    const host = getOptionalServeHost(flags)
     const exitCode = await serveOrcaApp({
       json,
       port,
+      host,
       pairingAddress:
         typeof flags.get('pairing-address') === 'string'
           ? (flags.get('pairing-address') as string)

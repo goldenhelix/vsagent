@@ -17,8 +17,14 @@ INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 
 PORT="${VSAGENT_PORT:-6768}"
 PAIRING_ADDRESS="${VSAGENT_PAIRING_ADDRESS:-}"
+# Bind host: default 0.0.0.0 (all interfaces). Set VSAGENT_HOST to a single IP
+# (e.g. the Tailscale address) to restrict exposure to that interface.
+BIND_HOST="${VSAGENT_HOST:-}"
 
 ARGS=(--serve --serve-port "$PORT")
+if [[ -n "$BIND_HOST" ]]; then
+  ARGS+=(--serve-host "$BIND_HOST")
+fi
 if [[ -n "$PAIRING_ADDRESS" ]]; then
   ARGS+=(--serve-pairing-address "$PAIRING_ADDRESS")
 fi

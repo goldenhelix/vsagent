@@ -104,15 +104,33 @@ curl -fsSL https://github.com/goldenhelix/vsagent/releases/latest/download/insta
 | --- | --- | --- |
 | `--version=vX.Y.Z` | latest | Pin to a specific release tag. Accepts `v1.2.3` or `1.2.3`. |
 | `--port=N` | `6768` | The serve port (WebSocket runtime + web client over HTTP, same port). Becomes `VSAGENT_PORT`. |
+| `--host=IP` | `0.0.0.0` | Interface to bind. Set to a single IP (e.g. a Tailscale address) to expose serve only on that interface. Becomes `VSAGENT_HOST`. The pairing/web-client URL then advertises that IP unless `--pairing-address` overrides it. |
 | `--pairing-address=HOST` | auto | Hostname/IP written into printed pairing / web client URLs. Set it to the DNS name users will actually reach (e.g. behind a proxy). Becomes `VSAGENT_PAIRING_ADDRESS`. |
 | `--install-dir=DIR` | `~/.local/share/vsagent` | Where the unpacked tarball lives. Also `VSAGENT_HOME` env. |
 | `--repo=owner/repo` | `goldenhelix/vsagent` | Override the release source (forks / mirrors). |
 | `--no-systemd` | off | Skip writing/enabling the unit. Run under tmux, supervisord, etc. |
 | `--no-start` | off | Don't start the service at the end. |
 
-Note: serve binds `0.0.0.0` on the chosen port. Restrict exposure with a
-firewall or a reverse proxy (below); `--pairing-address` only changes the
-address *advertised* in URLs, not the bind.
+Note: serve binds `0.0.0.0` (all interfaces) on the chosen port by default.
+Restrict exposure with `--host` (bind a single interface, e.g. a Tailscale IP),
+a firewall, or a reverse proxy (below). `--pairing-address` only changes the
+address *advertised* in URLs, not the bind — use `--host` to change what serve
+actually listens on. The WebSocket/web-client server is the only externally
+bound listener; everything else (daemon, CLI socket, agent hooks, browser
+proxies) binds a unix socket or loopback.
+
+Two caveats when pinning `--host` to a specific interface IP:
+
+- **The interface must be up before serve starts.** Binding an IP that does
+  not yet exist fails with `EADDRNOTAVAIL` and the web server won't come up
+  (the runtime still runs on its local socket, but no browser can reach it).
+  Under systemd, order the unit after the interface — e.g. for Tailscale add
+  `After=tailscaled.service` and a readiness check, or restart serve once the
+  address is assigned.
+- **TLS + a pinned IP needs a matching cert.** With `--serve-https` the
+  default self-signed certificate does not include the bound IP in its SAN, so
+  browsers will warn. Supply a cert that covers that IP/hostname via
+  `--serve-cert` / `--serve-key`, or terminate TLS at a reverse proxy.
 
 ### Environment variables
 
@@ -120,6 +138,7 @@ address *advertised* in URLs, not the bind.
 | --- | --- |
 | `VSAGENT_DATA_DIR` | Absolute path for all server + CLI state (profiles, pairing trust, runtime metadata). Default for a tarball install: `~/.config/vsagent` — the CLI resolves the same dir, so `vsagent status` finds the server with no configuration. Keep it short: unix sockets under it break past ~107 bytes. |
 | `VSAGENT_PORT`, `VSAGENT_PAIRING_ADDRESS` | Serve launcher port / advertised address (see Flags). |
+| `VSAGENT_HOST` | Interface to bind (default `0.0.0.0`). Set to a single IP to restrict exposure to that interface. |
 | `VSAGENT_SERVE_OPEN_PAIRING=1` | Trusted-proxy mode: `GET /` redirects with an embedded pairing offer (see Reverse proxy). |
 | `VSAGENT_SERVE_PAIRING_PROXY_SECRET` | Header-gated variant of open pairing. |
 | `VSAGENT_GITEA_TOKEN`, `VSAGENT_GITEA_API_BASE_URL` | Gitea task-source auth. |
@@ -168,7 +187,7 @@ The launcher is a thin wrapper around:
 ```bash
 cd <install-dir>
 node_modules/electron/dist/electron <install-dir> --serve --serve-port $VSAGENT_PORT \
-  [--serve-pairing-address $VSAGENT_PAIRING_ADDRESS]
+  [--serve-host $VSAGENT_HOST] [--serve-pairing-address $VSAGENT_PAIRING_ADDRESS]
 ```
 
 plus capture of the printed `Web client URL:` line into

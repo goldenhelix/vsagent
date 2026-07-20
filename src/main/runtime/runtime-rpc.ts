@@ -54,6 +54,10 @@ import {
 } from '../../shared/terminal-stream-protocol'
 
 const DEFAULT_WS_PORT = 6768
+// Why (VSAgent fork): the WebSocket transport is the only wildcard-bound
+// listener in serve mode. Default to 0.0.0.0 to preserve behavior; --serve-host
+// narrows it (e.g. to a Tailscale IP).
+const DEFAULT_WS_HOST = '0.0.0.0'
 
 type OrcaRuntimeRpcServerOptions = {
   runtime: OrcaRuntimeService
@@ -62,6 +66,10 @@ type OrcaRuntimeRpcServerOptions = {
   platform?: NodeJS.Platform
   enableWebSocket?: boolean
   wsPort?: number
+  // Why (VSAgent fork): bind address for the WebSocket/web-client server.
+  // Defaults to 0.0.0.0 (all interfaces); set to a specific IP to restrict
+  // exposure (e.g. a Tailscale interface).
+  wsHost?: string
   // Why: true when the caller set an explicit port (e.g. `orca serve --port`).
   // Distinguishes that pin from the DEFAULT_WS_PORT default so transport bind
   // order can prefer the pin over a stale STA-1511 fallback (issue #8535).
@@ -478,6 +486,7 @@ export class OrcaRuntimeRpcServer {
   private readonly platform: NodeJS.Platform
   private readonly enableWebSocket: boolean
   private readonly wsPort: number
+  private readonly wsHost: string
   private readonly preferPinnedWsPort: boolean
   private readonly webClientRoot: string | undefined
   private readonly serveTls: boolean
@@ -514,6 +523,7 @@ export class OrcaRuntimeRpcServer {
     platform = process.platform,
     enableWebSocket = false,
     wsPort = DEFAULT_WS_PORT,
+    wsHost = DEFAULT_WS_HOST,
     preferPinnedWsPort = false,
     webClientRoot,
     serveTls = false,
@@ -529,6 +539,7 @@ export class OrcaRuntimeRpcServer {
     this.platform = platform
     this.enableWebSocket = enableWebSocket
     this.wsPort = wsPort
+    this.wsHost = wsHost
     this.preferPinnedWsPort = preferPinnedWsPort
     this.webClientRoot = webClientRoot
     this.serveTls = serveTls
@@ -942,7 +953,7 @@ export class OrcaRuntimeRpcServer {
         const serveTlsMaterial = this.resolveServeTlsMaterial()
 
         const wsTransport = new WebSocketTransport({
-          host: '0.0.0.0',
+          host: this.wsHost,
           port: this.wsPort,
           staticRoot: this.webClientRoot,
           ...(serveTlsMaterial

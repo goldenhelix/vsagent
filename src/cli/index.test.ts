@@ -2022,12 +2022,21 @@ describe('orca cli worktree awareness', () => {
     expect(serveOrcaAppMock).toHaveBeenCalledWith({
       json: true,
       port: '6768',
+      host: null,
       pairingAddress: '100.64.1.20',
       noPairing: true,
       mobilePairing: false,
       recipeJson: false,
       projectRoot: null
     })
+  })
+
+  it('forwards --host as the serve bind address', async () => {
+    serveOrcaAppMock.mockResolvedValue(0)
+
+    await main(['serve', '--host', '100.64.1.20', '--json'], '/tmp/repo')
+
+    expect(serveOrcaAppMock).toHaveBeenCalledWith(expect.objectContaining({ host: '100.64.1.20' }))
   })
 
   it('starts a foreground headless server with mobile pairing enabled', async () => {
@@ -2041,6 +2050,7 @@ describe('orca cli worktree awareness', () => {
     expect(serveOrcaAppMock).toHaveBeenCalledWith({
       json: true,
       port: null,
+      host: null,
       pairingAddress: '100.64.1.20',
       noPairing: false,
       mobilePairing: true,
@@ -2067,6 +2077,7 @@ describe('orca cli worktree awareness', () => {
     expect(serveOrcaAppMock).toHaveBeenCalledWith({
       json: false,
       port: null,
+      host: null,
       pairingAddress: 'wss://sandbox.example.com',
       noPairing: false,
       mobilePairing: false,

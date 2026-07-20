@@ -1409,6 +1409,7 @@ let syntheticTitleSpinnerTimer: ReturnType<typeof setInterval> | null = null
 type ServeOptions = {
   json: boolean
   wsPort?: number
+  wsHost?: string
   pairingAddress: string | null
   noPairing: boolean
   mobilePairing: boolean
@@ -1417,6 +1418,16 @@ type ServeOptions = {
   https: boolean
   tlsCertPath: string | null
   tlsKeyPath: string | null
+}
+
+// Why (VSAgent fork): a wildcard bind has no single advertisable address, so
+// it must not become the pairing host. Mirrors the check in
+// advertised-url-watcher.ts and local-workspace-port-scanner.ts.
+function isWildcardBindHost(host: string): boolean {
+  // Strip IPv6 brackets so [::] is recognized like ::, mirroring the
+  // unspecified-host check in advertised-url-watcher.ts.
+  const stripped = host.trim().replace(/^\[|\]$/g, '')
+  return stripped === '' || stripped === '0.0.0.0' || stripped === '::' || stripped === '*'
 }
 
 function getServeOptions(argv = process.argv): ServeOptions {
@@ -1437,10 +1448,19 @@ function getServeOptions(argv = process.argv): ServeOptions {
     }
     wsPort = parsedPort
   }
+  const rawHost = valueAfter('--serve-host')
+  const wsHost = rawHost ?? undefined
+  const isSpecificHost = wsHost !== undefined && !isWildcardBindHost(wsHost)
+  const explicitPairingAddress = valueAfter('--serve-pairing-address')
   return {
     json: argv.includes('--serve-json'),
     ...(wsPort !== undefined ? { wsPort } : {}),
-    pairingAddress: valueAfter('--serve-pairing-address'),
+    ...(wsHost !== undefined ? { wsHost } : {}),
+    // Why (VSAgent fork): binding to a specific IP (e.g. a Tailscale address)
+    // but leaving the advertised host at the 127.0.0.1 default would print an
+    // unreachable pairing/web-client URL. Default the pairing address to the
+    // bind host so `--serve-host <ip>` alone advertises a reachable URL.
+    pairingAddress: explicitPairingAddress ?? (isSpecificHost ? (wsHost as string) : null),
     noPairing: argv.includes('--serve-no-pairing'),
     mobilePairing: argv.includes('--serve-mobile-pairing'),
     recipeJson: argv.includes('--serve-recipe-json'),
@@ -2229,6 +2249,9 @@ app.whenReady().then(async () => {
     enableWebSocket: true,
     ...(isE2E ? { wsPort: 0 } : {}),
     ...(devWsPort !== undefined ? { wsPort: devWsPort } : {}),
+    // Why (VSAgent fork): --serve-host narrows the WS/web-client bind from the
+    // 0.0.0.0 default (e.g. to a Tailscale IP). Omitted → runtime keeps 0.0.0.0.
+    ...(serveOptions?.wsHost ? { wsHost: serveOptions.wsHost } : {}),
     ...(serveOptions?.wsPort !== undefined
       ? {
           wsPort: serveOptions.wsPort,
