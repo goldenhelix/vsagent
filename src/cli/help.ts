@@ -11,6 +11,7 @@ Startup:
   open                      Launch Orca and wait for the runtime to be reachable
   serve                     Start a headless Orca runtime server
   status                    Show app/runtime/graph readiness
+  pairing-url               Print a pairing URL to add this runtime elsewhere
 
 Diagnostics:
   diagnostics memory        Collect a memory snapshot for Orca and managed terminals
@@ -199,6 +200,7 @@ Common Commands:
   orca open [--json]
   orca serve [--port <port>] [--pairing-address <host>] [--mobile-pairing] [--no-pairing] [--project-root <path>] [--recipe-json] [--json]
   orca status [--json]
+  orca pairing-url [--address <host>] [--rotate] [--json]
   orca diagnostics memory [--json]
   orca agent-context [--json]
   orca environment add --name <name> --pairing-code <code> [--json]
