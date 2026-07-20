@@ -312,7 +312,7 @@ export function GiteaIntegrationCard(): React.JSX.Element {
                 <span className="font-mono text-[11px]">
                   {translate(
                     'auto.components.settings.token.source.control.integration.cards.6d5c2a3005',
-                    'ORCA_GITEA_TOKEN'
+                    'VSAGENT_GITEA_TOKEN'
                   )}
                 </span>{' '}
                 {translate(
@@ -322,7 +322,7 @@ export function GiteaIntegrationCard(): React.JSX.Element {
                 <span className="font-mono text-[11px]">
                   {translate(
                     'auto.components.settings.token.source.control.integration.cards.709057ad91',
-                    'ORCA_GITEA_API_BASE_URL'
+                    'VSAGENT_GITEA_API_BASE_URL'
                   )}
                 </span>{' '}
                 {translate(

@@ -58,7 +58,7 @@ const TASK_PROVIDER_OPTIONS: readonly {
     get description() {
       return translate(
         'auto.components.settings.TasksPane.gitea.desc',
-        'Show Gitea in the Tasks source picker and sidebar shortcuts. Requires a server-configured token (ORCA_GITEA_TOKEN).'
+        'Show Gitea in the Tasks source picker and sidebar shortcuts. Requires a server-configured token (VSAGENT_GITEA_TOKEN).'
       )
     },
     // Why: no dedicated Gitea brand mark ships here; the Coffee mug echoes
