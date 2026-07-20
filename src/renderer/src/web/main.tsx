@@ -13,8 +13,8 @@ import {
 } from './web-pairing'
 import {
   createStoredWebRuntimeEnvironment,
-  readStoredWebRuntimeEnvironment,
-  saveStoredWebRuntimeEnvironment
+  listStoredWebRuntimeEnvironments,
+  upsertStoredWebRuntimeEnvironment
 } from './web-runtime-environment'
 import { installWebPreloadApi } from './web-preload-api'
 import { I18nProvider } from '../i18n/I18nProvider'
@@ -29,7 +29,7 @@ function WebRoot(): React.JSX.Element {
   const startupDecision = useMemo(() => {
     const decision = decideWebPairingStartup({
       initialPairingInput,
-      hasStoredEnvironment: readStoredWebRuntimeEnvironment() !== null
+      hasStoredEnvironment: listStoredWebRuntimeEnvironments().length > 0
     })
     if (
       decision.kind === 'auto-save-runtime-offer' ||
@@ -41,8 +41,12 @@ function WebRoot(): React.JSX.Element {
   }, [initialPairingInput])
   const [hasEnvironment, setHasEnvironment] = useState(() => {
     if (startupDecision.kind === 'auto-save-runtime-offer') {
-      saveStoredWebRuntimeEnvironment(
-        createStoredWebRuntimeEnvironment({ name: 'Orca Server', offer: startupDecision.offer })
+      // Why: a URL-fragment pairing comes from the page-origin server — the
+      // browser's PRIMARY. Same-endpoint re-pairs keep the env id stable so
+      // saved secondaries and persisted sessions survive.
+      upsertStoredWebRuntimeEnvironment(
+        createStoredWebRuntimeEnvironment({ name: 'Orca Server', offer: startupDecision.offer }),
+        { makeActive: true }
       )
       return true
     }

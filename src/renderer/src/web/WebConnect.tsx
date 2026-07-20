@@ -4,11 +4,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  clearStoredWebRuntimeEnvironment,
   createStoredWebRuntimeEnvironment,
+  getActiveStoredWebRuntimeEnvironment,
   isMixedContentWebSocket,
-  readStoredWebRuntimeEnvironment,
-  saveStoredWebRuntimeEnvironment
+  removeStoredWebRuntimeEnvironment,
+  upsertStoredWebRuntimeEnvironment
 } from './web-runtime-environment'
 import { parseWebPairingInput } from './web-pairing'
 import { WebRuntimeClient } from './web-runtime-client'
@@ -24,7 +24,7 @@ export default function WebConnect({
   initialPairingInput,
   onConnected
 }: WebConnectProps): React.JSX.Element {
-  const existingEnvironment = readStoredWebRuntimeEnvironment()
+  const existingEnvironment = getActiveStoredWebRuntimeEnvironment()
   const [name, setName] = useState(existingEnvironment?.name ?? 'Orca Server')
   const [pairingCode, setPairingCode] = useState(initialPairingInput ?? '')
   const [error, setError] = useState<string | null>(null)
@@ -72,11 +72,12 @@ export default function WebConnect({
         )
         return
       }
-      saveStoredWebRuntimeEnvironment({
-        ...environment,
-        runtimeId: response._meta.runtimeId,
-        lastUsedAt: Date.now()
-      })
+      // Why: the connect screen pairs the browser's PRIMARY server; a
+      // same-endpoint re-pair refreshes credentials without a new env id.
+      upsertStoredWebRuntimeEnvironment(
+        { ...environment, runtimeId: response._meta.runtimeId, lastUsedAt: Date.now() },
+        { makeActive: true }
+      )
       onConnected()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -99,7 +100,12 @@ export default function WebConnect({
   }, [initialPairingInput, parsedOffer])
 
   const clear = (): void => {
-    clearStoredWebRuntimeEnvironment()
+    // Why: the button says "Clear saved server" — remove the stored active
+    // pairing (registry-aware), not just the input field.
+    const active = getActiveStoredWebRuntimeEnvironment()
+    if (active) {
+      removeStoredWebRuntimeEnvironment(active.id)
+    }
     setPairingCode('')
     setError(null)
   }

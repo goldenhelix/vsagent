@@ -414,12 +414,6 @@ export function RuntimeEnvironmentsPane({
     }
     setIsSaving(true)
     try {
-      if (!allowLocalRuntime && settings.activeRuntimeEnvironmentId) {
-        const disconnected = await switchRuntimeEnvironment(null)
-        if (!disconnected) {
-          return
-        }
-      }
       const result = await window.api.runtimeEnvironments.addFromPairingCode({
         name: trimmedName,
         pairingCode: trimmedPairingCode
@@ -430,13 +424,11 @@ export function RuntimeEnvironmentsPane({
       }
       await loadEnvironments()
       if (!allowLocalRuntime) {
-        const switched = await switchRuntimeEnvironment(result.environment.id)
-        if (!switched) {
-          await window.api.runtimeEnvironments.remove({ selector: result.environment.id })
-          await loadEnvironments()
-          return
-        }
-        if (mountedRef.current) {
+        // Why (VSAgent fork): in the web client, adding a server is ADDITIVE —
+        // connect it so its projects join the sidebar, but never move the
+        // primary pointer or touch the existing servers' pairings.
+        const connected = await connectEnvironment(result.environment)
+        if (mountedRef.current && connected) {
           toast.success(
             translate(
               'auto.components.settings.RuntimeEnvironmentsPane.a5b58465b6',

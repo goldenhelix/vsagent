@@ -101,13 +101,15 @@ import {
   type KeybindingPlatform
 } from '../../../shared/keybindings'
 import {
-  clearStoredWebRuntimeEnvironment,
   createStoredWebRuntimeEnvironment,
+  getActiveStoredWebRuntimeEnvironment,
   getPreferredWebPairingOffer,
-  readStoredWebRuntimeEnvironment,
+  listStoredWebRuntimeEnvironments,
   redactStoredWebRuntimeEnvironment,
-  saveStoredWebRuntimeEnvironment,
+  removeStoredWebRuntimeEnvironment,
+  setActiveStoredWebRuntimeEnvironmentId,
   updateStoredEnvironmentRuntimeId,
+  upsertStoredWebRuntimeEnvironment,
   type StoredWebRuntimeEnvironment
 } from './web-runtime-environment'
 import { parseWebPairingInput } from './web-pairing'
@@ -152,9 +154,11 @@ export const CLIPBOARD_IMAGE_UPLOAD_CHUNK_BASE64_CHARS = 512 * 1024
 export const CLIPBOARD_IMAGE_SINGLE_FRAME_FALLBACK_BASE64_CHARS = 256 * 1024
 const CLIPBOARD_IMAGE_SAVE_TIMEOUT_MS = 30_000
 
-let activeEnvironment: StoredWebRuntimeEnvironment | null = readStoredWebRuntimeEnvironment()
-let activeClient: WebRuntimeClient | null = null
-let activeClientEnvironmentId: string | null = null
+// Why (VSAgent fork): one live RPC client per paired server, so the browser
+// can hold projects/terminals from several servers at once. The "active"
+// environment is the primary focus pointer (page-origin server by default);
+// unscoped window.api surfaces stay pinned to it.
+const runtimeClientsByEnvironmentId = new Map<string, WebRuntimeClient>()
 let cachedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null = null
 let cachedDetectedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null = null
 const runtimeCallQueuePool = new RuntimeRpcCallQueuePool()
@@ -504,7 +508,6 @@ const EXPOSE_STORE_REQUESTED =
   new URLSearchParams(location.search).get('orcaExposeStore') === '1'
 
 export function installWebPreloadApi(): void {
-  activeEnvironment = readStoredWebRuntimeEnvironment()
   const webWindow = window as unknown as { __ORCA_WEB_CLIENT__?: boolean }
   webWindow.__ORCA_WEB_CLIENT__ = true
   window.electron = createFallbackProxy(['electron']) as Window['electron']
@@ -639,8 +642,11 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       // so the pre-hydration kill-switch read works the same as desktop.
       getSync: () => getStoredSettings(),
       set: async (updates) => {
-        if (updates.activeRuntimeEnvironmentId === null) {
-          disconnectActiveRuntimeEnvironment()
+        // Why: the active environment is a focus pointer over the stored
+        // registry — moving it must never destroy a pairing. A null update is
+        // a desktop "focus local" gesture with no web meaning; ignore it.
+        if (typeof updates.activeRuntimeEnvironmentId === 'string') {
+          setActiveStoredWebRuntimeEnvironmentId(updates.activeRuntimeEnvironmentId)
         }
         const sanitizedUpdates = { ...updates }
         if ('autoRenameBranchFromWorkDefaultedOn' in sanitizedUpdates) {
@@ -825,7 +831,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       listRuntimeAccessGrants: () => Promise.resolve({ grants: [] }),
       revokeRuntimeAccess: () => Promise.resolve({ revoked: false }),
       isWebSocketReady: () =>
-        Promise.resolve({ ready: Boolean(activeEnvironment), endpoint: null }),
+        Promise.resolve({ ready: Boolean(getActiveStoredWebRuntimeEnvironment()), endpoint: null }),
       getRelayStatus: () => Promise.resolve({ status: 'offline' as const }),
       onRelayStatusChanged: () => noopUnsubscribe
     },
@@ -1305,34 +1311,34 @@ function createRuntimeApi(): NonNullable<Partial<PreloadApi>['runtime']> {
 
 function createRuntimeEnvironmentsApi(): NonNullable<Partial<PreloadApi>['runtimeEnvironments']> {
   return {
-    list: async () => {
-      const environment = requireActiveEnvironmentOrNull()
-      return environment ? [redactStoredWebRuntimeEnvironment(environment)] : []
-    },
+    list: async () => listStoredWebRuntimeEnvironments().map(redactStoredWebRuntimeEnvironment),
     addFromPairingCode: async ({ name, pairingCode }) => {
       const offer = parseWebPairingInput(pairingCode)
       if (!offer) {
         throw new Error('Invalid VSAgent pairing code.')
       }
-      closeActiveRuntimeClients()
-      activeEnvironment = createStoredWebRuntimeEnvironment({ name, offer })
-      saveStoredWebRuntimeEnvironment(activeEnvironment)
-      return { environment: redactStoredWebRuntimeEnvironment(activeEnvironment) }
+      // Why: additive — pairing a new server must never destroy or replace an
+      // existing pairing. Same-endpoint re-pairs refresh credentials in place
+      // (stable env id); the active/primary pointer stays where it was.
+      const stored = upsertStoredWebRuntimeEnvironment(
+        createStoredWebRuntimeEnvironment({ name, offer })
+      )
+      // Drop any client dialed with the previous credentials for this env.
+      closeRuntimeClientForEnvironment(stored.id)
+      return { environment: redactStoredWebRuntimeEnvironment(stored) }
     },
     resolve: async ({ selector }) =>
       redactStoredWebRuntimeEnvironment(resolveEnvironment(selector)),
     remove: async ({ selector }) => {
       const environment = resolveEnvironment(selector)
-      if (activeEnvironment?.id === environment.id) {
-        disconnectActiveRuntimeEnvironment()
-      }
+      removeRuntimeEnvironment(environment.id)
       return { removed: redactStoredWebRuntimeEnvironment(environment) }
     },
     disconnect: async ({ selector }) => {
+      // Why: disconnect drops the live connection but keeps the stored
+      // pairing (desktop semantics) — reconnect works without re-pairing.
       const environment = resolveEnvironment(selector)
-      if (activeEnvironment?.id === environment.id) {
-        disconnectActiveRuntimeEnvironment()
-      }
+      closeRuntimeClientForEnvironment(environment.id)
       return { disconnected: redactStoredWebRuntimeEnvironment(environment) }
     },
     getStatus: ({ selector, timeoutMs }) =>
@@ -3324,51 +3330,60 @@ async function getRemoteRuntimeStatus(): Promise<RuntimeStatus> {
 }
 
 function getClientForEnvironment(environment: StoredWebRuntimeEnvironment): WebRuntimeClient {
-  if (!activeClient || activeClientEnvironmentId !== environment.id) {
-    activeClient?.close()
-    activeClient = new WebRuntimeClient(getPreferredWebPairingOffer(environment))
-    activeClientEnvironmentId = environment.id
+  const existing = runtimeClientsByEnvironmentId.get(environment.id)
+  if (existing) {
+    return existing
   }
-  return activeClient
+  const client = new WebRuntimeClient(getPreferredWebPairingOffer(environment))
+  runtimeClientsByEnvironmentId.set(environment.id, client)
+  return client
 }
 
-function closeActiveRuntimeClients(): void {
-  activeClient?.close()
-  activeClient = null
-  activeClientEnvironmentId = null
+function closeRuntimeClientForEnvironment(environmentId: string): void {
+  const client = runtimeClientsByEnvironmentId.get(environmentId)
+  if (client) {
+    client.close()
+    runtimeClientsByEnvironmentId.delete(environmentId)
+  }
   invalidateRuntimeWorktreeCaches()
 }
 
-function disconnectActiveRuntimeEnvironment(): void {
-  closeActiveRuntimeClients()
-  clearStoredWebRuntimeEnvironment()
-  activeEnvironment = null
+// Why: removal destroys the stored device token — this is the only web-side
+// operation that un-pairs a server. Switching focus never routes here.
+function removeRuntimeEnvironment(environmentId: string): void {
+  closeRuntimeClientForEnvironment(environmentId)
+  removeStoredWebRuntimeEnvironment(environmentId)
 }
 
 function resolveEnvironment(selector: string): StoredWebRuntimeEnvironment {
-  const environment = requireActiveEnvironment()
-  if (selector === environment.id || selector === environment.name || selector === 'active') {
-    return environment
+  if (selector === 'active') {
+    return requireActiveEnvironment()
   }
-  if (selector.startsWith('web-') && environment.id.startsWith('web-')) {
-    // Why: persisted terminal ids can outlive a web-client re-pair, which creates
-    // a fresh web-* environment id even when it points at the same active server.
-    return environment
+  const environments = listStoredWebRuntimeEnvironments()
+  const match = environments.find((entry) => entry.id === selector || entry.name === selector)
+  if (match) {
+    return match
+  }
+  if (selector.startsWith('web-')) {
+    // Why: persisted terminal ids can outlive a web-client re-pair, which
+    // creates a fresh web-* environment id even when it points at the same
+    // server. A stale id is by definition not in the registry, so route it to
+    // the active (primary) environment.
+    return requireActiveEnvironment()
   }
   throw new Error(`Unknown Orca runtime environment: ${selector}`)
 }
 
 function requireActiveEnvironment(): StoredWebRuntimeEnvironment {
-  activeEnvironment = activeEnvironment ?? readStoredWebRuntimeEnvironment()
-  if (!activeEnvironment) {
+  const environment = getActiveStoredWebRuntimeEnvironment()
+  if (!environment) {
     throw new Error('Pair this web client with a VSAgent server first.')
   }
-  return activeEnvironment
+  return environment
 }
 
 function requireActiveEnvironmentOrNull(): StoredWebRuntimeEnvironment | null {
-  activeEnvironment = activeEnvironment ?? readStoredWebRuntimeEnvironment()
-  return activeEnvironment
+  return getActiveStoredWebRuntimeEnvironment()
 }
 
 function updateEnvironmentFromResponse(
@@ -3376,11 +3391,11 @@ function updateEnvironmentFromResponse(
   response: RuntimeRpcResponse<unknown>
 ): void {
   const runtimeId = response.ok ? response._meta.runtimeId : (response._meta?.runtimeId ?? null)
-  activeEnvironment = updateStoredEnvironmentRuntimeId(environment, runtimeId)
+  updateStoredEnvironmentRuntimeId(environment, runtimeId)
 }
 
 function getStoredSettings(): GlobalSettings {
-  const environment = (activeEnvironment = activeEnvironment ?? readStoredWebRuntimeEnvironment())
+  const environment = getActiveStoredWebRuntimeEnvironment()
   const defaults = getDefaultSettings('~')
   const rawStoredSettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
   const stored = readJson<Partial<GlobalSettings>>(SETTINGS_STORAGE_KEY, {})
@@ -3712,7 +3727,10 @@ function mergeSettings(
       ...(base.voice ?? defaults.voice),
       ...updates.voice
     } as NonNullable<GlobalSettings['voice']>,
-    activeRuntimeEnvironmentId: activeEnvironment?.id ?? updates.activeRuntimeEnvironmentId ?? null,
+    // Why: reflect the persisted primary pointer; the renderer's focus concept
+    // (switchRuntimeEnvironment) round-trips through settings.set above.
+    activeRuntimeEnvironmentId:
+      getActiveStoredWebRuntimeEnvironment()?.id ?? updates.activeRuntimeEnvironmentId ?? null,
     terminalCustomThemes: normalizeTerminalCustomThemes(
       updates.terminalCustomThemes ?? base.terminalCustomThemes
     ),

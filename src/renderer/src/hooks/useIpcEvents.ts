@@ -1078,7 +1078,13 @@ export function useIpcEvents(): void {
         // its whole ssh.* API routes to that one host (STA-1468). A desktop
         // client owns a local SSH surface those maps must keep describing, so a
         // remote host's state goes into that environment's own bucket instead.
-        if (isPairedWebClientWindow()) {
+        // Why (VSAgent fork): with multiple paired servers, only the PRIMARY
+        // environment mirrors into the global maps — secondaries use per-env
+        // buckets like desktop, or two servers' SSH state would clobber.
+        if (
+          isPairedWebClientWindow() &&
+          environmentId === useAppStore.getState().settings?.activeRuntimeEnvironmentId
+        ) {
           handleSshStateChangedEvent?.({ targetId: event.targetId, state: event.state })
         } else {
           applyRuntimeEnvironmentSshStateChanged(environmentId, event.targetId, event.state)
