@@ -8,12 +8,32 @@ export type WebPairingOffer = {
   deviceToken: string
   publicKeyB64: string
   scope?: DeviceScope
+  // Why (VSAgent fork): optional server display name (hostname / --serve-name)
+  // used as the default saved-server name.
+  name?: string
 }
 
 export type WebPairingStartupDecision =
   | { kind: 'auto-save-runtime-offer'; offer: WebPairingOffer }
   | { kind: 'show-connect'; initialPairingInput: string | null }
   | { kind: 'use-stored-environment' }
+
+// Why (VSAgent fork): default saved-server name — the offer's server-provided
+// name, else the endpoint hostname, else a generic label.
+export function defaultWebEnvironmentName(offer: WebPairingOffer): string {
+  if (offer.name) {
+    return offer.name
+  }
+  try {
+    const host = new URL(offer.endpoint).hostname
+    if (host && host !== '127.0.0.1' && host !== 'localhost') {
+      return host
+    }
+  } catch {
+    // fall through to the generic label
+  }
+  return 'VSAgent Server'
+}
 
 export function parseWebPairingInput(input: string): WebPairingOffer | null {
   const trimmed = input.trim()
@@ -99,11 +119,16 @@ function decodePairingPayload(base64url: string): WebPairingOffer | null {
     return null
   }
   const scope = parseWebPairingScope(parsed.scope)
+  const name =
+    typeof parsed.name === 'string' && parsed.name.trim().length > 0
+      ? parsed.name.trim().slice(0, 64)
+      : null
   return {
     v: PAIRING_OFFER_VERSION,
     endpoint: normalizeWebSocketEndpoint(parsed.endpoint),
     deviceToken: parsed.deviceToken,
     publicKeyB64: parsed.publicKeyB64,
+    ...(name ? { name } : {}),
     ...(scope ? { scope } : {})
   }
 }

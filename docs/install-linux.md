@@ -139,6 +139,7 @@ Two caveats when pinning `--host` to a specific interface IP:
 | `VSAGENT_DATA_DIR` | Absolute path for all server + CLI state (profiles, pairing trust, runtime metadata). Default for a tarball install: `~/.config/vsagent` — the CLI resolves the same dir, so `vsagent status` finds the server with no configuration. Keep it short: unix sockets under it break past ~107 bytes. |
 | `VSAGENT_PORT`, `VSAGENT_PAIRING_ADDRESS` | Serve launcher port / advertised address (see Flags). |
 | `VSAGENT_HOST` | Interface to bind (default `0.0.0.0`). Set to a single IP to restrict exposure to that interface. |
+| `VSAGENT_SERVER_NAME` | Display name embedded in pairing offers — web clients use it as the default saved-server name (also `--serve-name`). Default: the server's hostname. |
 | `VSAGENT_SERVE_OPEN_PAIRING=1` | Trusted-proxy mode: `GET /` redirects with an embedded pairing offer (see Reverse proxy). |
 | `VSAGENT_SERVE_PAIRING_PROXY_SECRET` | Header-gated variant of open pairing. |
 | `VSAGENT_GITEA_TOKEN`, `VSAGENT_GITEA_API_BASE_URL` | Gitea task-source auth. |

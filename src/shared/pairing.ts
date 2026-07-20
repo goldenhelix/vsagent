@@ -7,7 +7,10 @@ import {
 export { PAIRING_OFFER_VERSION, PairingOfferSchema }
 export type { PairingOffer }
 
-export function encodePairingOffer(offer: PairingOffer): string {
+// Why (VSAgent fork): `name` is an optional server display name consumed by
+// the web client's default environment naming; zod-validating decoders strip
+// it, so older clients are unaffected.
+export function encodePairingOffer(offer: PairingOffer & { name?: string }): string {
   const json = JSON.stringify(offer)
   const base64url = Buffer.from(json, 'utf-8')
     .toString('base64')

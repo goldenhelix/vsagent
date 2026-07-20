@@ -1410,6 +1410,7 @@ type ServeOptions = {
   json: boolean
   wsPort?: number
   wsHost?: string
+  serverName: string | null
   pairingAddress: string | null
   noPairing: boolean
   mobilePairing: boolean
@@ -1452,7 +1453,12 @@ function getServeOptions(argv = process.argv): ServeOptions {
   const wsHost = rawHost ?? undefined
   const isSpecificHost = wsHost !== undefined && !isWildcardBindHost(wsHost)
   const explicitPairingAddress = valueAfter('--serve-pairing-address')
+  // Why (VSAgent fork): server display name for pairing offers — clients use
+  // it as the default saved-server name. Flag > env > hostname.
+  const serverName =
+    valueAfter('--serve-name') ?? process.env.VSAGENT_SERVER_NAME?.trim() ?? os.hostname()
   return {
+    serverName,
     json: argv.includes('--serve-json'),
     ...(wsPort !== undefined ? { wsPort } : {}),
     ...(wsHost !== undefined ? { wsHost } : {}),
@@ -2256,6 +2262,7 @@ app.whenReady().then(async () => {
     // generator) advertise the serve's configured address by default, so they
     // don't fall back to an unreachable 127.0.0.1 like the startup print would.
     ...(serveOptions?.pairingAddress ? { defaultPairingAddress: serveOptions.pairingAddress } : {}),
+    ...(serveOptions?.serverName ? { serverDisplayName: serveOptions.serverName } : {}),
     ...(serveOptions?.wsPort !== undefined
       ? {
           wsPort: serveOptions.wsPort,

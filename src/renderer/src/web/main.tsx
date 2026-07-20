@@ -9,7 +9,8 @@ import { RecoverableRenderErrorBoundary } from '../components/error-boundaries/R
 import {
   clearPairingInputFromAddressBar,
   decideWebPairingStartup,
-  readPairingInputFromLocation
+  readPairingInputFromLocation,
+  defaultWebEnvironmentName
 } from './web-pairing'
 import {
   createStoredWebRuntimeEnvironment,
@@ -45,7 +46,10 @@ function WebRoot(): React.JSX.Element {
       // browser's PRIMARY. Same-endpoint re-pairs keep the env id stable so
       // saved secondaries and persisted sessions survive.
       upsertStoredWebRuntimeEnvironment(
-        createStoredWebRuntimeEnvironment({ name: 'Orca Server', offer: startupDecision.offer }),
+        createStoredWebRuntimeEnvironment({
+          name: defaultWebEnvironmentName(startupDecision.offer),
+          offer: startupDecision.offer
+        }),
         { makeActive: true }
       )
       return true

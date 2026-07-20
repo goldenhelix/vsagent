@@ -76,6 +76,10 @@ type OrcaRuntimeRpcServerOptions = {
   // mirrors the serve's --serve-pairing-address so `orca pairing-url` is
   // reachable, not 127.0.0.1.
   defaultPairingAddress?: string | null
+  // Why (VSAgent fork): display name embedded in pairing offers so clients
+  // default to a meaningful server name (hostname / --serve-name) instead of
+  // a generic label.
+  serverDisplayName?: string | null
   // Why: true when the caller set an explicit port (e.g. `orca serve --port`).
   // Distinguishes that pin from the DEFAULT_WS_PORT default so transport bind
   // order can prefer the pin over a stale STA-1511 fallback (issue #8535).
@@ -494,6 +498,7 @@ export class OrcaRuntimeRpcServer {
   private readonly wsPort: number
   private readonly wsHost: string
   private readonly defaultPairingAddress: string | null
+  private readonly serverDisplayName: string | null
   private readonly preferPinnedWsPort: boolean
   private readonly webClientRoot: string | undefined
   private readonly serveTls: boolean
@@ -532,6 +537,7 @@ export class OrcaRuntimeRpcServer {
     wsPort = DEFAULT_WS_PORT,
     wsHost = DEFAULT_WS_HOST,
     defaultPairingAddress = null,
+    serverDisplayName = null,
     preferPinnedWsPort = false,
     webClientRoot,
     serveTls = false,
@@ -549,6 +555,7 @@ export class OrcaRuntimeRpcServer {
     this.wsPort = wsPort
     this.wsHost = wsHost
     this.defaultPairingAddress = defaultPairingAddress
+    this.serverDisplayName = serverDisplayName
     this.preferPinnedWsPort = preferPinnedWsPort
     this.webClientRoot = webClientRoot
     this.serveTls = serveTls
@@ -692,7 +699,8 @@ export class OrcaRuntimeRpcServer {
       endpoint,
       deviceToken: device.token,
       publicKeyB64,
-      scope
+      scope,
+      ...(this.serverDisplayName ? { name: this.serverDisplayName } : {})
     })
     return {
       available: true,
@@ -725,7 +733,8 @@ export class OrcaRuntimeRpcServer {
       endpoint,
       deviceToken: device.token,
       publicKeyB64,
-      scope: 'runtime'
+      scope: 'runtime',
+      ...(this.serverDisplayName ? { name: this.serverDisplayName } : {})
     })
   }
 

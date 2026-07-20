@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { decideWebPairingStartup, parseWebPairingInput, type WebPairingOffer } from './web-pairing'
+import {
+  decideWebPairingStartup,
+  defaultWebEnvironmentName,
+  parseWebPairingInput,
+  type WebPairingOffer
+} from './web-pairing'
 
 describe('web pairing input', () => {
   const offer: WebPairingOffer = {
@@ -76,5 +81,48 @@ describe('web pairing input', () => {
     ).toEqual({
       kind: 'use-stored-environment'
     })
+  })
+})
+
+describe('pairing offer server name', () => {
+  const encode = (offer: object): string =>
+    `orca://pair?code=${Buffer.from(JSON.stringify(offer)).toString('base64url')}`
+
+  it('decodes the optional server name from the offer', () => {
+    const offer = parseWebPairingInput(
+      encode({ v: 2, endpoint: 'ws://a:1', deviceToken: 't', publicKeyB64: 'k', name: 'rudy01' })
+    )
+    expect(offer?.name).toBe('rudy01')
+  })
+
+  it('ignores a missing/blank name and caps long names', () => {
+    const noName = parseWebPairingInput(
+      encode({ v: 2, endpoint: 'ws://a:1', deviceToken: 't', publicKeyB64: 'k' })
+    )
+    expect(noName?.name).toBeUndefined()
+    const long = parseWebPairingInput(
+      encode({
+        v: 2,
+        endpoint: 'ws://a:1',
+        deviceToken: 't',
+        publicKeyB64: 'k',
+        name: 'x'.repeat(200)
+      })
+    )
+    expect(long?.name).toHaveLength(64)
+  })
+
+  it('defaultWebEnvironmentName prefers offer name, then endpoint host', () => {
+    const base: WebPairingOffer = {
+      v: 2,
+      endpoint: 'wss://dev-rudy01.ts.net:8445',
+      deviceToken: 't',
+      publicKeyB64: 'k'
+    }
+    expect(defaultWebEnvironmentName({ ...base, name: 'VSWarehouse' })).toBe('VSWarehouse')
+    expect(defaultWebEnvironmentName(base)).toBe('dev-rudy01.ts.net')
+    expect(defaultWebEnvironmentName({ ...base, endpoint: 'ws://127.0.0.1:6768' })).toBe(
+      'VSAgent Server'
+    )
   })
 })

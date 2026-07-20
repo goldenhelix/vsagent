@@ -10,7 +10,7 @@ import {
   removeStoredWebRuntimeEnvironment,
   upsertStoredWebRuntimeEnvironment
 } from './web-runtime-environment'
-import { parseWebPairingInput } from './web-pairing'
+import { defaultWebEnvironmentName, parseWebPairingInput } from './web-pairing'
 import { WebRuntimeClient } from './web-runtime-client'
 import type { RuntimeStatus } from '../../../shared/runtime-types'
 import { translate } from '@/i18n/i18n'
@@ -25,7 +25,15 @@ export default function WebConnect({
   onConnected
 }: WebConnectProps): React.JSX.Element {
   const existingEnvironment = getActiveStoredWebRuntimeEnvironment()
-  const [name, setName] = useState(existingEnvironment?.name ?? 'Orca Server')
+  const [name, setName] = useState(() => {
+    if (existingEnvironment?.name) {
+      return existingEnvironment.name
+    }
+    // Why (VSAgent fork): default to the server-provided name (hostname /
+    // --serve-name) carried by the pairing offer when one is deep-linked.
+    const offer = initialPairingInput ? parseWebPairingInput(initialPairingInput) : null
+    return offer ? defaultWebEnvironmentName(offer) : 'VSAgent Server'
+  })
   const [pairingCode, setPairingCode] = useState(initialPairingInput ?? '')
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
