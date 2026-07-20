@@ -5569,16 +5569,40 @@ export class OrcaRuntimeService {
       this.hasRecentTerminalOutputPath(terminalHandle, pathText, absolutePath),
     resolveRuntimeGitTarget: (selector) => this.resolveRuntimeGitTarget(selector),
     openFile: (worktreeId, filePath, relativePath, runtimeEnvironmentId) => {
-      if (!this.notifier?.openFile) {
+      if (this.notifier?.openFile) {
+        this.notifier.openFile(worktreeId, filePath, relativePath, runtimeEnvironmentId)
+        return
+      }
+      // Why (VSAgent fork): headless serve has no desktop window; relay to
+      // paired clients so the web client opens the editor tab. Only throw
+      // when nobody is listening at all.
+      if (this.clientEventListeners.size === 0) {
         throw new Error('renderer_unavailable')
       }
-      this.notifier.openFile(worktreeId, filePath, relativePath, runtimeEnvironmentId)
+      this.emitClientEvent({
+        type: 'openFile',
+        worktreeId,
+        filePath,
+        relativePath,
+        ...(runtimeEnvironmentId ? { runtimeEnvironmentId } : {})
+      })
     },
     openDiff: (worktreeId, filePath, relativePath, staged, runtimeEnvironmentId) => {
-      if (!this.notifier?.openDiff) {
+      if (this.notifier?.openDiff) {
+        this.notifier.openDiff(worktreeId, filePath, relativePath, staged, runtimeEnvironmentId)
+        return
+      }
+      if (this.clientEventListeners.size === 0) {
         throw new Error('renderer_unavailable')
       }
-      this.notifier.openDiff(worktreeId, filePath, relativePath, staged, runtimeEnvironmentId)
+      this.emitClientEvent({
+        type: 'openDiff',
+        worktreeId,
+        filePath,
+        relativePath,
+        staged,
+        ...(runtimeEnvironmentId ? { runtimeEnvironmentId } : {})
+      })
     }
   })
 

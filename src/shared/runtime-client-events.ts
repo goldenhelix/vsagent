@@ -27,6 +27,25 @@ export type RuntimeClientEvent =
       startup?: WorktreeStartupLaunch
       defaultTabs?: WorktreeDefaultTabsLaunch
     }
+  // Why (VSAgent fork): headless serve has no desktop window to receive
+  // `orca file open` / `file diff` notifier calls; these relay them to paired
+  // clients so the web client opens the editor/diff tab (feedback: the CLI
+  // file surface was desktop-only).
+  | {
+      type: 'openFile'
+      worktreeId: string
+      filePath: string
+      relativePath: string
+      runtimeEnvironmentId?: string
+    }
+  | {
+      type: 'openDiff'
+      worktreeId: string
+      filePath: string
+      relativePath: string
+      staged: boolean
+      runtimeEnvironmentId?: string
+    }
 
 export type RuntimeClientEventStreamMessage =
   | ({ type: 'ready'; subscriptionId: string } & {

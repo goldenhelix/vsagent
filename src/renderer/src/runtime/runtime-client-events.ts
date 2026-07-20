@@ -65,6 +65,10 @@ function isRuntimeClientEvent(
     message.type === 'worktreesChanged' ||
     message.type === 'sshStateChanged' ||
     message.type === 'linearLinkedIssueUpdated' ||
-    message.type === 'activateWorktree'
+    message.type === 'activateWorktree' ||
+    // Why (VSAgent fork): `orca file open` / `file diff` relayed from a
+    // headless serve to paired clients.
+    message.type === 'openFile' ||
+    message.type === 'openDiff'
   )
 }

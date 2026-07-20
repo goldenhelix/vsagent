@@ -1002,9 +1002,75 @@ export function useIpcEvents(): void {
     let handleSshStateChangedEvent: ((data: { targetId: string; state: unknown }) => void) | null =
       null
 
+    // Why: shared by the mobile IPC relay (desktop window) and the runtime
+    // client-event stream (paired web clients / remote environments) so both
+    // open editor tabs through the same store path.
+    const openFileFromRemote = (data: {
+      worktreeId: string
+      filePath: string
+      relativePath: string
+      runtimeEnvironmentId?: string
+    }): void => {
+      const store = useAppStore.getState()
+      const basename = data.relativePath.split(/[\\/]/).pop() || data.relativePath
+      store.setActiveWorktree(data.worktreeId)
+      store.markWorktreeVisited(data.worktreeId)
+      store.setActiveView('terminal')
+      store.openFile({
+        filePath: data.filePath,
+        relativePath: data.relativePath,
+        worktreeId: data.worktreeId,
+        language: detectLanguage(basename),
+        runtimeEnvironmentId: data.runtimeEnvironmentId,
+        mode: 'edit'
+      })
+      store.setActiveTabType('editor')
+      store.revealWorktreeInSidebar(data.worktreeId)
+    }
+    const openDiffFromRemote = (data: {
+      worktreeId: string
+      filePath: string
+      relativePath: string
+      staged: boolean
+      runtimeEnvironmentId?: string
+    }): void => {
+      const store = useAppStore.getState()
+      const language = detectLanguage(data.relativePath)
+      store.setActiveWorktree(data.worktreeId)
+      store.markWorktreeVisited(data.worktreeId)
+      store.setActiveView('terminal')
+      store.openDiff(data.worktreeId, data.filePath, data.relativePath, language, data.staged, {
+        runtimeEnvironmentId: data.runtimeEnvironmentId
+      })
+      store.setActiveTabType('editor')
+      store.revealWorktreeInSidebar(data.worktreeId)
+    }
+
     const handleRuntimeClientEvent = (environmentId: string, event: RuntimeClientEvent): void => {
       if (event.type === 'reposChanged') {
         runtimeProjectRefreshScheduler.request(environmentId)
+        return
+      }
+      // Why (VSAgent fork): `orca file open`/`file diff` against a headless
+      // serve relay here; default the env to the emitting environment so the
+      // web client resolves the worktree on the right host.
+      if (event.type === 'openFile') {
+        openFileFromRemote({
+          worktreeId: event.worktreeId,
+          filePath: event.filePath,
+          relativePath: event.relativePath,
+          runtimeEnvironmentId: event.runtimeEnvironmentId ?? environmentId
+        })
+        return
+      }
+      if (event.type === 'openDiff') {
+        openDiffFromRemote({
+          worktreeId: event.worktreeId,
+          filePath: event.filePath,
+          relativePath: event.relativePath,
+          staged: event.staged,
+          runtimeEnvironmentId: event.runtimeEnvironmentId ?? environmentId
+        })
         return
       }
       if (event.type === 'sshStateChanged') {
@@ -1963,50 +2029,12 @@ export function useIpcEvents(): void {
       })
     )
 
-    unsubs.push(
-      window.api.ui.onOpenFileFromMobile(
-        ({ worktreeId, filePath, relativePath, runtimeEnvironmentId }) => {
-          const store = useAppStore.getState()
-          const basename = relativePath.split(/[\\/]/).pop() || relativePath
-          store.setActiveWorktree(worktreeId)
-          store.markWorktreeVisited(worktreeId)
-          store.setActiveView('terminal')
-          // Why: mobile only sends a desktop-backed path. The renderer owns
-          // editor tab creation so grouped tab order and markdown bridges update
-          // through the same store path as desktop File Explorer.
-          store.openFile({
-            filePath,
-            relativePath,
-            worktreeId,
-            language: detectLanguage(basename),
-            runtimeEnvironmentId,
-            mode: 'edit'
-          })
-          store.setActiveTabType('editor')
-          store.revealWorktreeInSidebar(worktreeId)
-        }
-      )
-    )
-
-    unsubs.push(
-      window.api.ui.onOpenDiffFromMobile(
-        ({ worktreeId, filePath, relativePath, staged, runtimeEnvironmentId }) => {
-          const store = useAppStore.getState()
-          const language = detectLanguage(relativePath)
-          store.setActiveWorktree(worktreeId)
-          store.markWorktreeVisited(worktreeId)
-          store.setActiveView('terminal')
-          // Why: mobile renders diff tabs from diff metadata. The desktop
-          // markdown Changes-mode shortcut is editor-local and would publish
-          // plain markdown content back to mobile.
-          store.openDiff(worktreeId, filePath, relativePath, language, staged, {
-            runtimeEnvironmentId
-          })
-          store.setActiveTabType('editor')
-          store.revealWorktreeInSidebar(worktreeId)
-        }
-      )
-    )
+    // Why: mobile only sends a desktop-backed path. The renderer owns editor
+    // tab creation so grouped tab order and markdown bridges update through
+    // the same store path as desktop File Explorer (openFileFromRemote), and
+    // diff tabs render from diff metadata (openDiffFromRemote).
+    unsubs.push(window.api.ui.onOpenFileFromMobile(openFileFromRemote))
+    unsubs.push(window.api.ui.onOpenDiffFromMobile(openDiffFromRemote))
 
     unsubs.push(
       window.api.ui.onCloseTerminal(({ tabId, paneRuntimeId }) => {
