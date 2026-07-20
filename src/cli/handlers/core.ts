@@ -6,20 +6,27 @@ import { stripElectronRunAsNode } from '../runtime/launch'
 import type { RuntimePairingOfferResult } from '../../shared/runtime-pairing-offer'
 
 function formatRuntimePairingOffer(offer: RuntimePairingOfferResult): string {
+  // Why (VSAgent fork): match the name the operator invoked (the vsagent
+  // launcher sets VSAGENT_BRAND_CLI, same seam as help output).
+  const bin = process.env.VSAGENT_BRAND_CLI === '1' ? 'vsagent' : 'orca'
   if (!offer.available) {
     return [
       'Pairing is unavailable — this runtime is not serving a WebSocket endpoint.',
-      'Start the server with `orca serve` (or `vsagent serve`), then retry.'
+      `Start the server with \`${bin} serve\`, then retry.`
     ].join('\n')
   }
   const lines = [`Pairing URL: ${offer.pairingUrl}`, `Endpoint:    ${offer.endpoint}`]
   if (offer.webClientUrl) {
     lines.push(`Web client:  ${offer.webClientUrl}`)
   }
+  const name = offer.serverName ?? '<name>'
   lines.push(
     '',
-    'Add this runtime on another host with:',
-    `  orca environment add --name <name> --pairing-code '${offer.pairingUrl}'`
+    'In a web client: Settings → Remote Servers → Add Server, paste the pairing URL',
+    "  (adds this server's projects alongside the current ones).",
+    '',
+    `For CLI access from another host (\`${bin} --environment ${name} ...\`):`,
+    `  ${bin} environment add --name ${name} --pairing-code '${offer.pairingUrl}'`
   )
   return lines.join('\n')
 }

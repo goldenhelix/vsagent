@@ -678,6 +678,7 @@ export class OrcaRuntimeRpcServer {
         endpoint: string
         deviceId: string
         webClientUrl: string | null
+        serverName: string | null
       } {
     const rawEndpoint = this.getWebSocketEndpoint()
     const publicKeyB64 = this.getE2EEPublicKey()
@@ -707,6 +708,7 @@ export class OrcaRuntimeRpcServer {
       pairingUrl,
       endpoint,
       deviceId: device.deviceId,
+      serverName: this.serverDisplayName,
       webClientUrl:
         this.webClientRoot && scope === 'runtime' ? createWebClientUrl(endpoint, pairingUrl) : null
     }

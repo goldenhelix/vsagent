@@ -19,4 +19,7 @@ export type RuntimePairingOfferResult =
       endpoint: string
       deviceId: string
       webClientUrl: string | null
+      /** Server display name (hostname / --serve-name) for copy-pastable
+       *  client-side examples. */
+      serverName: string | null
     }
