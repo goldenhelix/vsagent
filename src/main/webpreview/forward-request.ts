@@ -58,7 +58,17 @@ const HOP_BY_HOP_RESPONSE = new Set([
   'content-security-policy-report-only',
   'cross-origin-opener-policy',
   'cross-origin-resource-policy',
-  'cross-origin-embedder-policy'
+  'cross-origin-embedder-policy',
+  // Why: a proxy session's upstream ORIGIN changes over time (address-bar
+  // retargets reuse the same proxy path), so the browser must never reuse a
+  // cached response for that path — a cached example.com document would keep
+  // rendering after the session points at another site. Strip the upstream's
+  // caching directives/validators; every writer stamps no-store below.
+  'cache-control',
+  'expires',
+  'etag',
+  'last-modified',
+  'age'
 ])
 
 export type ForwardArgs = {
@@ -247,6 +257,7 @@ function streamResponseToClient(
       }
       res.setHeader(name, value as string | string[])
     }
+    res.setHeader('Cache-Control', 'no-store')
     res.statusCode = upstreamRes.statusCode ?? 502
     const contentType = String(upstreamRes.headers['content-type'] || '')
     const isHtml = args.injectHtml && args.targetOrigin && contentType.includes('text/html')
@@ -324,6 +335,7 @@ function streamRedirectThroughExt(
       'Location',
       `${proxyPathPrefix}/_ext?u=${encodeURIComponent(redirectTarget.toString())}`
     )
+    res.setHeader('Cache-Control', 'no-store')
     res.statusCode = upstreamRes.statusCode ?? 302
     res.end()
     void finalTarget
