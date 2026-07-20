@@ -13,6 +13,7 @@ import type { OrcaRuntimeService } from './orca-runtime'
 import { writeRuntimeMetadata } from './runtime-metadata'
 import { RpcDispatcher } from './rpc/dispatcher'
 import type { RpcRequest, RpcResponse } from './rpc/core'
+import type { RuntimePairingOfferParams } from '../../shared/runtime-pairing-offer'
 import { errorResponse } from './rpc/errors'
 import type { RpcMessageContext, RpcTransport } from './rpc/transport'
 import { UnixSocketTransport } from './rpc/unix-socket-transport'
@@ -70,6 +71,11 @@ type OrcaRuntimeRpcServerOptions = {
   // Defaults to 0.0.0.0 (all interfaces); set to a specific IP to restrict
   // exposure (e.g. a Tailscale interface).
   wsHost?: string
+  // Why (VSAgent fork): default advertised host for on-demand pairing offers
+  // (pairing.createRuntimeOffer) when the caller doesn't pass an address —
+  // mirrors the serve's --serve-pairing-address so `orca pairing-url` is
+  // reachable, not 127.0.0.1.
+  defaultPairingAddress?: string | null
   // Why: true when the caller set an explicit port (e.g. `orca serve --port`).
   // Distinguishes that pin from the DEFAULT_WS_PORT default so transport bind
   // order can prefer the pin over a stale STA-1511 fallback (issue #8535).
@@ -487,6 +493,7 @@ export class OrcaRuntimeRpcServer {
   private readonly enableWebSocket: boolean
   private readonly wsPort: number
   private readonly wsHost: string
+  private readonly defaultPairingAddress: string | null
   private readonly preferPinnedWsPort: boolean
   private readonly webClientRoot: string | undefined
   private readonly serveTls: boolean
@@ -524,6 +531,7 @@ export class OrcaRuntimeRpcServer {
     enableWebSocket = false,
     wsPort = DEFAULT_WS_PORT,
     wsHost = DEFAULT_WS_HOST,
+    defaultPairingAddress = null,
     preferPinnedWsPort = false,
     webClientRoot,
     serveTls = false,
@@ -540,6 +548,7 @@ export class OrcaRuntimeRpcServer {
     this.enableWebSocket = enableWebSocket
     this.wsPort = wsPort
     this.wsHost = wsHost
+    this.defaultPairingAddress = defaultPairingAddress
     this.preferPinnedWsPort = preferPinnedWsPort
     this.webClientRoot = webClientRoot
     this.serveTls = serveTls
@@ -669,7 +678,10 @@ export class OrcaRuntimeRpcServer {
       return { available: false }
     }
 
-    const endpoint = resolvePairingEndpoint(rawEndpoint, args.address)
+    // Why (VSAgent fork): fall back to the serve's configured pairing address
+    // (mirrors --serve-pairing-address) so on-demand offers advertise a
+    // reachable host instead of 127.0.0.1 when the caller passes none.
+    const endpoint = resolvePairingEndpoint(rawEndpoint, args.address ?? this.defaultPairingAddress)
     const deviceName = args.name ?? `CLI ${new Date().toLocaleDateString()}`
     const scope = args.scope ?? 'runtime'
     const device = args.rotate
@@ -1122,7 +1134,15 @@ export class OrcaRuntimeRpcServer {
 
     try {
       return await this.dispatcher.dispatch(request, {
-        signal: longPoll ? context?.signal : undefined
+        signal: longPoll ? context?.signal : undefined,
+        // Why (VSAgent fork): the unix socket is local-trust (0o600 token), so
+        // the CLI `pairing-url` command may mint runtime pairing offers.
+        createRuntimePairingOffer: (args) =>
+          this.createPairingOffer({
+            address: args.address,
+            rotate: args.rotate,
+            scope: 'runtime'
+          })
       })
     } finally {
       if (longPoll) {
@@ -1281,6 +1301,18 @@ export class OrcaRuntimeRpcServer {
         // full-screen web/desktop runtime clients aren't truncated.
         clientKind: device.scope,
         pairing: pairingContext,
+        // Why (VSAgent fork): a runtime-scope web client (full client, like
+        // desktop) may mint pairing offers; mobile-scope devices may not.
+        ...(device.scope === 'runtime'
+          ? {
+              createRuntimePairingOffer: (args: RuntimePairingOfferParams) =>
+                this.createPairingOffer({
+                  address: args.address,
+                  rotate: args.rotate,
+                  scope: 'runtime'
+                })
+            }
+          : {}),
         signal: abortRegistration?.signal,
         sendBinary,
         registerBinaryStreamHandler: (streamId, handler) =>

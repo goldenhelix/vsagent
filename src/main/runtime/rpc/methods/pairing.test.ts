@@ -21,6 +21,56 @@ function dispatchPairing(
   })
 }
 
+function dispatchCreateOffer(
+  params: unknown,
+  createRuntimePairingOffer?: NonNullable<
+    Parameters<RpcDispatcher['dispatchStreaming']>[2]
+  >['createRuntimePairingOffer']
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve) => {
+    const dispatcher = new RpcDispatcher({
+      runtime: new OrcaRuntimeService(),
+      methods: PAIRING_METHODS
+    })
+    void dispatcher.dispatchStreaming(
+      { id: 'request-1', authToken: '', method: 'pairing.createRuntimeOffer', params },
+      (response) => resolve(JSON.parse(response) as Record<string, unknown>),
+      createRuntimePairingOffer ? { createRuntimePairingOffer } : {}
+    )
+  })
+}
+
+describe('pairing.createRuntimeOffer', () => {
+  it('forwards address/rotate to the offer provider and returns its result', async () => {
+    const offer = {
+      available: true as const,
+      pairingUrl: 'orca://pair?code=abc',
+      endpoint: 'ws://100.64.1.20:6768',
+      deviceId: 'device-1',
+      webClientUrl: 'http://100.64.1.20:6768/web-index.html#pairing=x'
+    }
+    const createRuntimePairingOffer = vi.fn().mockReturnValue(offer)
+
+    await expect(
+      dispatchCreateOffer({ address: '100.64.1.20', rotate: true }, createRuntimePairingOffer)
+    ).resolves.toMatchObject({ ok: true, result: offer })
+    expect(createRuntimePairingOffer).toHaveBeenCalledWith({ address: '100.64.1.20', rotate: true })
+  })
+
+  it('defaults address to null and rotate to false when omitted', async () => {
+    const createRuntimePairingOffer = vi.fn().mockReturnValue({ available: false })
+    await dispatchCreateOffer({}, createRuntimePairingOffer)
+    expect(createRuntimePairingOffer).toHaveBeenCalledWith({ address: null, rotate: false })
+  })
+
+  it('fails when the runtime does not expose pairing-offer minting (mobile scope)', async () => {
+    await expect(dispatchCreateOffer({}, undefined)).resolves.toMatchObject({
+      ok: false,
+      error: { message: 'pairing_offer_unavailable' }
+    })
+  })
+})
+
 describe('pairing RPC methods', () => {
   it('passes only phone-owned credential material to the server-bound provider', async () => {
     const provisionRelay = vi.fn().mockResolvedValue({

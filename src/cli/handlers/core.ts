@@ -3,6 +3,26 @@ import type { CommandHandler } from '../dispatch'
 import { formatCliStatus, formatStatus, printResult } from '../format'
 import { RuntimeClientError, serveOrcaApp } from '../runtime-client'
 import { stripElectronRunAsNode } from '../runtime/launch'
+import type { RuntimePairingOfferResult } from '../../shared/runtime-pairing-offer'
+
+function formatRuntimePairingOffer(offer: RuntimePairingOfferResult): string {
+  if (!offer.available) {
+    return [
+      'Pairing is unavailable — this runtime is not serving a WebSocket endpoint.',
+      'Start the server with `orca serve` (or `vsagent serve`), then retry.'
+    ].join('\n')
+  }
+  const lines = [`Pairing URL: ${offer.pairingUrl}`, `Endpoint:    ${offer.endpoint}`]
+  if (offer.webClientUrl) {
+    lines.push(`Web client:  ${offer.webClientUrl}`)
+  }
+  lines.push(
+    '',
+    'Add this runtime on another host with:',
+    `  orca environment add --name <name> --pairing-code '${offer.pairingUrl}'`
+  )
+  return lines.join('\n')
+}
 
 function envRecord(): Record<string, string> {
   // Why: the `orca` launcher runs Orca's Electron binary as Node, so this CLI
@@ -152,5 +172,19 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       process.exitCode = 1
     }
     printResult(result, json, formatStatus)
+  },
+  'pairing-url': async ({ client, flags, json }) => {
+    const rawAddress = flags.get('address')
+    if (flags.has('address') && (typeof rawAddress !== 'string' || rawAddress.length === 0)) {
+      throw new RuntimeClientError('invalid_argument', 'Missing value for --address.')
+    }
+    const result = await client.call<RuntimePairingOfferResult>('pairing.createRuntimeOffer', {
+      address: typeof rawAddress === 'string' ? rawAddress : undefined,
+      rotate: flags.get('rotate') === true
+    })
+    if (!json && !result.result.available) {
+      process.exitCode = 1
+    }
+    printResult(result, json, formatRuntimePairingOffer)
   }
 }

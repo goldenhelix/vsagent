@@ -11,6 +11,10 @@ import type {
   PairingGetEndpointsResult,
   PairingProvisionRelayParams
 } from '../../../shared/mobile-relay-credential-contract'
+import type {
+  RuntimePairingOfferParams,
+  RuntimePairingOfferResult
+} from '../../../shared/runtime-pairing-offer'
 
 export type PairingRpcContext = {
   getEndpoints(params: PairingGetEndpointsParams): Promise<PairingGetEndpointsResult>
@@ -76,6 +80,11 @@ export type RpcContext = {
   // phones only. Undefined for in-process callers → treat as full-class (no clip).
   clientKind?: 'mobile' | 'runtime'
   pairing?: PairingRpcContext
+  // Why (VSAgent fork): mints a runtime pairing offer so `orca pairing-url` and
+  // the web-client generator can hand out a code to add this runtime elsewhere.
+  // Present on the local unix socket (local trust) and runtime-scope WS clients;
+  // absent for mobile-scope devices.
+  createRuntimePairingOffer?: (args: RuntimePairingOfferParams) => RuntimePairingOfferResult
   // Why: mobile terminal traffic is byte-oriented and bypasses JSON streaming
   // responses after the binary terminal cutover. Undefined on Unix/socket
   // transports and non-E2EE WebSocket paths.

@@ -16,6 +16,10 @@ import {
   type RpcResponse
 } from './core'
 import type { TerminalStreamFrame } from '../../../shared/terminal-stream-protocol'
+import type {
+  RuntimePairingOfferParams,
+  RuntimePairingOfferResult
+} from '../../../shared/runtime-pairing-offer'
 import type { FeatureInteractionId } from '../../../shared/feature-interactions'
 import { isBrowserPaneUiRuntimeRpcParams } from '../../../shared/runtime-rpc-feature-interaction-source'
 import {
@@ -44,7 +48,13 @@ export class RpcDispatcher {
     this.registry = buildRegistry(methods)
   }
 
-  async dispatch(request: RpcRequest, options?: { signal?: AbortSignal }): Promise<RpcResponse> {
+  async dispatch(
+    request: RpcRequest,
+    options?: {
+      signal?: AbortSignal
+      createRuntimePairingOffer?: (args: RuntimePairingOfferParams) => RuntimePairingOfferResult
+    }
+  ): Promise<RpcResponse> {
     const meta = this.meta()
     const method = this.registry.get(request.method)
     if (!method) {
@@ -80,7 +90,8 @@ export class RpcDispatcher {
     try {
       const result = await method.handler(parsedParams.value, {
         runtime: this.runtime,
-        signal: options?.signal
+        signal: options?.signal,
+        createRuntimePairingOffer: options?.createRuntimePairingOffer
       })
       this.recordRuntimeFeatureInteraction(request.method, result, undefined, request.params)
       return successResponse(request.id, meta, result)
@@ -104,6 +115,7 @@ export class RpcDispatcher {
       clientId?: string
       clientKind?: 'mobile' | 'runtime'
       pairing?: PairingRpcContext
+      createRuntimePairingOffer?: (args: RuntimePairingOfferParams) => RuntimePairingOfferResult
       sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
       registerBinaryStreamHandler?: (
         streamId: number,
@@ -138,6 +150,7 @@ export class RpcDispatcher {
           clientId: options?.clientId,
           clientKind: options?.clientKind,
           pairing: options?.pairing,
+          createRuntimePairingOffer: options?.createRuntimePairingOffer,
           sendBinary: options?.sendBinary,
           registerBinaryStreamHandler: options?.registerBinaryStreamHandler
         })

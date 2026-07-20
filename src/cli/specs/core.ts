@@ -1,6 +1,7 @@
 import type { CommandSpec } from '../args'
 import { GLOBAL_FLAGS } from '../args'
 import { SERVE_COMMAND_SPECS } from './serve'
+import { PAIRING_COMMAND_SPECS } from './pairing'
 
 export const CORE_COMMAND_SPECS: CommandSpec[] = [
   {
@@ -18,6 +19,7 @@ export const CORE_COMMAND_SPECS: CommandSpec[] = [
     allowedFlags: [...GLOBAL_FLAGS],
     examples: ['orca status', 'orca status --json']
   },
+  ...PAIRING_COMMAND_SPECS,
   {
     path: ['claude-teams'],
     argumentMode: 'passthrough',

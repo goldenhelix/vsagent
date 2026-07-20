@@ -2252,6 +2252,10 @@ app.whenReady().then(async () => {
     // Why (VSAgent fork): --serve-host narrows the WS/web-client bind from the
     // 0.0.0.0 default (e.g. to a Tailscale IP). Omitted → runtime keeps 0.0.0.0.
     ...(serveOptions?.wsHost ? { wsHost: serveOptions.wsHost } : {}),
+    // Why (VSAgent fork): on-demand pairing offers (`orca pairing-url`, web
+    // generator) advertise the serve's configured address by default, so they
+    // don't fall back to an unreachable 127.0.0.1 like the startup print would.
+    ...(serveOptions?.pairingAddress ? { defaultPairingAddress: serveOptions.pairingAddress } : {}),
     ...(serveOptions?.wsPort !== undefined
       ? {
           wsPort: serveOptions.wsPort,
