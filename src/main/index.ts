@@ -1411,6 +1411,7 @@ type ServeOptions = {
   wsPort?: number
   wsHost?: string
   serverName: string | null
+  storageNamespace: string | null
   pairingAddress: string | null
   noPairing: boolean
   mobilePairing: boolean
@@ -1457,8 +1458,18 @@ function getServeOptions(argv = process.argv): ServeOptions {
   // it as the default saved-server name. Flag > env > hostname.
   const serverName =
     valueAfter('--serve-name') ?? process.env.VSAGENT_SERVER_NAME?.trim() ?? os.hostname()
+  // Why (VSAgent fork): browser-storage namespace for the served web client —
+  // set per app (e.g. the workspace slug) when several VSAgent apps share one
+  // browser origin under sub-URL routes. Normalized into the env var, which
+  // the static web-client handler reads directly.
+  const storageNamespace =
+    valueAfter('--serve-storage-namespace') ?? process.env.VSAGENT_STORAGE_NAMESPACE?.trim() ?? null
+  if (storageNamespace) {
+    process.env.VSAGENT_STORAGE_NAMESPACE = storageNamespace
+  }
   return {
     serverName,
+    storageNamespace,
     json: argv.includes('--serve-json'),
     ...(wsPort !== undefined ? { wsPort } : {}),
     ...(wsHost !== undefined ? { wsHost } : {}),

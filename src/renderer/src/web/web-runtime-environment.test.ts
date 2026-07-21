@@ -10,8 +10,9 @@ const storage = new Map<string, string>()
     removeItem: (key: string) => void storage.delete(key),
     clear: () => storage.clear()
   },
-  location: { protocol: 'https:' }
+  location: { protocol: 'https:', pathname: '/web-index.html' }
 }
+import { installScopedWebStorage } from './web-storage-scope-install'
 import {
   createStoredWebRuntimeEnvironment,
   getActiveStoredWebRuntimeEnvironment,
@@ -35,7 +36,40 @@ beforeEach(() => {
   window.localStorage.clear()
 })
 
+function makeScopedStorageView(shared: Map<string, string>, scope: string): Storage {
+  const view = {
+    getItem: (key: string) => shared.get(key) ?? null,
+    setItem: (key: string, value: string) => void shared.set(key, value),
+    removeItem: (key: string) => void shared.delete(key),
+    clear: () => shared.clear()
+  } as unknown as Storage
+  installScopedWebStorage(view, scope)
+  return view
+}
+
 describe('web runtime environment registry', () => {
+  it('isolates registries between namespaced apps sharing one origin store', () => {
+    const win = (globalThis as { window: { localStorage: Storage } }).window
+    const shared = new Map<string, string>()
+    // Workspace A's page: storage boundary scoped to its namespace
+    win.localStorage = makeScopedStorageView(shared, 'data_curation')
+    upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({ name: 'ws-a', offer: makeOffer('wss://a:1') })
+    )
+    // Workspace B's page over the SAME underlying origin storage
+    win.localStorage = makeScopedStorageView(shared, 'test_automation')
+    expect(listStoredWebRuntimeEnvironments()).toEqual([])
+    upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({ name: 'ws-b', offer: makeOffer('wss://b:1') })
+    )
+    expect(listStoredWebRuntimeEnvironments().map((e) => e.name)).toEqual(['ws-b'])
+    // Back on workspace A's page
+    win.localStorage = makeScopedStorageView(shared, 'data_curation')
+    expect(listStoredWebRuntimeEnvironments().map((e) => e.name)).toEqual(['ws-a'])
+    // Restore the plain unscoped stub for the remaining tests
+    win.localStorage = makeScopedStorageView(new Map(), '')
+  })
+
   it('migrates the v1 single slot into the registry once', () => {
     const legacy = createStoredWebRuntimeEnvironment({
       name: 'rudy01',

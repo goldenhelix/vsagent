@@ -1,3 +1,6 @@
+// Why: storage scoping must install before any other module touches
+// localStorage (see web-storage-scope-boot.ts) — keep this import FIRST.
+import './web-storage-scope-boot'
 import '../assets/main.css'
 
 import { Suspense, useMemo, useState } from 'react'

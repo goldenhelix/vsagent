@@ -138,6 +138,9 @@ import { normalizeContextualTourIds, type ContextualTourId } from '../../../shar
 import { translate } from '@/i18n/i18n'
 import { getDefaultCreateProjectParent } from '@/components/sidebar/create-project-defaults'
 
+// Why: `orca*` keys are transparently scoped per app namespace/path at the
+// storage boundary — see web-storage-scope-install.ts (imported first by the
+// web entry). Keys here stay plain.
 const SETTINGS_STORAGE_KEY = 'orca.web.settings.v1'
 const UI_STORAGE_KEY = 'orca.web.ui.v1'
 const SESSION_STORAGE_KEY = 'orca.web.workspaceSession.v1'

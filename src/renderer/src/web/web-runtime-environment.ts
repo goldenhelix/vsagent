@@ -24,6 +24,10 @@ export type WebRuntimeEnvironmentRegistry = {
   activeId: string | null
 }
 
+// Why: `orca*` keys are transparently scoped per app namespace/path at the
+// storage boundary (web-storage-scope-install.ts), so a scoped app never sees
+// another app's registry — including the legacy v1 slot, which resolves to a
+// scoped name that never existed and therefore migrates nothing there.
 const LEGACY_ENVIRONMENT_STORAGE_KEY = 'orca.web.runtimeEnvironment.v1'
 const REGISTRY_STORAGE_KEY = 'orca.web.runtimeEnvironments.v2'
 
