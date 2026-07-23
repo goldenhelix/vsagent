@@ -112,6 +112,7 @@ import {
   upsertStoredWebRuntimeEnvironment,
   type StoredWebRuntimeEnvironment
 } from './web-runtime-environment'
+import { normalizeTerminalQuickCommands } from '../../../shared/terminal-quick-commands'
 import { parseWebPairingInput } from './web-pairing'
 import { WebRuntimeClient } from './web-runtime-client'
 import { RuntimeRpcCallQueuePool } from '../../../shared/runtime-rpc-call-queue'
@@ -3470,6 +3471,19 @@ async function getRuntimeBackedStoredSettings(): Promise<GlobalSettings> {
         result.settings.prBotAuthorOverrides
       )
     }
+    // Why (VSAgent fork): seed-worthy server-side settings (container seeds
+    // write them into the profile) must reach the web client.
+    if (Array.isArray(result.settings.terminalQuickCommands)) {
+      runtimeSettings.terminalQuickCommands = normalizeTerminalQuickCommands(
+        result.settings.terminalQuickCommands
+      )
+    }
+    if (typeof result.settings.workspaceDir === 'string' && result.settings.workspaceDir) {
+      runtimeSettings.workspaceDir = result.settings.workspaceDir
+    }
+    if (typeof result.settings.nestWorkspaces === 'boolean') {
+      runtimeSettings.nestWorkspaces = result.settings.nestWorkspaces
+    }
     const next = mergeSettings(local, runtimeSettings)
     writeJson(SETTINGS_STORAGE_KEY, next)
     return next
@@ -3503,6 +3517,17 @@ async function syncRuntimeBackedSettings(
     runtimeUpdates.prBotAuthorOverrides = normalizePRBotAuthorOverrides(
       updates.prBotAuthorOverrides
     )
+  }
+  if (Array.isArray(updates.terminalQuickCommands)) {
+    runtimeUpdates.terminalQuickCommands = normalizeTerminalQuickCommands(
+      updates.terminalQuickCommands
+    )
+  }
+  if (typeof updates.workspaceDir === 'string' && updates.workspaceDir) {
+    runtimeUpdates.workspaceDir = updates.workspaceDir
+  }
+  if (typeof updates.nestWorkspaces === 'boolean') {
+    runtimeUpdates.nestWorkspaces = updates.nestWorkspaces
   }
   if (Object.keys(runtimeUpdates).length === 0) {
     return localNext

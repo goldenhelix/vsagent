@@ -898,6 +898,7 @@ type RuntimeStore = {
     minimaxGroupId?: GlobalSettings['minimaxGroupId']
     minimaxUsageModels?: GlobalSettings['minimaxUsageModels']
     prBotAuthorOverrides?: GlobalSettings['prBotAuthorOverrides']
+    terminalQuickCommands?: GlobalSettings['terminalQuickCommands']
     gitlabProjects?: GlobalSettings['gitlabProjects']
     mobileAutoRestoreFitMs?: number | null
     mobileEmulatorEnabled?: boolean
@@ -2730,6 +2731,9 @@ export class OrcaRuntimeService {
 
   getClientSettings(): Pick<
     GlobalSettings,
+    | 'terminalQuickCommands'
+    | 'workspaceDir'
+    | 'nestWorkspaces'
     | 'defaultTuiAgent'
     | 'disabledTuiAgents'
     | 'agentCmdOverrides'
@@ -2753,6 +2757,11 @@ export class OrcaRuntimeService {
     }
     const settings = this.store.getSettings()
     return {
+      // Why (VSAgent fork): seed-worthy client settings for web deployments —
+      // quick commands, workspace root, and nesting live server-side.
+      terminalQuickCommands: settings.terminalQuickCommands ?? [],
+      workspaceDir: settings.workspaceDir,
+      nestWorkspaces: settings.nestWorkspaces !== false,
       defaultTuiAgent: settings.defaultTuiAgent ?? null,
       disabledTuiAgents: settings.disabledTuiAgents ?? [],
       agentCmdOverrides: settings.agentCmdOverrides ?? {},
@@ -2776,6 +2785,9 @@ export class OrcaRuntimeService {
   updateClientSettings(
     updates: Pick<
       Partial<GlobalSettings>,
+      | 'terminalQuickCommands'
+      | 'workspaceDir'
+      | 'nestWorkspaces'
       | 'agentStatusHooksEnabled'
       | 'defaultTuiAgent'
       | 'disabledTuiAgents'
@@ -2795,6 +2807,9 @@ export class OrcaRuntimeService {
     >
   ): Pick<
     GlobalSettings,
+    | 'terminalQuickCommands'
+    | 'workspaceDir'
+    | 'nestWorkspaces'
     | 'defaultTuiAgent'
     | 'disabledTuiAgents'
     | 'agentCmdOverrides'

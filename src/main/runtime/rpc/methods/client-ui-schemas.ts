@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { normalizeTerminalQuickCommands } from '../../../../shared/terminal-quick-commands'
 import {
   isFeatureInteractionId,
   type FeatureInteractionId
@@ -163,7 +164,14 @@ export const SettingsUpdate = z
     prBotAuthorOverrides: z
       .unknown()
       .transform((value) => normalizePRBotAuthorOverrides(value))
-      .optional()
+      .optional(),
+    // Why (VSAgent fork): seed-worthy client settings for web deployments.
+    terminalQuickCommands: z
+      .unknown()
+      .transform((value) => normalizeTerminalQuickCommands(value))
+      .optional(),
+    workspaceDir: z.string().min(1).optional(),
+    nestWorkspaces: z.boolean().optional()
   })
   .strict()
   .default({})
