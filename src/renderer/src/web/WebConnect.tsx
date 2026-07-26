@@ -62,7 +62,11 @@ export default function WebConnect({
       return
     }
     setConnecting(true)
-    const environment = createStoredWebRuntimeEnvironment({ name, offer: parsedOffer })
+    const environment = createStoredWebRuntimeEnvironment({
+      name,
+      offer: parsedOffer,
+      pairedVia: 'origin'
+    })
     const client = new WebRuntimeClient(parsedOffer)
     try {
       const response = await client.call('status.get', undefined, { timeoutMs: 15_000 })

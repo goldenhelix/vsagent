@@ -1325,7 +1325,7 @@ function createRuntimeEnvironmentsApi(): NonNullable<Partial<PreloadApi>['runtim
       // existing pairing. Same-endpoint re-pairs refresh credentials in place
       // (stable env id); the active/primary pointer stays where it was.
       const stored = upsertStoredWebRuntimeEnvironment(
-        createStoredWebRuntimeEnvironment({ name, offer })
+        createStoredWebRuntimeEnvironment({ name, offer, pairedVia: 'manual' })
       )
       // Drop any client dialed with the previous credentials for this env.
       closeRuntimeClientForEnvironment(stored.id)
@@ -3357,6 +3357,9 @@ function closeRuntimeClientForEnvironment(environmentId: string): void {
 function removeRuntimeEnvironment(environmentId: string): void {
   closeRuntimeClientForEnvironment(environmentId)
   removeStoredWebRuntimeEnvironment(environmentId)
+  // Why: drop the removed server's persisted workspace session too, or the
+  // orphaned key lingers in localStorage forever.
+  window.localStorage.removeItem(sessionStorageKeyForHost(`runtime:${environmentId}`))
 }
 
 function resolveEnvironment(selector: string): StoredWebRuntimeEnvironment {

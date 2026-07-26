@@ -18,6 +18,7 @@ import {
 import {
   createStoredWebRuntimeEnvironment,
   listStoredWebRuntimeEnvironments,
+  pruneStaleOriginPairings,
   upsertStoredWebRuntimeEnvironment
 } from './web-runtime-environment'
 import { installWebPreloadApi } from './web-preload-api'
@@ -48,13 +49,21 @@ function WebRoot(): React.JSX.Element {
       // Why: a URL-fragment pairing comes from the page-origin server — the
       // browser's PRIMARY. Same-endpoint re-pairs keep the env id stable so
       // saved secondaries and persisted sessions survive.
-      upsertStoredWebRuntimeEnvironment(
+      const stored = upsertStoredWebRuntimeEnvironment(
         createStoredWebRuntimeEnvironment({
           name: defaultWebEnvironmentName(startupDecision.offer),
-          offer: startupDecision.offer
+          offer: startupDecision.offer,
+          pairedVia: 'origin'
         }),
         { makeActive: true }
       )
+      // Why: ephemeral app deployments (rebuild = new backend, new endpoint)
+      // re-pair via this fragment every boot; earlier same-host origin
+      // pairings are dead instances — prune them and their session state so
+      // the sidebar and Remote Hosts list don't accumulate corpses.
+      for (const removedId of pruneStaleOriginPairings(stored.id)) {
+        window.localStorage.removeItem(`orca.web.workspaceSession.v1.runtime:${removedId}`)
+      }
       return true
     }
     return startupDecision.kind === 'use-stored-environment'

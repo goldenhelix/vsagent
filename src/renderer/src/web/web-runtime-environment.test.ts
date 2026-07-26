@@ -15,6 +15,7 @@ const storage = new Map<string, string>()
 import { installScopedWebStorage } from './web-storage-scope-install'
 import {
   createStoredWebRuntimeEnvironment,
+  pruneStaleOriginPairings,
   getActiveStoredWebRuntimeEnvironment,
   listStoredWebRuntimeEnvironments,
   readWebRuntimeEnvironmentRegistry,
@@ -139,5 +140,98 @@ describe('web runtime environment registry', () => {
     removeStoredWebRuntimeEnvironment(first.id)
     expect(listStoredWebRuntimeEnvironments().map((entry) => entry.id)).toEqual([second.id])
     expect(getActiveStoredWebRuntimeEnvironment()?.id).toBe(second.id)
+  })
+})
+
+describe('pruneStaleOriginPairings', () => {
+  it('removes dead same-host origin pairings from earlier app instances', () => {
+    // Rebuild lineage: same host, different app_instance paths.
+    const old1 = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'VSAgent',
+        offer: makeOffer('wss://nightly.example.com/w/hg19/app_instance/app_OLD1'),
+        pairedVia: 'origin'
+      })
+    )
+    const old2 = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'VSAgent',
+        offer: makeOffer('wss://nightly.example.com/w/hg19/app_instance/app_OLD2'),
+        pairedVia: 'origin'
+      })
+    )
+    const fresh = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'VSAgent',
+        offer: makeOffer('wss://nightly.example.com/w/hg19/app_instance/app_NEW'),
+        pairedVia: 'origin'
+      }),
+      { makeActive: true }
+    )
+    const removed = pruneStaleOriginPairings(fresh.id)
+    expect(removed.sort()).toEqual([old1.id, old2.id].sort())
+    expect(listStoredWebRuntimeEnvironments().map((e) => e.id)).toEqual([fresh.id])
+    expect(getActiveStoredWebRuntimeEnvironment()?.id).toBe(fresh.id)
+  })
+
+  it('keeps manually added servers, even on the same host', () => {
+    const manual = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'server2',
+        offer: makeOffer('wss://nightly.example.com/w/other/app_instance/app_X'),
+        pairedVia: 'manual'
+      })
+    )
+    const fresh = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'VSAgent',
+        offer: makeOffer('wss://nightly.example.com/w/hg19/app_instance/app_NEW'),
+        pairedVia: 'origin'
+      })
+    )
+    expect(pruneStaleOriginPairings(fresh.id)).toEqual([])
+    expect(
+      listStoredWebRuntimeEnvironments()
+        .map((e) => e.id)
+        .sort()
+    ).toEqual([manual.id, fresh.id].sort())
+  })
+
+  it('keeps cross-host servers regardless of provenance (legacy entries)', () => {
+    const rudy02 = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'rudy02',
+        offer: makeOffer('wss://dev-rudy02.ts.net:8445')
+      })
+    )
+    const fresh = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'rudy01',
+        offer: makeOffer('wss://dev-rudy01.ts.net:8445'),
+        pairedVia: 'origin'
+      })
+    )
+    expect(pruneStaleOriginPairings(fresh.id)).toEqual([])
+    expect(listStoredWebRuntimeEnvironments()).toHaveLength(2)
+    void rudy02
+  })
+
+  it('distinguishes ports on the same hostname', () => {
+    const otherPort = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'srv-6801',
+        offer: makeOffer('ws://devserver:6801')
+      })
+    )
+    const fresh = upsertStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'srv-6800',
+        offer: makeOffer('ws://devserver:6800'),
+        pairedVia: 'origin'
+      })
+    )
+    expect(pruneStaleOriginPairings(fresh.id)).toEqual([])
+    expect(listStoredWebRuntimeEnvironments()).toHaveLength(2)
+    void otherPort
   })
 })

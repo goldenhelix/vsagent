@@ -12,6 +12,11 @@ export type StoredWebRuntimeEnvironment = Omit<PublicKnownRuntimeEnvironment, 'e
     deviceToken: string
     publicKeyB64: string
   }[]
+  // Why: 'origin' = paired from the page's own pairing fragment/redirect (the
+  // serving app itself); 'manual' = deliberately added via Add Server.
+  // Origin pairings from ephemeral app instances are prunable lineage; manual
+  // pairings must survive re-pairs. Absent on pre-v0.6.10 entries.
+  pairedVia?: 'origin' | 'manual'
 }
 
 // Why (VSAgent fork): the web client stores a REGISTRY of paired servers plus
@@ -118,6 +123,7 @@ export function upsertStoredWebRuntimeEnvironment(
     stored = {
       ...existing,
       name: environment.name,
+      pairedVia: environment.pairedVia ?? existing.pairedVia,
       runtimeId: environment.runtimeId ?? existing.runtimeId,
       updatedAt: Date.now(),
       preferredEndpointId: existing.preferredEndpointId,
@@ -138,6 +144,56 @@ export function upsertStoredWebRuntimeEnvironment(
   return stored
 }
 
+/**
+ * Prune stale lineage after an origin (page-fragment) pairing: ephemeral app
+ * deployments mint a NEW backend per rebuild, so earlier origin pairings for
+ * the same endpoint host are dead instances of the same app. Removes stored
+ * environments that share the kept pairing's endpoint host (hostname:port)
+ * unless they were added manually (Add Server), and returns the removed ids
+ * so the caller can clean their per-environment session keys.
+ */
+export function pruneStaleOriginPairings(keepId: string): string[] {
+  const registry = readWebRuntimeEnvironmentRegistry()
+  const keep = registry.environments.find((entry) => entry.id === keepId)
+  const keepHost = keep ? endpointHost(keep) : null
+  if (!keep || !keepHost) {
+    return []
+  }
+  const removedIds: string[] = []
+  const environments = registry.environments.filter((entry) => {
+    if (entry.id === keepId || entry.pairedVia === 'manual') {
+      return true
+    }
+    if (endpointHost(entry) !== keepHost) {
+      return true
+    }
+    removedIds.push(entry.id)
+    return false
+  })
+  if (removedIds.length === 0) {
+    return []
+  }
+  saveWebRuntimeEnvironmentRegistry({
+    environments,
+    activeId: environments.some((entry) => entry.id === registry.activeId)
+      ? registry.activeId
+      : keepId
+  })
+  return removedIds
+}
+
+function endpointHost(environment: StoredWebRuntimeEnvironment): string | null {
+  const endpoint = environment.endpoints[0]?.endpoint
+  if (!endpoint) {
+    return null
+  }
+  try {
+    return new URL(endpoint).host
+  } catch {
+    return null
+  }
+}
+
 /** Remove a pairing entirely (destroys the stored device token). */
 export function removeStoredWebRuntimeEnvironment(id: string): void {
   const registry = readWebRuntimeEnvironmentRegistry()
@@ -151,11 +207,13 @@ export function removeStoredWebRuntimeEnvironment(id: string): void {
 export function createStoredWebRuntimeEnvironment(args: {
   name: string
   offer: WebPairingOffer
+  pairedVia?: 'origin' | 'manual'
 }): StoredWebRuntimeEnvironment {
   const id = `web-${createBrowserUuid()}`
   const now = Date.now()
   return {
     id,
+    ...(args.pairedVia ? { pairedVia: args.pairedVia } : {}),
     name: args.name.trim() || 'Orca Server',
     createdAt: now,
     updatedAt: now,
