@@ -1,0 +1,56 @@
+[Unit]
+Description=VSAgent web service (Orca serve)
+Documentation=https://github.com/goldenhelix/vsagent
+Documentation=https://github.com/stablyai/orca/blob/main/docs/reference/headless-linux-server.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# install.sh fills these placeholders in when it writes
+# ~/.config/systemd/user/vsagent.service. The defaults below document the
+# contract; the installed copy has concrete values substituted via sed.
+Environment=VSAGENT_PORT=__PORT__
+Environment=VSAGENT_PAIRING_ADDRESS=__PAIRING_ADDRESS__
+Environment=NODE_ENV=production
+# Why: a VPS GPU/DRI setup commonly warns or crashes GL init even for the
+# (optional) Xvfb path; see docs/reference/headless-linux-server.md's
+# Troubleshooting section (upstream's own recommendation for the same case).
+Environment=LIBGL_ALWAYS_SOFTWARE=1
+WorkingDirectory=__INSTALL_DIR__
+# The launcher boots `electron <install-dir> --serve` and records the printed
+# "Web client URL" (which carries the pairing token) to
+# ${XDG_STATE_HOME:-~/.local/state}/vsagent/web-url for later retrieval.
+# Xvfb is optional: installing it (apt-get install xvfb) enables in-app
+# browser panes. Without it, serve exits (code 1) unless you set
+# VSAGENT_ALLOW_DISPLAYLESS_SERVE=1 above (terminals/agents work, browser
+# panes are off) — see docs/install-linux.md and
+# docs/reference/headless-linux-server.md#hosts-that-cannot-run-xvfb.
+ExecStart=__INSTALL_DIR__/scripts/vsagent-serve
+# Why: an intentional `systemctl stop` exits cleanly, so on-failure only fires
+# on crashes (e.g. a SIGSEGV under memory pressure surfaces as 139).
+Restart=on-failure
+# Exit status 3 means another process already owns this userData profile
+# (Orca's SingletonLock) — retrying that launch can never succeed, so leave
+# the unit failed instead of restart-looping. Orca reclaims a provably-dead
+# lock automatically on the next start; this only matters when the owner is
+# a live process. See docs/reference/headless-linux-server.md's
+# "Journal shows ... already running" troubleshooting entry.
+RestartPreventExitStatus=3
+RestartSec=2
+# Why: contain the blast radius of long-session memory growth (observed ~63G
+# RSS over ~2 days on the previous stack) so a leak gets the service restarted
+# well before it can exhaust the host. MemoryHigh throttles + reclaims;
+# MemoryMax is the hard cap whose OOM kill triggers the restart. Tune to the
+# deployment's RAM.
+MemoryAccounting=yes
+MemoryHigh=8G
+MemoryMax=16G
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vsagent
+# A 30s shutdown grace gives the daemon time to flush runtime state.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

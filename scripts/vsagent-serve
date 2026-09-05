@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# VSAgent serve launcher — boots upstream Orca's native `--serve` mode from an
+# installed release tarball. Shipped at <install-dir>/scripts/vsagent-serve;
+# both the systemd unit and ~/.local/bin/vsagent point here.
+#
+# Env vars:
+#   VSAGENT_PORT                     runtime WS/HTTP port (default 6768)
+#   VSAGENT_PAIRING_ADDRESS          host advertised in printed pairing / web
+#                                    client URLs (default: Orca picks one)
+#   VSAGENT_ALLOW_DISPLAYLESS_SERVE  see docs/install-linux.md and
+#                                    docs/reference/headless-linux-server.md
+#                                    #hosts-that-cannot-run-xvfb — this script
+#                                    execs Electron directly, so it (not the
+#                                    orca CLI) must put --ozone-platform on argv
+# Args:
+#   --json    passthrough to --serve-json (machine-readable ready line)
+#   anything else is forwarded to the Orca serve process verbatim
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
+
+PORT="${VSAGENT_PORT:-6768}"
+PAIRING_ADDRESS="${VSAGENT_PAIRING_ADDRESS:-}"
+# Bind host: default 0.0.0.0 (all interfaces). Set VSAGENT_HOST to a single IP
+# (e.g. the Tailscale address) to restrict exposure to that interface.
+BIND_HOST="${VSAGENT_HOST:-}"
+
+ARGS=(--serve --serve-port "$PORT")
+if [[ -n "$BIND_HOST" ]]; then
+  ARGS+=(--serve-host "$BIND_HOST")
+fi
+if [[ -n "$PAIRING_ADDRESS" ]]; then
+  ARGS+=(--serve-pairing-address "$PAIRING_ADDRESS")
+fi
+
+EXTRA=()
+for arg in "$@"; do
+  case "$arg" in
+    --json) EXTRA+=(--serve-json) ;;
+    *) EXTRA+=("$arg") ;;
+  esac
+done
+
+# Why: Chromium picks its Ozone platform from the real launch command line
+# before any JS runs (src/shared/displayless-serve-fallback.ts), so this
+# switch cannot be added from inside Orca. `orca serve` (the CLI) appends it
+# automatically; this script execs Electron directly and must do the same.
+# Accept either spelling since VSAGENT_* -> ORCA_* aliasing only happens
+# inside the process this script is about to start, too late for argv.
+ALLOW_DISPLAYLESS="${VSAGENT_ALLOW_DISPLAYLESS_SERVE:-${ORCA_ALLOW_DISPLAYLESS_SERVE:-}}"
+if [[ "$ALLOW_DISPLAYLESS" == "1" ]]; then
+  EXTRA+=(--ozone-platform=headless)
+fi
+
+# Why: systemd user units run with a minimal PATH that rarely includes node,
+# and node_modules/.bin/electron is a Node shim. Prefer the real binary; fall
+# back to the shim for layouts where dist/ lives elsewhere (path.txt installs).
+ELECTRON="$INSTALL_DIR/node_modules/electron/dist/electron"
+if [[ ! -x "$ELECTRON" ]]; then
+  ELECTRON="$INSTALL_DIR/node_modules/.bin/electron"
+fi
+if [[ ! -x "$ELECTRON" ]]; then
+  echo "[vsagent-serve] electron is not installed — run 'pnpm install --prod' in $INSTALL_DIR" >&2
+  exit 1
+fi
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/vsagent"
+mkdir -p "$STATE_DIR"
+WEB_URL_FILE="$STATE_DIR/web-url"
+
+# Why: app.getAppPath() must resolve out/web (web client) and the daemon entry
+# relative to the install dir, and runtime skill assets load from cwd/resources.
+cd "$INSTALL_DIR"
+
+# Why: install.sh links the `vsagent`/`orca` CLI launchers; skip the serve
+# process's own CLI self-install so it can't race or hijack them.
+export VSAGENT_MANAGED_INSTALL=1
+
+# Why: the printed "Web client URL" carries the pairing token, and journald may
+# rotate past it. Mirror stdout while recording that line to a state file so
+# systemd users can always recover the URL. exec keeps electron as the service
+# main process (signals, exit code) while the process substitution filters.
+# The ready line is also rebranded here (VSAgent) without an upstream diff.
+# Why: VSAGENT_OPEN_FOLDER imports the given folder(s) as projects once the
+# server is ready — the container passes the user-picked folder and it appears
+# in every paired browser. Colon-separated for multiple. Idempotent: the
+# upsert dedupes by path, identity and git-vs-folder kind are derived.
+open_folders() {
+  local folder
+  IFS=':' read -ra _folders <<<"${VSAGENT_OPEN_FOLDER}"
+  for folder in "${_folders[@]}"; do
+    [[ -z "$folder" ]] && continue
+    if out=$("$SCRIPT_DIR/vsagent-cli" project setup-existing-folder \
+      --host local --path "$folder" --json 2>&1); then
+      printf '[vsagent-serve] opened project folder %s\n' "$folder"
+    else
+      printf '[vsagent-serve] failed to open project folder %s: %s\n' "$folder" "$out" >&2
+    fi
+  done
+}
+
+exec "$ELECTRON" "$INSTALL_DIR" "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} > >(
+  OPENED_FOLDERS=0
+  while IFS= read -r line; do
+    case "$line" in
+      # serve-readiness.ts now prints a bare "Orca server ready" line, then the
+      # endpoint on its own "Bound endpoint: ..." line — no longer a suffix.
+      'Orca server ready') line='VSAgent server ready' ;;
+    esac
+    printf '%s\n' "$line"
+    case "$line" in
+      'Web client URL: '*)
+        printf '%s\n' "${line#Web client URL: }" >"$WEB_URL_FILE"
+        printf '[vsagent-serve] web client URL saved to %s\n' "$WEB_URL_FILE"
+        if [[ -n "${VSAGENT_OPEN_FOLDER:-}" && "$OPENED_FOLDERS" -eq 0 ]]; then
+          OPENED_FOLDERS=1
+          open_folders &
+        fi
+        ;;
+    esac
+  done
+)
