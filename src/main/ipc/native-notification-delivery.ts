@@ -8,7 +8,7 @@ import { safelyRevealWindow } from '../window/focus-existing-window'
 import { isBackgroundLaunch } from '../window/foreground-activation-policy'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree/id'
 import { parsePaneKey } from '../../shared/stable-pane-id'
-import type { buildNotificationOptions } from './notification-options'
+import type { buildNotificationOptions } from '../../shared/notification-options'
 import { getEffectiveNotificationSoundId } from './notification-sound-selection'
 import {
   activeNotificationsById,

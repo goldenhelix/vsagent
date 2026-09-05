@@ -1,4 +1,4 @@
-import type { NotificationDispatchRequest } from '../../shared/notification-settings-types'
+import type { NotificationDispatchRequest } from './notification-settings-types'
 
 const NOTIFICATION_AGENT_LABEL_MAX_LENGTH = 40
 const NOTIFICATION_TITLE_CONTEXT_MAX_LENGTH = 80
@@ -34,9 +34,11 @@ export function buildNotificationOptions(args: NotificationDispatchRequest): {
   }
 
   if (args.source === 'test') {
+    // Why (VSAgent fork): neutral copy — this renders from the main process,
+    // outside the web client's translate-seam rebrand.
     return {
-      title: 'Orca notifications are on',
-      body: 'This is a test notification from Orca.'
+      title: 'Notifications are on',
+      body: 'This is a test notification.'
     }
   }
 
