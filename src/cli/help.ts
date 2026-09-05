@@ -6,15 +6,26 @@ import { ROOT_HELP_TEXT_SECONDARY } from './root-help-text-secondary'
 
 const ROOT_HELP_TEXT = [ROOT_HELP_TEXT_PRIMARY, ROOT_HELP_TEXT_SECONDARY].join('\n')
 
+// Why (VSAgent fork): when launched via the vsagent launcher (which sets
+// VSAGENT_BRAND_CLI=1), rebrand help output at this one seam instead of
+// editing dozens of upstream strings. `orca <cmd>` examples become
+// `vsagent <cmd>`, which stays correct — both names run this same CLI.
+function brandHelpText(text: string): string {
+  if (process.env.VSAGENT_BRAND_CLI !== '1') {
+    return text
+  }
+  return text.replace(/\bOrca\b/g, 'VSAgent').replace(/\borca\b/g, 'vsagent')
+}
+
 export function printHelp(specs: CommandSpec[], commandPath: string[] = []): void {
   const exactSpec = findCommandSpec(specs, commandPath)
   if (exactSpec) {
-    console.log(formatCommandHelp(exactSpec))
+    console.log(brandHelpText(formatCommandHelp(exactSpec)))
     return
   }
 
   if (isCommandGroup(commandPath)) {
-    console.log(formatGroupHelp(specs, commandPath[0]))
+    console.log(brandHelpText(formatGroupHelp(specs, commandPath[0])))
     return
   }
 
@@ -24,7 +35,7 @@ export function printHelp(specs: CommandSpec[], commandPath: string[] = []): voi
     console.log(`Unknown command: ${commandPath.join(' ')}${recovery ? `\n${recovery}` : ''}\n`)
   }
 
-  console.log(ROOT_HELP_TEXT)
+  console.log(brandHelpText(ROOT_HELP_TEXT))
 }
 
 export function formatCommandHelp(spec: CommandSpec): string {

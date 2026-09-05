@@ -66,6 +66,7 @@
     "build:notification-status-macos": "node config/scripts/build-notification-status-macos.mjs",
     "build:native": "node config/scripts/build-native-for-platform.mjs",
     "smoke:computer": "node config/scripts/computer-use-smoke.mjs",
+    "smoke:web": "node tests/web-client-smoke.mjs",
     "verify:computer-native": "node config/scripts/verify-computer-native.mjs",
     "verify:cli-bin": "node config/scripts/verify-cli-bin.mjs",
     "verify:built-skills-cli": "node config/scripts/verify-skills-cli-runtime.cjs out",
