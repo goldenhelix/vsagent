@@ -22,6 +22,7 @@ import { getProjectIdForProviderIdentity } from '../../shared/project-host-setup
 import { getProjectHostSetupForRepo } from '../../shared/project-host-setup-lookup'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
+import { isGitRepo } from '../git/repo-detection'
 import type { RuntimeStore } from './runtime-store-contract'
 
 type RuntimeProjectHostSetupDependencies = {
@@ -97,12 +98,20 @@ export class RuntimeProjectHostSetupController {
     if (!this.deps.getStore()) {
       throw new Error('runtime_unavailable')
     }
-    const kind = args.kind === 'folder' ? 'folder' : 'git'
     const knownRepoIds = new Set(this.deps.listRepos().map((repo) => repo.id))
     // Why route rather than refuse: this process owns the SSH connection, and its own IPC handler
     // already registers `ssh:*` hosts correctly. Refusing here only made the CLI and runtime RPC
     // disagree with the desktop app about what the same process can do.
     const sshTargetId = getSshTargetIdForExecutionHost(args.hostId)
+    // Why (VSAgent fork): auto-detect git vs folder when the caller doesn't say — server-side
+    // deployments import arbitrary user-picked paths. Local branch only: isGitRepo is a
+    // local-filesystem probe and the SSH branch's path lives on a different machine, so leave
+    // that branch at today's 'git' default.
+    const kind = sshTargetId
+      ? args.kind === 'folder'
+        ? 'folder'
+        : 'git'
+      : (args.kind ?? (isGitRepo(args.path) ? 'git' : 'folder'))
     const repo = sshTargetId
       ? await this.deps.addRemoteRepo({
           connectionId: sshTargetId,
@@ -182,7 +191,9 @@ export class RuntimeProjectHostSetupController {
     }
     let repo = initialRepo
     let setup = getProjectHostSetupForRepo(this.listSetups(), repo)
-    if (setup.projectId !== args.projectId) {
+    // Why (VSAgent fork): no projectId means "use the derived identity" — the idempotent
+    // open-this-folder upsert (identity can't be known in advance).
+    if (args.projectId && setup.projectId !== args.projectId) {
       const existingProject = this.listProjects().find((project) => project.id === args.projectId)
       const identity = existingProject?.providerIdentity ?? args.projectProviderIdentity
       if (!identity || getProjectIdForProviderIdentity(identity) !== args.projectId) {

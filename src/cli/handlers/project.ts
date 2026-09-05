@@ -115,8 +115,11 @@ export const PROJECT_HANDLERS: Record<string, CommandHandler> = {
     // An SSH host's filesystem is not the CLI's, so resolving a relative path against the client
     // cwd would register a path that names the wrong machine.
     const pathIsOffClient = client.isRemote || getSshTargetIdForExecutionHost(hostId) !== null
+    // Why (VSAgent fork): --project is optional — omitted means "use the identity derived from
+    // the folder" (idempotent open-this-folder upsert).
+    const projectId = getOptionalStringFlag(flags, 'project')
     const args: ProjectHostSetupExistingFolderArgs = {
-      projectId: getRequiredStringFlag(flags, 'project'),
+      ...(projectId ? { projectId } : {}),
       hostId,
       path: resolveRepoPathArgument(rawPath, cwd, pathIsOffClient, 'Remote project setup'),
       kind: getOptionalRepoKind(flags),

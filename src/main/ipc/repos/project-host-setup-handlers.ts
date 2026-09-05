@@ -170,7 +170,10 @@ export function registerProjectHostSetupHandlers(mainWindow: BrowserWindow, stor
         aligned = alignRepoWithRequestedProject(
           store,
           result.repo,
-          args.projectId,
+          // Why (VSAgent fork): a missing projectId means "use the identity derived from the
+          // folder" — the align check then trivially passes.
+          args.projectId ??
+            getProjectHostSetupForRepo(store.getProjectHostSetups(), result.repo).projectId,
           args.setupMethod,
           args.projectProviderIdentity
         )
