@@ -52,6 +52,16 @@ export function getGitLabWorkItemWorkspaceSeed(item: GitLabWorkItem): string {
     })?.seedName ?? getLinkedWorkItemSuggestedName(item)
   )
 }
+export function getGiteaWorkItemWorkspaceSeed(item: GitLabWorkItem): string {
+  return (
+    getLinkedWorkItemWorkspaceName({
+      type: item.type,
+      provider: 'gitea',
+      number: item.number,
+      title: item.title
+    })?.seedName ?? getLinkedWorkItemSuggestedName(item)
+  )
+}
 export function getJiraIssueWorkspaceSeed(issue: JiraIssue): string {
   return (
     getLinkedWorkItemWorkspaceName({

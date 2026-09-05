@@ -10,11 +10,12 @@ import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import {
   getGitHubWorkItemWorkspaceSeed,
+  getGiteaWorkItemWorkspaceSeed,
   getGitLabWorkItemWorkspaceSeed,
   getTaskPageRepoSourceContext
 } from './task-page-source-context'
 export function useTaskPageWorkspaceActions(model: TaskPageSearchActionsModel) {
-  const { repoMap, openModal } = model
+  const { repoMap, openModal, taskSource } = model
   const openComposerForItem = useCallback(
     (item: GitHubWorkItem): void => {
       const linkedWorkItem: LinkedWorkItemSummary = {
@@ -81,8 +82,12 @@ export function useTaskPageWorkspaceActions(model: TaskPageSearchActionsModel) {
   )
   const openComposerForGitLabItem = useCallback(
     (item: GitLabWorkItem): void => {
+      // Why: Gitea reuses this GitLab "start work" flow; stamp the linked task
+      // + source context with the active provider so the persisted worktree
+      // link and workspace seed reflect where the item actually came from.
+      const workItemProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
       const linkedWorkItem: LinkedWorkItemSummary = {
-        provider: 'gitlab',
+        provider: workItemProvider,
         type: item.type,
         number: item.number,
         title: item.title,
@@ -97,15 +102,18 @@ export function useTaskPageWorkspaceActions(model: TaskPageSearchActionsModel) {
         linkedWorkItem,
         taskSourceContext: getTaskPageRepoSourceContext(
           repoMap.get(item.repoId),
-          'gitlab',
+          workItemProvider,
           item.projectRef
         ),
-        prefilledName: getGitLabWorkItemWorkspaceSeed(item),
+        prefilledName:
+          workItemProvider === 'gitea'
+            ? getGiteaWorkItemWorkspaceSeed(item)
+            : getGitLabWorkItemWorkspaceSeed(item),
         initialRepoId: item.repoId,
         telemetrySource: 'sidebar'
       })
     },
-    [openModal, repoMap]
+    [openModal, repoMap, taskSource]
   )
   const handleUseGitLabItem = useCallback(
     (item: GitLabWorkItem): void => {

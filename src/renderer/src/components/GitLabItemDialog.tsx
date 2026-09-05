@@ -24,6 +24,7 @@ export default function GitLabItemDialog({
   repoPath,
   repoId,
   sourceContext,
+  provider = 'gitlab',
   onClose,
   onCreateWorkspace
 }: GitLabItemDialogProps) {
@@ -42,7 +43,7 @@ export default function GitLabItemDialog({
   }, [repoId, repoPath, sourceContext])
   const updateCommentDraft = state.updateCommentDraft
 
-  useGitLabItemDetailsEffect(item, repoSelector, state)
+  useGitLabItemDetailsEffect(item, repoSelector, state, provider)
   useGitLabItemScopeResetEffect(itemId, state)
 
   const handleRefresh = useCallback(() => {
@@ -51,7 +52,14 @@ export default function GitLabItemDialog({
   const detailsEditing = useGitLabDetailsEditing(item, repoSelector, state)
   const pipelineActions = useGitLabPipelineActions(item, repoSelector, state, handleRefresh)
   const reviewActions = useGitLabReviewActions(item, repoSelector, state)
-  const primaryActions = useGitLabPrimaryActions(item, itemId, repoSelector, state, handleRefresh)
+  const primaryActions = useGitLabPrimaryActions(
+    item,
+    itemId,
+    repoSelector,
+    state,
+    handleRefresh,
+    provider
+  )
 
   return (
     <GitLabItemDialogView

@@ -19,6 +19,9 @@ export function TaskPageGitLabDialog({
       repoPath={gitlabDialogRepo?.path ?? null}
       repoId={gitlabDialogItem?.repoId ?? null}
       sourceContext={gitlabDialogSourceContext}
+      // Why: Gitea reuses this dialog; route its issue detail/comment calls to
+      // the gitea preload namespace instead of gl.*.
+      provider={gitlabDialogSourceContext?.provider === 'gitea' ? 'gitea' : 'gitlab'}
       onCreateWorkspace={(item) => {
         setGitlabDialogItem(null)
         handleUseGitLabItem(item)

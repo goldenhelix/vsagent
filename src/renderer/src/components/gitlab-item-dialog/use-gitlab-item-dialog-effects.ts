@@ -7,7 +7,10 @@ import type { GitLabItemDialogState } from './use-gitlab-item-dialog-state'
 export function useGitLabItemDetailsEffect(
   item: GitLabWorkItem | null,
   repoSelector: GitLabDialogRepoSelector | null,
-  state: GitLabItemDialogState
+  state: GitLabItemDialogState,
+  // Why: Gitea reuses this dialog for its issues — route detail reads to the
+  // gitea preload namespace (no `type` field there; Gitea items are always issues).
+  provider: 'gitlab' | 'gitea' = 'gitlab'
 ): void {
   const { refreshNonce, setDetails, setEditingDetails, setError, setLoading } = state
   useEffect(() => {
@@ -21,8 +24,11 @@ export function useGitLabItemDetailsEffect(
     let stale = false
     setLoading(true)
     setError(null)
-    void window.api.gl
-      .workItemDetails({ ...repoSelector, iid: item.number, type: item.type })
+    const detailsRequest =
+      provider === 'gitea'
+        ? window.api.gitea.workItemDetails({ ...repoSelector, iid: item.number })
+        : window.api.gl.workItemDetails({ ...repoSelector, iid: item.number, type: item.type })
+    void detailsRequest
       .then((data) => {
         if (stale) {
           return
@@ -46,7 +52,16 @@ export function useGitLabItemDetailsEffect(
     return () => {
       stale = true
     }
-  }, [item, refreshNonce, repoSelector, setDetails, setEditingDetails, setError, setLoading])
+  }, [
+    item,
+    provider,
+    refreshNonce,
+    repoSelector,
+    setDetails,
+    setEditingDetails,
+    setError,
+    setLoading
+  ])
 }
 
 export function useGitLabItemScopeResetEffect(

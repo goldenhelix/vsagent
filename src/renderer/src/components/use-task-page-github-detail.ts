@@ -28,6 +28,7 @@ export function useTaskPageGitHubDetail(model: TaskPageGitHubListStateModel) {
     selectedRepos,
     primaryRepo,
     setGithubMode,
+    taskSource,
     gitlabDialogItem,
     setGitlabDialogItem,
     appliedTaskSearch,
@@ -129,19 +130,27 @@ export function useTaskPageGitHubDetail(model: TaskPageGitHubListStateModel) {
     if (!gitlabDialogItem) {
       return null
     }
+    // Why: Gitea shares this GitLab dialog state; keep the source-context
+    // provider aligned with the active tab so the dialog routes to gitea.*.
+    const workItemProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
     if (
-      pageData.openGitLabSourceContext?.provider === 'gitlab' &&
+      pageData.openGitLabSourceContext?.provider === workItemProvider &&
       pageData.openGitLabWorkItem?.id === gitlabDialogItem.id &&
       pageData.openGitLabWorkItem.repoId === gitlabDialogItem.repoId
     ) {
       return pageData.openGitLabSourceContext
     }
-    return getTaskPageRepoSourceContext(gitlabDialogRepo, 'gitlab', gitlabDialogItem.projectRef)
+    return getTaskPageRepoSourceContext(
+      gitlabDialogRepo,
+      workItemProvider,
+      gitlabDialogItem.projectRef
+    )
   }, [
     gitlabDialogItem,
     gitlabDialogRepo,
     pageData.openGitLabSourceContext,
-    pageData.openGitLabWorkItem
+    pageData.openGitLabWorkItem,
+    taskSource
   ])
   const setDialogWorkItem = useCallback(
     (item: GitHubWorkItem | null, initialTab: ItemDialogTab = 'conversation') => {
@@ -198,14 +207,17 @@ export function useTaskPageGitHubDetail(model: TaskPageGitHubListStateModel) {
   )
   const openGitLabDetailPage = useCallback(
     (item: GitLabWorkItem) => {
+      // Why: Gitea reuses this GitLab detail flow; preserve the active tab so a
+      // Gitea row doesn't bounce the source selector back to GitLab.
+      const workItemProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
       openTaskPage(
         {
-          taskSource: 'gitlab',
+          taskSource: workItemProvider,
           preselectedRepoId: item.repoId,
           openGitLabWorkItem: item,
           openGitLabSourceContext: getTaskPageRepoSourceContext(
             repoMap.get(item.repoId),
-            'gitlab',
+            workItemProvider,
             item.projectRef
           )
         },
@@ -214,7 +226,7 @@ export function useTaskPageGitHubDetail(model: TaskPageGitHubListStateModel) {
         }
       )
     },
-    [openTaskPage, repoMap]
+    [openTaskPage, repoMap, taskSource]
   )
   const nextModel = model as typeof model & {
     githubTaskDrawerWorkItem: typeof githubTaskDrawerWorkItem
