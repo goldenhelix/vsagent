@@ -876,7 +876,13 @@
       "blocked": {
         "notification": {
           "fallback": {
-            "de50bef680": "macOS is blocking Orca notifications"
+            "de50bef680": "macOS is blocking Orca notifications",
+            "web": {
+              "blocked": "Your browser is blocking notifications",
+              "allow": "Allow notifications for this site to get agent alerts.",
+              "reenable": "Re-enable notifications for this site in your browser settings.",
+              "enable": "Enable notifications"
+            }
           }
         }
       },
