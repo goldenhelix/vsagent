@@ -23,11 +23,23 @@ describe('getServeOptionValidationError', () => {
       { recipeJson: true, mobilePairing: true, projectRoot: '/tmp/repo' },
       /requires runtime pairing.*--mobile-pairing/i
     ],
-    [{ recipeJson: true }, /requires --project-root/i]
+    [{ recipeJson: true }, /requires --project-root/i],
+    [{ tlsCertPath: '/tmp/server.crt' }, /--cert and --key together/i],
+    [{ tlsKeyPath: '/tmp/server.key' }, /--cert and --key together/i]
   ])('rejects incompatible options', (override, expected) => {
     expect(
       getServeOptionValidationError({ ...validOptions, ...override } as typeof validOptions)
     ).toMatch(expected)
+  })
+
+  it('accepts a complete TLS keypair', () => {
+    expect(
+      getServeOptionValidationError({
+        ...validOptions,
+        tlsCertPath: '/tmp/server.crt',
+        tlsKeyPath: '/tmp/server.key'
+      })
+    ).toBeNull()
   })
 })
 

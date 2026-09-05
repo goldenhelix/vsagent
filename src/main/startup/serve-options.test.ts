@@ -1,19 +1,46 @@
-import { describe, expect, it } from 'vitest'
+import { hostname } from 'node:os'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getServeOptions } from './serve-options'
 import { normalizeServeModeArgv } from './serve-mode-argv'
 
+const DEFAULT_OPTIONS = {
+  json: false,
+  bindHost: null,
+  pairingAddress: null,
+  noPairing: false,
+  mobilePairing: false,
+  recipeJson: false,
+  projectRoot: null,
+  https: false,
+  tlsCertPath: null,
+  tlsKeyPath: null,
+  serverName: hostname(),
+  storageNamespace: null
+}
+
 describe('getServeOptions', () => {
+  let priorServeName: string | undefined
+  let priorStorageNamespace: string | undefined
+
+  beforeEach(() => {
+    priorServeName = process.env.ORCA_SERVE_NAME
+    priorStorageNamespace = process.env.ORCA_STORAGE_NAMESPACE
+    delete process.env.ORCA_SERVE_NAME
+    delete process.env.ORCA_STORAGE_NAMESPACE
+  })
+
+  afterEach(() => {
+    restoreEnv('ORCA_SERVE_NAME', priorServeName)
+    restoreEnv('ORCA_STORAGE_NAMESPACE', priorStorageNamespace)
+  })
+
   it('parses a valid launch', () => {
     expect(
       getServeOptions(['/AppRun', '--serve', '--serve-port', '6768', '--serve-no-pairing'])
     ).toEqual({
-      json: false,
+      ...DEFAULT_OPTIONS,
       wsPort: 6768,
-      pairingAddress: null,
-      noPairing: true,
-      mobilePairing: false,
-      recipeJson: false,
-      projectRoot: null
+      noPairing: true
     })
   })
 
@@ -137,14 +164,7 @@ describe('getServeOptions', () => {
   it('ignores serve-looking arguments after the terminator', () => {
     expect(
       getServeOptions(['/AppRun', '--serve', '--', '--serve-port', '1', '--serve-no-pairing'])
-    ).toEqual({
-      json: false,
-      pairingAddress: null,
-      noPairing: false,
-      mobilePairing: false,
-      recipeJson: false,
-      projectRoot: null
-    })
+    ).toEqual(DEFAULT_OPTIONS)
   })
 
   it('requires a port value', () => {
@@ -158,4 +178,106 @@ describe('getServeOptions', () => {
       'Missing value for --serve-port.'
     )
   })
+
+  it.each([
+    ['--serve-host', '--host', 'bindHost', '100.64.1.20'],
+    ['--serve-name', '--name', 'serverName', 'build-box'],
+    ['--serve-storage-namespace', '--storage-namespace', 'storageNamespace', 'team-a']
+  ])('reads %s / %s in both the space and equals forms', (serveFlag, cliFlag, field, value) => {
+    for (const argv of [
+      ['/AppRun', '--serve', serveFlag, value],
+      ['/AppRun', '--serve', `${serveFlag}=${value}`],
+      ['/AppRun', '--serve', cliFlag, value],
+      ['/AppRun', '--serve', `${cliFlag}=${value}`]
+    ]) {
+      delete process.env.ORCA_STORAGE_NAMESPACE
+      expect(getServeOptions(argv)).toMatchObject({ [field]: value })
+    }
+  })
+
+  it('reads --serve-https as a boolean in both spellings', () => {
+    expect(getServeOptions(['/AppRun', '--serve', '--serve-https']).https).toBe(true)
+    expect(getServeOptions(['/AppRun', '--serve', '--https']).https).toBe(true)
+    // A boolean with an attached value is a string, matching the other serve booleans.
+    expect(getServeOptions(['/AppRun', '--serve', '--serve-https=false']).https).toBe(false)
+    expect(getServeOptions(['/AppRun', '--serve']).https).toBe(false)
+  })
+
+  it('advertises a pinned bind host, but never a wildcard one', () => {
+    expect(getServeOptions(['/AppRun', '--serve', '--serve-host', '100.64.1.20'])).toMatchObject({
+      bindHost: '100.64.1.20',
+      pairingAddress: '100.64.1.20'
+    })
+    for (const wildcard of ['0.0.0.0', '::', '[::]', '*']) {
+      expect(getServeOptions(['/AppRun', '--serve', '--serve-host', wildcard])).toMatchObject({
+        bindHost: wildcard,
+        pairingAddress: null
+      })
+    }
+  })
+
+  it('keeps an explicit pairing address ahead of the bind host', () => {
+    expect(
+      getServeOptions([
+        '/AppRun',
+        '--serve',
+        '--serve-host',
+        '100.64.1.20',
+        '--serve-pairing-address',
+        'orca.example.com'
+      ]).pairingAddress
+    ).toBe('orca.example.com')
+  })
+
+  it('resolves the server name as flag > ORCA_SERVE_NAME > hostname', () => {
+    process.env.ORCA_SERVE_NAME = 'from-env'
+    expect(getServeOptions(['/AppRun', '--serve', '--serve-name', 'from-flag']).serverName).toBe(
+      'from-flag'
+    )
+    expect(getServeOptions(['/AppRun', '--serve']).serverName).toBe('from-env')
+    process.env.ORCA_SERVE_NAME = '   '
+    expect(getServeOptions(['/AppRun', '--serve']).serverName).toBe(hostname())
+  })
+
+  it('normalizes the storage namespace into ORCA_STORAGE_NAMESPACE for the static handler', () => {
+    expect(
+      getServeOptions(['/AppRun', '--serve', '--serve-storage-namespace', 'team-a'])
+        .storageNamespace
+    ).toBe('team-a')
+    expect(process.env.ORCA_STORAGE_NAMESPACE).toBe('team-a')
+
+    delete process.env.ORCA_STORAGE_NAMESPACE
+    process.env.ORCA_STORAGE_NAMESPACE = 'from-env'
+    expect(getServeOptions(['/AppRun', '--serve']).storageNamespace).toBe('from-env')
+  })
+
+  it('rejects half a TLS keypair', () => {
+    expect(() =>
+      getServeOptions(['/AppRun', '--serve', '--serve-https', '--serve-cert', '/tmp/server.crt'])
+    ).toThrow(/--cert and --key together/i)
+    expect(() =>
+      getServeOptions(['/AppRun', '--serve', '--serve-https', '--serve-key', '/tmp/server.key'])
+    ).toThrow(/--cert and --key together/i)
+  })
+
+  it.each([
+    ['--serve-cert', '/tmp/server.crt', '--serve-key', '/tmp/server.key'],
+    ['--serve-cert=/tmp/server.crt', '--serve-key=/tmp/server.key'],
+    ['--cert', '/tmp/server.crt', '--key', '/tmp/server.key'],
+    ['--cert=/tmp/server.crt', '--key=/tmp/server.key']
+  ])('reads a TLS keypair from %s', (...tlsArgv) => {
+    expect(getServeOptions(['/AppRun', '--serve', '--serve-https', ...tlsArgv])).toMatchObject({
+      https: true,
+      tlsCertPath: '/tmp/server.crt',
+      tlsKeyPath: '/tmp/server.key'
+    })
+  })
 })
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name]
+    return
+  }
+  process.env[name] = value
+}
