@@ -4,6 +4,8 @@ import { translate } from '@/i18n/i18n'
 import { canShowRightSidebarForView } from '@/lib/right-sidebar-visibility'
 import { isEditableTarget } from '../lib/editable-target'
 import { getSelectedTextForFileSearch } from '../lib/file-search-selection'
+import { isVSAgentWebMode } from '../lib/vsagent-web-mode'
+import { openNewWorkspaceFromShortcut } from '../hooks/ipc-events/new-workspace-command'
 import { registerAppCommandDispatcher } from '@/lib/app-command-dispatch'
 import { executePluginCommand } from '@/lib/plugin-command-execution'
 import { findPluginCommandForKeybinding } from '@/lib/plugin-command-keybindings'
@@ -233,6 +235,15 @@ export function useGlobalKeybindings(args: {
           })
           return
         }
+      }
+
+      // Why (VSAgent web): Cmd/Ctrl+N reaches the desktop app through the main
+      // process before-input-event allowlist, which never fires in a browser tab.
+      // Handle the browser-safe remap (vsagent-web-keybindings.ts) here.
+      if (isVSAgentWebMode() && matchShortcut('workspace.create')) {
+        input.preventDefault()
+        openNewWorkspaceFromShortcut(useAppStore.getState())
+        return
       }
 
       const handlers = createAppCommandHandlers(state, input, context)
