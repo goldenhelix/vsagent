@@ -12,9 +12,9 @@ vi.mock('../git/runner', () => ({
 import {
   getGiteaAuthStatus,
   getGiteaPullRequestForBranch,
-  getGiteaPullRequestForBranchOrThrow,
-  normalizeGiteaApiBaseUrl
+  getGiteaPullRequestForBranchOrThrow
 } from './client'
+import { normalizeGiteaApiBaseUrl } from './gitea-api-request'
 import { _resetGiteaRepoRefCache } from './repository-ref'
 import {
   _getGiteaPullRequestScanCacheSize,
