@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http'
 import { extname, isAbsolute, posix, relative, resolve } from 'node:path'
 
@@ -17,17 +17,38 @@ const STATIC_WEB_CONTENT_TYPES = new Map([
   ['.woff2', 'font/woff2']
 ])
 
-export function createStaticWebClientHandler(staticRoot: string): RequestListener {
+export function createStaticWebClientHandler(
+  staticRoot: string,
+  options: { storageNamespace?: string | null } = {}
+): RequestListener {
   const resolvedRoot = resolve(staticRoot)
+  // Why: --serve-storage-namespace is normalized into this env var at
+  // startup (serve-options.ts), so the handler needs no plumbing through the
+  // transport when the caller doesn't pass one explicitly.
+  const storageNamespace =
+    (options.storageNamespace ?? process.env.ORCA_STORAGE_NAMESPACE)?.trim() || null
   return (request, response) => {
-    void handleStaticRequest(resolvedRoot, request, response)
+    void handleStaticRequest(resolvedRoot, request, response, storageNamespace)
   }
+}
+
+// Why: multiple VSAgent apps can share one browser origin under sub-URL
+// routes; the web client scopes its localStorage by this namespace
+// (--serve-storage-namespace) so workspaces never share pairings/settings.
+// Injected as a boot global so it exists before any module reads storage.
+function injectStorageNamespace(html: string, namespace: string): string {
+  const safe = JSON.stringify(namespace).replace(/</g, '\\u003c')
+  return html.replace(
+    '<head>',
+    `<head><script>window.__VSAGENT_STORAGE_NAMESPACE__=${safe};</script>`
+  )
 }
 
 async function handleStaticRequest(
   staticRoot: string,
   request: IncomingMessage,
-  response: ServerResponse
+  response: ServerResponse,
+  storageNamespace: string | null = null
 ): Promise<void> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     response.setHeader('Allow', 'GET, HEAD')
@@ -69,6 +90,18 @@ async function handleStaticRequest(
     'Content-Type',
     STATIC_WEB_CONTENT_TYPES.get(extname(absolutePath)) ?? 'application/octet-stream'
   )
+  if (storageNamespace && pathname === '/web-index.html') {
+    const html = injectStorageNamespace(await readFile(absolutePath, 'utf8'), storageNamespace)
+    const body = Buffer.from(html, 'utf8')
+    response.setHeader('Content-Length', body.length)
+    response.setHeader('Cache-Control', 'no-cache')
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
+    response.end(body)
+    return
+  }
   response.setHeader('Content-Length', fileStat.size)
   response.setHeader(
     'Cache-Control',
