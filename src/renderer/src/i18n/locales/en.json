@@ -10200,7 +10200,8 @@
             "setup": "setup",
             "apiKey": "api key",
             "skill": "skill",
-            "connect": "connect"
+            "connect": "connect",
+            "gitea": "gitea"
           }
         },
         "terminal": {

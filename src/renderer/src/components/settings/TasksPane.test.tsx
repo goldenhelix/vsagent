@@ -393,4 +393,41 @@ describe('TasksPane', () => {
     })
     expect(mocks.refreshPreflightStatus).toHaveBeenCalledWith({ force: true })
   })
+
+  it('renders the Gitea card and hides it from Tasks', async () => {
+    mocks.readiness.gitea = { connected: true, checking: false, visible: true }
+    const giteaSettings = {
+      visibleTaskProviders: ['github', 'gitlab', 'gitea', 'linear'],
+      defaultTaskSource: 'github'
+    } as GlobalSettings
+    const updateSettings = vi.fn()
+    const giteaContainer = document.createElement('div')
+    document.body.appendChild(giteaContainer)
+    const giteaRoot = createRoot(giteaContainer)
+    await act(async () => {
+      giteaRoot.render(<TasksPane settings={giteaSettings} updateSettings={updateSettings} />)
+    })
+
+    expect(giteaContainer.textContent).toContain('Gitea')
+    expect(giteaContainer.textContent).toContain('server-configured token')
+
+    const hideButton = Array.from(giteaContainer.querySelectorAll('button')).find(
+      (button) => button.getAttribute('aria-label') === 'Hide Gitea from Tasks'
+    )
+    expect(hideButton).toBeDefined()
+
+    await act(async () => {
+      hideButton?.click()
+    })
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      visibleTaskProviders: ['github', 'gitlab', 'linear'],
+      defaultTaskSource: 'github'
+    })
+
+    await act(async () => {
+      giteaRoot.unmount()
+    })
+    giteaContainer.remove()
+  })
 })
