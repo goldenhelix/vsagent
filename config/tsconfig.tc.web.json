@@ -10,6 +10,7 @@
     "../src/preload/browser-find-subscriptions.ts",
     "../src/preload/close-active-tab-payload-admission.ts",
     "../src/preload/e2e-config.ts",
+    "../src/preload/gitea.ts",
     "../src/preload/gitlab.ts",
     "../src/preload/preload-runtime-support.ts",
     "../src/preload/renderer-heap-statistics-reader.ts",
