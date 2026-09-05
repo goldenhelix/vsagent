@@ -4,6 +4,13 @@ import type { RpcTransport } from '../rpc/transport'
 import { UnixSocketTransport } from '../rpc/unix-socket-transport'
 import { WebSocketTransport } from '../rpc/ws-transport'
 import { readWsFallbackPort, writeWsFallbackPort } from '../rpc/ws-fallback-port-store'
+import {
+  handleLeakedPreviewRequest,
+  handleWebPreview,
+  handleWebPreviewUpgrade,
+  isWebPreviewPath,
+  isWebPreviewUpgrade
+} from '../../webpreview/proxy'
 import type { DeviceRegistry } from '../device-registry'
 import type { E2EEKeypair } from '../e2ee-keypair'
 import { UnpairedDeviceAuthThrottle } from '../rpc/unpaired-device-auth-throttle'
@@ -175,7 +182,26 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
       port: options.port,
       staticRoot: this.webClientRoot,
       ...(options.fallbackPort !== undefined ? { fallbackPort: options.fallbackPort } : {}),
-      ...(options.preferPinnedPort ? { preferPinnedPort: true } : {})
+      ...(options.preferPinnedPort ? { preferPinnedPort: true } : {}),
+      // Why (VSAgent fork): the webpreview reverse proxy serves in-app browser iframes for web
+      // clients on the same origin as the web-client bundle. Session ids are unguessable 128-bit
+      // capabilities minted only over the authenticated webpreview.* RPC methods. Both handlers
+      // must stay stateless — this runs again on the pairing-time loopback→wide rebind — which the
+      // module-level session registry satisfies.
+      extraHttpHandler: async (req, res) => {
+        if (isWebPreviewPath(req.url)) {
+          await handleWebPreview(req, res)
+          return true
+        }
+        return handleLeakedPreviewRequest(req, res)
+      },
+      extraUpgradeHandler: (req, socket, head) => {
+        if (!isWebPreviewUpgrade(req)) {
+          return false
+        }
+        handleWebPreviewUpgrade(req, socket, head)
+        return true
+      }
     })
     const mobileSocketWiring = this.ensureMobileSocketWiring(deviceRegistry, e2eeKeypair)
     this.detachWebSocketWiring = mobileSocketWiring.attachTransport(wsTransport)

@@ -5,6 +5,13 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { RpcTransport } from './transport'
 import { createStaticWebClientHandler } from './static-web-client-handler'
 import { RemoteRuntimeServerHeartbeat } from './remote-runtime-server-heartbeat'
+import {
+  attachServeUpgradeRouting,
+  composeServeRequestListener,
+  type ExtraHttpHandler,
+  type ExtraUpgradeHandler
+} from './serve-http-handler-chain'
+import { isPortListenFallbackError, resolveBindCandidatePorts } from './ws-transport-bind-fallback'
 
 const MAX_WS_MESSAGE_BYTES = 1024 * 1024
 // Why: one desktop remote-host client can hold many concurrent streams, so keep the cap high enough that stale streams don't starve control RPCs.
@@ -41,6 +48,10 @@ export type WebSocketTransportOptions = {
   fallbackPort?: number
   // Why: serve --port clients dial the pinned port; prefer it first so a stale fallback can't steal the pin (issue #8535). Default keeps fallback-first (STA-1511).
   preferPinnedPort?: boolean
+  // Why (VSAgent fork): the webpreview reverse proxy shares this HTTP server; it is consulted before the static web-client handler.
+  extraHttpHandler?: ExtraHttpHandler
+  // Why (VSAgent fork): webpreview WS tunnels (VNC, HMR) must bypass the RPC WebSocketServer.
+  extraUpgradeHandler?: ExtraUpgradeHandler
 }
 
 export class WebSocketTransport implements RpcTransport {
@@ -53,6 +64,8 @@ export class WebSocketTransport implements RpcTransport {
   private readonly staticRoot: string | undefined
   private readonly fallbackPort: number | undefined
   private readonly preferPinnedPort: boolean
+  private readonly extraHttpHandler: ExtraHttpHandler | undefined
+  private readonly extraUpgradeHandler: ExtraUpgradeHandler | undefined
   private httpServer: HttpsServer | HttpServer | null = null
   private wss: WebSocketServer | null = null
   private messageHandler: WebSocketMessageHandler | null = null
@@ -74,7 +87,9 @@ export class WebSocketTransport implements RpcTransport {
     preAuthTimeoutMs,
     staticRoot,
     fallbackPort,
-    preferPinnedPort
+    preferPinnedPort,
+    extraHttpHandler,
+    extraUpgradeHandler
   }: WebSocketTransportOptions) {
     this.host = host
     this.port = port
@@ -89,6 +104,8 @@ export class WebSocketTransport implements RpcTransport {
     this.staticRoot = staticRoot
     this.fallbackPort = fallbackPort
     this.preferPinnedPort = preferPinnedPort === true
+    this.extraHttpHandler = extraHttpHandler
+    this.extraUpgradeHandler = extraUpgradeHandler
   }
 
   onMessage(handler: WebSocketMessageHandler): void {
@@ -138,17 +155,11 @@ export class WebSocketTransport implements RpcTransport {
       return
     }
 
-    // Why: bind a persisted fallback first so devices paired to it aren't stranded (STA-1511); serve --port flips to pinned-first (issue #8535); on failure each candidate falls through to OS-assigned port 0.
-    const persistedFallbackPort =
-      this.fallbackPort !== undefined && this.fallbackPort !== 0 && this.fallbackPort !== this.port
-        ? this.fallbackPort
-        : undefined
-    const candidatePorts =
-      persistedFallbackPort === undefined
-        ? [this.port]
-        : this.preferPinnedPort
-          ? [this.port, persistedFallbackPort]
-          : [persistedFallbackPort, this.port]
+    const { candidatePorts, persistedFallbackPort } = resolveBindCandidatePorts({
+      port: this.port,
+      fallbackPort: this.fallbackPort,
+      preferPinnedPort: this.preferPinnedPort
+    })
     for (const port of candidatePorts) {
       try {
         await this.tryListen(port)
@@ -171,9 +182,10 @@ export class WebSocketTransport implements RpcTransport {
   }
 
   private createHttpServer(): HttpServer | HttpsServer {
-    const requestListener = this.staticRoot
+    const staticListener = this.staticRoot
       ? createStaticWebClientHandler(this.staticRoot)
       : undefined
+    const requestListener = composeServeRequestListener(this.extraHttpHandler, staticListener)
     return this.tlsCert && this.tlsKey
       ? createHttpsServer({ cert: this.tlsCert, key: this.tlsKey }, requestListener)
       : createHttpServer(requestListener)
@@ -194,10 +206,12 @@ export class WebSocketTransport implements RpcTransport {
     // Why: the WS cap applies only post-upgrade; a separate TCP cap bounds raw/pre-upgrade descriptor use.
     httpServer.maxConnections = MAX_TCP_CONNECTIONS
 
+    // Why (VSAgent fork): noServer + explicit upgrade routing lets the webpreview WS tunnel claim its own upgrades; a server-attached WSS would grab every upgrade.
     const wss = new WebSocketServer({
-      server: httpServer,
+      noServer: true,
       maxPayload: MAX_WS_MESSAGE_BYTES
     })
+    attachServeUpgradeRouting(httpServer, wss, this.extraUpgradeHandler)
 
     wss.on('connection', (ws) => {
       if (wss.clients.size > MAX_WS_CONNECTIONS) {
@@ -336,20 +350,4 @@ export class WebSocketTransport implements RpcTransport {
       this.preAuthTimers.delete(ws)
     }
   }
-}
-
-function isPortListenFallbackError(error: unknown, port: number): boolean {
-  if (!(error instanceof Error) || !('code' in error)) {
-    return false
-  }
-  if (error.code === 'EADDRINUSE') {
-    return true
-  }
-  return (
-    error.code === 'EACCES' &&
-    'syscall' in error &&
-    error.syscall === 'listen' &&
-    'port' in error &&
-    error.port === port
-  )
 }
