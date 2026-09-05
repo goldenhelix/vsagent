@@ -15660,6 +15660,24 @@
                 }
               }
             }
+          },
+          "WebBrowserPane": {
+            "more": "More options",
+            "copy": {
+              "url": "Copy URL"
+            },
+            "open": {
+              "tab": "Open in browser tab"
+            },
+            "go": {
+              "to": "Go to"
+            },
+            "invalid": {
+              "url": "Invalid URL"
+            },
+            "frame": {
+              "title": "Browser"
+            }
           }
         },
         "profile": {

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { useAppStore } from '@/store'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { isWebClientLocation } from '@/lib/web-client-location'
+import { WEBPREVIEW_PROXY_RUNTIME_CAPABILITY } from '../../../../../shared/protocol-version'
 import type { BrowserWorkspace as BrowserWorkspaceState } from '../../../../../shared/browser-workspace-types'
 import { destroyPersistentWebview } from '../host-guest/webview-registry'
 import { useBrowserAutomationVisiblePageIds } from '../host-guest/browser-automation-visibility'
@@ -18,6 +20,7 @@ import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-t
 import { RemoteBrowserPagePane } from '../stream-remote/remote-browser-page-pane'
 import { ClientHostedBrowserPagePane } from '../ClientHostedBrowserPagePane'
 import { BrowserPagePane } from './browser-page-pane'
+import WebBrowserPane from '../WebBrowserPane'
 import { WorkspaceDocPagePane } from '../workspace-doc/workspace-doc-page-pane'
 import { DeferredBrowserContent } from './DeferredBrowserContent'
 import { isBrowserPagePanePaintable } from '../host-guest/browser-page-paintability'
@@ -41,6 +44,13 @@ export default function BrowserPane({
   const resolvedChromeShortcutScope = chromeShortcutScope ?? (isActive ? 'focused' : 'inactive')
   const activeRuntimeEnvironmentId = useAppStore((s) =>
     getRuntimeEnvironmentIdForWorktree(s, browserTab.worktreeId)
+  )
+  const hostAdvertisesWebPreview = useAppStore((s) =>
+    activeRuntimeEnvironmentId
+      ? (s.runtimeStatusByEnvironmentId
+          ?.get(activeRuntimeEnvironmentId)
+          ?.status?.capabilities?.includes(WEBPREVIEW_PROXY_RUNTIME_CAPABILITY) ?? false)
+      : false
   )
   const browserPages = useAppStore((s) =>
     getBrowserPagesForWorkspace(s.browserPagesByWorkspace, browserTab.id)
@@ -106,6 +116,15 @@ export default function BrowserPane({
       throw new Error('Could not reclaim browser control')
     }
   }, [activeBrowserPageId])
+
+  // Why: web clients have no Electron <webview>, and the remote screencast path needs a display on
+  // the serve host. The iframe pane, backed by the host's webpreview proxy, replaces both. Desktop
+  // is untouched (webPreview exists only in the web preload). Placed after every hook so the async
+  // capability flipping cannot change the hook count; without the capability we fall through to the
+  // streamed pane rather than mounting an iframe the host would 404.
+  if (window.api?.webPreview && isWebClientLocation() && hostAdvertisesWebPreview) {
+    return <WebBrowserPane browserTab={browserTab} isActive={isActive} />
+  }
 
   if (activeBrowserRuntimeEnvironmentId) {
     const environmentHandle =
