@@ -39,4 +39,17 @@ describe('getRepoBackedTaskEmptyState', () => {
       description: 'No GitLab MRs match this filter.'
     })
   })
+
+  it('uses a single issues-only no-match copy for Gitea regardless of gitlabView', () => {
+    expect(
+      getRepoBackedTaskEmptyState({
+        provider: 'gitea',
+        selectedRepoCount: 1,
+        gitlabView: 'mrs'
+      })
+    ).toEqual({
+      title: 'No Gitea issues',
+      description: 'No Gitea issues match this filter.'
+    })
+  })
 })
