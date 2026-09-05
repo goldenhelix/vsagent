@@ -5,6 +5,7 @@ import type { GitLabTaskFilter, GitLabIssueFilter } from '@/components/task-page
 import type { GitLabWorkItem, GitLabTodo } from '../../../shared/gitlab-types'
 import { getRepoBackedTaskEmptyState } from '@/components/task-page-empty-state'
 import { isGitLabIssueFilter, isGitLabMRFilter } from './task-page-source-context'
+import { filterGitLabItemsBySearch } from './task-page-gitlab-item-search'
 export function useTaskPageProviderState(model: TaskPageSourceAvailabilityModel) {
   const {
     settings,
@@ -60,6 +61,11 @@ export function useTaskPageProviderState(model: TaskPageSourceAvailabilityModel)
   // Why: parallel to Linear's slim per-source state — skips workItemsCache and cross-repo aggregation; fetches directly via window.api.gl for the primary repo.
   const [gitlabFilter, setGitlabFilter] = useState<GitLabTaskFilter | GitLabIssueFilter>('opened')
   const [gitlabItems, setGitlabItems] = useState<GitLabWorkItem[]>([])
+  // Why: client-side keyword filter over the already-loaded list — parity with the GitHub list search, but local so the GitLab/Gitea issues path needs no extra fetch.
+  const [gitlabSearchInput, setGitlabSearchInput] = useState('')
+  // Why: the Gitea milestone filter is server-side (milestone is not shown on rows), keyed on the milestone TITLE ('all' = no filter). Milestones are per-repo.
+  const [giteaMilestones, setGiteaMilestones] = useState<{ id: number; title: string }[]>([])
+  const [activeGiteaMilestone, setActiveGiteaMilestone] = useState<string>('all')
   const [gitlabLoading, setGitlabLoading] = useState(false)
   const [gitlabError, setGitlabError] = useState<string | null>(null)
   const [gitlabRefreshNonce, setGitlabRefreshNonce] = useState(0)
@@ -67,17 +73,19 @@ export function useTaskPageProviderState(model: TaskPageSourceAvailabilityModel)
   const [gitlabDialogItem, setGitlabDialogItem] = useState<GitLabWorkItem | null>(null)
 
   // Why: GitLab tab has two sub-views — the project MR/issue list and the user's cross-project Todos (a separate stream).
-  const [gitlabView, setGitlabView] = useState<'issues' | 'mrs' | 'todos'>('mrs')
+  const [gitlabViewSelection, setGitlabView] = useState<'issues' | 'mrs' | 'todos'>('mrs')
+  // Why: Gitea is issues-only on the Task page, so pin the shared view instead of storing it — the MR/todos sub-views never run, and the GitLab tab keeps the view the user left it on.
+  const gitlabView = taskSource === 'gitea' ? 'issues' : gitlabViewSelection
   const [gitlabTodos, setGitlabTodos] = useState<GitLabTodo[]>([])
   const [gitlabTodosLoading, setGitlabTodosLoading] = useState(false)
   const gitlabEmptyState = useMemo(
     () =>
       getRepoBackedTaskEmptyState({
-        provider: 'gitlab',
+        provider: taskSource === 'gitea' ? 'gitea' : 'gitlab',
         selectedRepoCount: selectedRepos.length,
         gitlabView
       }),
-    [gitlabView, selectedRepos.length]
+    [taskSource, gitlabView, selectedRepos.length]
   )
   const gitlabFilterIsValid =
     gitlabView === 'issues'
@@ -91,14 +99,14 @@ export function useTaskPageProviderState(model: TaskPageSourceAvailabilityModel)
     setGitlabFilter('opened')
   }
   const displayedGitLabItems = useMemo(() => {
-    if (gitlabView === 'issues') {
-      return gitlabItems.filter((item) => item.type === 'issue')
-    }
-    if (gitlabView === 'mrs') {
-      return gitlabItems.filter((item) => item.type === 'mr')
-    }
-    return gitlabItems
-  }, [gitlabItems, gitlabView])
+    const byView =
+      gitlabView === 'issues'
+        ? gitlabItems.filter((item) => item.type === 'issue')
+        : gitlabView === 'mrs'
+          ? gitlabItems.filter((item) => item.type === 'mr')
+          : gitlabItems
+    return filterGitLabItemsBySearch(byView, gitlabSearchInput)
+  }, [gitlabItems, gitlabView, gitlabSearchInput])
   const nextModel = model as typeof model & {
     taskSourceManuallyChangedRef: typeof taskSourceManuallyChangedRef
     lastPageTaskSourceRef: typeof lastPageTaskSourceRef
@@ -116,6 +124,12 @@ export function useTaskPageProviderState(model: TaskPageSourceAvailabilityModel)
     setGitlabFilter: typeof setGitlabFilter
     gitlabItems: typeof gitlabItems
     setGitlabItems: typeof setGitlabItems
+    gitlabSearchInput: typeof gitlabSearchInput
+    setGitlabSearchInput: typeof setGitlabSearchInput
+    giteaMilestones: typeof giteaMilestones
+    setGiteaMilestones: typeof setGiteaMilestones
+    activeGiteaMilestone: typeof activeGiteaMilestone
+    setActiveGiteaMilestone: typeof setActiveGiteaMilestone
     gitlabLoading: typeof gitlabLoading
     setGitlabLoading: typeof setGitlabLoading
     gitlabError: typeof gitlabError
@@ -151,6 +165,12 @@ export function useTaskPageProviderState(model: TaskPageSourceAvailabilityModel)
   nextModel.setGitlabFilter = setGitlabFilter
   nextModel.gitlabItems = gitlabItems
   nextModel.setGitlabItems = setGitlabItems
+  nextModel.gitlabSearchInput = gitlabSearchInput
+  nextModel.setGitlabSearchInput = setGitlabSearchInput
+  nextModel.giteaMilestones = giteaMilestones
+  nextModel.setGiteaMilestones = setGiteaMilestones
+  nextModel.activeGiteaMilestone = activeGiteaMilestone
+  nextModel.setActiveGiteaMilestone = setActiveGiteaMilestone
   nextModel.gitlabLoading = gitlabLoading
   nextModel.setGitlabLoading = setGitlabLoading
   nextModel.gitlabError = gitlabError

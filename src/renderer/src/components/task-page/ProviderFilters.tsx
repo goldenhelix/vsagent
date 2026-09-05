@@ -17,7 +17,8 @@ export function TaskPageProviderFilters({
     <TaskPageLinearFilters model={model} />
   ) : taskSource === 'jira' && jiraConnected ? (
     <TaskPageJiraFilters model={model} />
-  ) : taskSource === 'gitlab' ? (
+  ) : // Why: Gitea shares the GitLab filter chrome; without this branch its tab would render no filters at all.
+  taskSource === 'gitlab' || taskSource === 'gitea' ? (
     <TaskPageGitLabFilters model={model} />
   ) : null
 }
