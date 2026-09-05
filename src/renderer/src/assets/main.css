@@ -860,6 +860,15 @@ html.native-shell .app-layout {
   filter: invert(1);
 }
 
+/* Why (VSAgent fork): the VSAgent mark is a full-color logo, so it must NOT be
+   inverted in light mode (unlike the monochrome Orca mark). Same footprint as
+   .titlebar-logo, full opacity so the brand color reads. */
+.titlebar-brand-logo {
+  height: 18px;
+  flex-shrink: 0;
+  margin: 0 6px 0 10px;
+}
+
 /* Why: desktop custom title bar buttons replace hidden native OS chrome.
    Anchored to the top-right corner of the viewport so they overlay any layout
    mode (full titlebar, workspace split, etc.) and stay accessible at all times. */
