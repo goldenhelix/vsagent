@@ -79,6 +79,21 @@ describe('client UI RPC methods', () => {
     expect(runtime.updateClientSettings).not.toHaveBeenCalled()
   })
 
+  it('rejects paired attempts to mutate the host-owned workspace filesystem defaults', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      updateClientSettings: vi.fn()
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
+
+    for (const update of [{ workspaceDir: '/srv/attacker' }, { nestWorkspaces: false }]) {
+      const response = await dispatcher.dispatch(makeRequest('settings.update', update))
+
+      expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+    }
+    expect(runtime.updateClientSettings).not.toHaveBeenCalled()
+  })
+
   it('persists the runtime host task source settings for mobile Tasks', async () => {
     const settings = {
       defaultTuiAgent: null,

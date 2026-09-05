@@ -40,6 +40,11 @@ export type RuntimeClientSettings = Pick<
   | 'artifactSharingEnabled'
   | 'worktreeVisibilityDefaults'
   | 'agentSkillSharingEnabled'
+  // Why these two cross the host-private line below: a browser client has no local filesystem, so
+  // the workspace root must come from the host or new-workspace creation has no default. Read-only
+  // mirror — RuntimeClientSettingsUpdate and SettingsUpdate both omit them, so no client can write.
+  | 'workspaceDir'
+  | 'nestWorkspaces'
 > & {
   hostSettingOverrides: RuntimeHostDisplayLabelOverrides
 }
@@ -106,6 +111,8 @@ export class RuntimeClientSettingsController {
       artifactSharingEnabled: isArtifactSharingEnabled(settings),
       worktreeVisibilityDefaults: settings.worktreeVisibilityDefaults ?? { external: 'hide' },
       agentSkillSharingEnabled: isAgentSkillSharingEnabled(settings),
+      workspaceDir: settings.workspaceDir,
+      nestWorkspaces: settings.nestWorkspaces !== false,
       hostSettingOverrides: Object.fromEntries(
         [
           ...getHostDisplayLabelOverrides({ hostSettingOverrides: settings.hostSettingOverrides })
