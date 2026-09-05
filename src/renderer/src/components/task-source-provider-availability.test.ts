@@ -143,6 +143,57 @@ describe('task source provider availability', () => {
     ).toEqual([{ hostId: 'runtime:server', reason: 'unsupported-provider' }])
   })
 
+  it('marks desktop-owned Gitea sources unavailable when the token is not authenticated', () => {
+    expect(
+      getRepoBackedProviderAvailability({
+        provider: 'gitea',
+        contexts: [source('local')],
+        preflightReady: true,
+        preflightStatus: {
+          ...readyPreflight,
+          gitea: {
+            configured: true,
+            authenticated: false,
+            account: null,
+            baseUrl: 'https://gitea.example.com',
+            tokenConfigured: true
+          }
+        }
+      })
+    ).toEqual([{ hostId: 'local', reason: 'missing-provider-auth' }])
+  })
+
+  it('marks desktop-owned Gitea sources unavailable when no token is configured', () => {
+    expect(
+      getRepoBackedProviderAvailability({
+        provider: 'gitea',
+        contexts: [source('local')],
+        preflightReady: true,
+        preflightStatus: {
+          ...readyPreflight,
+          gitea: {
+            configured: false,
+            authenticated: false,
+            account: null,
+            baseUrl: null,
+            tokenConfigured: false
+          }
+        }
+      })
+    ).toEqual([{ hostId: 'local', reason: 'unavailable-source-tool' }])
+  })
+
+  it('marks Gitea unsupported when a host preflight payload predates Gitea support', () => {
+    expect(
+      getRepoBackedProviderAvailability({
+        provider: 'gitea',
+        contexts: [source('local')],
+        preflightReady: true,
+        preflightStatus: readyPreflight
+      })
+    ).toEqual([{ hostId: 'local', reason: 'unsupported-provider' }])
+  })
+
   it('waits for preflight before reporting provider availability', () => {
     expect(
       getRepoBackedProviderAvailability({
