@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAppStore } from '@/store'
 import { showLocalPathOpenBlockedToast } from '@/lib/local-path-open-guard'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { useOptionalShortcutLabel } from '@/hooks/useShortcutLabel'
 import type { OpenFile } from '../../store/slices/editor'
 import { shouldBlockEditorTabLocalOpen } from './editor-tab-local-open-guard'
@@ -232,25 +233,31 @@ export function EditorFileTabContextMenu({
             'Copy Relative Path'
           )}
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => {
-            if (
-              shouldBlockEditorTabLocalOpen(
-                useAppStore.getState().settings,
-                file.runtimeEnvironmentId,
-                repoConnectionId
-              )
-            ) {
-              showLocalPathOpenBlockedToast()
-              return
-            }
-            window.api.shell.openPath(file.filePath)
-          }}
-        >
-          <ExternalLink className="size-3.5" />
-          {revealLabel}
-        </DropdownMenuItem>
+        {/* Why (VSAgent web): reveal opens the server host's file manager, which
+            is meaningless from the browser client — hide it and its separator. */}
+        {!isVSAgentWebMode() && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                if (
+                  shouldBlockEditorTabLocalOpen(
+                    useAppStore.getState().settings,
+                    file.runtimeEnvironmentId,
+                    repoConnectionId
+                  )
+                ) {
+                  showLocalPathOpenBlockedToast()
+                  return
+                }
+                window.api.shell.openPath(file.filePath)
+              }}
+            >
+              <ExternalLink className="size-3.5" />
+              {revealLabel}
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

@@ -11,6 +11,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { shouldShowRevealInFileManagerAction } from '@/components/right-sidebar/file-explorer-row-action-visibility'
 import { translate } from '@/i18n/i18n'
 import type { DiscoveredSkill } from '../../../../shared/skills'
 import { sourceKindLabel } from './skill-display-labels'
@@ -153,10 +154,14 @@ export function SkillDetailDialog({
         </div>
 
         <DialogFooter className="border-t border-border px-5 py-3">
-          <Button type="button" variant="ghost" size="sm" onClick={() => void revealSkill()}>
-            <FolderOpen className="size-3.5" />
-            {translate('auto.components.skills.SkillsPage.dc4c3328ee', 'Reveal file')}
-          </Button>
+          {/* Why (VSAgent web): reveal opens the server host's file manager,
+              which is meaningless from the browser client — hide it there. */}
+          {shouldShowRevealInFileManagerAction() && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => void revealSkill()}>
+              <FolderOpen className="size-3.5" />
+              {translate('auto.components.skills.SkillsPage.dc4c3328ee', 'Reveal file')}
+            </Button>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="pointer-events-auto mr-auto inline-flex">

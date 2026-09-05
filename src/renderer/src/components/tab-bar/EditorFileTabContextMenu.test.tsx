@@ -141,6 +141,12 @@ vi.mock('./editor-tab-local-open-guard', () => ({
   shouldBlockEditorTabLocalOpen: () => false
 }))
 
+const isVSAgentWebModeMock = vi.hoisted(() => vi.fn(() => false))
+
+vi.mock('@/lib/vsagent-web-mode', () => ({
+  isVSAgentWebMode: isVSAgentWebModeMock
+}))
+
 type ReactElementLike = {
   type: unknown
   props: Record<string, unknown>
@@ -259,6 +265,7 @@ describe('EditorFileTabContextMenu close-all shortcut', () => {
   beforeEach(() => {
     vi.resetModules()
     shortcutLabelMock.mockImplementation(assignedShortcutLabel)
+    isVSAgentWebModeMock.mockReturnValue(false)
     vi.stubGlobal('navigator', { userAgent: 'Mac' })
   })
 
@@ -318,5 +325,21 @@ describe('EditorFileTabContextMenu close-all shortcut', () => {
     expect(closeAllItem).toBeTruthy()
     expect(findElementsByType(closeAllItem, 'DropdownMenuShortcut')).toHaveLength(0)
     expect(findElementsByType(tree, 'DropdownMenuShortcut')).toHaveLength(0)
+  })
+
+  it('hides the reveal entry and its separator in VSAgent web mode', async () => {
+    const desktopTree = expandNode(await renderMenu())
+    const desktopSeparatorCount = findElementsByType(desktopTree, 'DropdownMenuSeparator').length
+
+    isVSAgentWebModeMock.mockReturnValue(true)
+    const webTree = expandNode(await renderMenu())
+    const webLabels = findElementsByType(webTree, 'DropdownMenuItem').map((item) =>
+      extractText(item.props.children)
+    )
+
+    expect(webLabels).not.toContain('Reveal in Finder')
+    expect(findElementsByType(webTree, 'DropdownMenuSeparator')).toHaveLength(
+      desktopSeparatorCount - 1
+    )
   })
 })

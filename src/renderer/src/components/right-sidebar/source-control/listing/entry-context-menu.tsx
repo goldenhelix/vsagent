@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/context-menu'
 import { useAppStore } from '@/store'
 import { OpenInApplicationIcon } from '@/lib/open-in-app-catalog'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 import { getLocalFileManagerLabel } from '@/lib/local-file-manager-label'
 import { NO_OPEN_IN_APPLICATIONS } from '@/lib/open-in-application-selection'
@@ -112,46 +113,53 @@ export function SourceControlEntryContextMenu({
             'Copy Relative Path'
           )}
         </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuSub>
-          <ContextMenuSubTrigger disabled={!absolutePath}>
-            <FolderOpen className="size-3.5" />
-            {translate('auto.components.sidebar.WorktreeOpenInMenu.8009ab69a6', 'Open in')}
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-52">
-            {openInEntries.map((entry) => {
-              const availability = getOpenInEntryAvailability(entry, settings, connectionId)
-              return (
-                <ContextMenuItem
-                  key={entry.id}
-                  onSelect={() => handleOpenInExternal(entry.target, entry.command)}
-                  disabled={!absolutePath || availability.disabled}
-                >
-                  {entry.target === 'file-manager' ? (
-                    <FolderOpen className="size-3.5" />
-                  ) : entry.command ? (
-                    <OpenInApplicationIcon application={{ command: entry.command }} size={14} />
-                  ) : (
-                    <ExternalLink className="size-3.5" />
-                  )}
-                  <span className="min-w-0 truncate">{entry.label}</span>
-                  {availability.metadata ? (
-                    <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
-                      {availability.metadata}
-                    </span>
-                  ) : null}
-                </ContextMenuItem>
-              )
-            })}
+        {/* Why (VSAgent web): the "Open in" submenu launches editors/file managers
+            on the server host — hidden in the browser client. The "Open in File
+            Explorer" item below reveals in Orca's own explorer, so it stays. */}
+        {!isVSAgentWebMode() && (
+          <>
             <ContextMenuSeparator />
-            <ContextMenuItem onSelect={openOpenInAppsSettings}>
-              {translate(
-                'auto.components.sidebar.WorktreeOpenInMenu.1417fd8380',
-                'Customize apps...'
-              )}
-            </ContextMenuItem>
-          </ContextMenuSubContent>
-        </ContextMenuSub>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger disabled={!absolutePath}>
+                <FolderOpen className="size-3.5" />
+                {translate('auto.components.sidebar.WorktreeOpenInMenu.8009ab69a6', 'Open in')}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-52">
+                {openInEntries.map((entry) => {
+                  const availability = getOpenInEntryAvailability(entry, settings, connectionId)
+                  return (
+                    <ContextMenuItem
+                      key={entry.id}
+                      onSelect={() => handleOpenInExternal(entry.target, entry.command)}
+                      disabled={!absolutePath || availability.disabled}
+                    >
+                      {entry.target === 'file-manager' ? (
+                        <FolderOpen className="size-3.5" />
+                      ) : entry.command ? (
+                        <OpenInApplicationIcon application={{ command: entry.command }} size={14} />
+                      ) : (
+                        <ExternalLink className="size-3.5" />
+                      )}
+                      <span className="min-w-0 truncate">{entry.label}</span>
+                      {availability.metadata ? (
+                        <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+                          {availability.metadata}
+                        </span>
+                      ) : null}
+                    </ContextMenuItem>
+                  )
+                })}
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={openOpenInAppsSettings}>
+                  {translate(
+                    'auto.components.sidebar.WorktreeOpenInMenu.1417fd8380',
+                    'Customize apps...'
+                  )}
+                </ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          </>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={handleRevealInOrcaExplorer} disabled={!absolutePath}>
           <FolderOpen className="size-3.5" />

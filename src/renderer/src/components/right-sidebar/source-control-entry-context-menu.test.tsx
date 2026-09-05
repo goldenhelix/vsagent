@@ -1,7 +1,11 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { SourceControlEntryContextMenu } from './source-control/listing/entry-context-menu'
+
+// Default: desktop. The VSAgent-web case below opts in per-test.
+vi.mock('@/lib/vsagent-web-mode', () => ({ isVSAgentWebMode: vi.fn(() => false) }))
 
 type ItemProps = { onSelect?: () => void; children?: React.ReactNode }
 
@@ -90,5 +94,31 @@ describe('SourceControlEntryContextMenu', () => {
     expect(copyRelativePathItem).toBeDefined()
     copyRelativePathItem?.onSelect?.()
     expect(writeClipboardText).toHaveBeenCalledWith('src/example.ts')
+  })
+
+  it('hides the desktop "Open in" submenu (and its separator) in VSAgent web mode, keeping "Open in File Explorer"', () => {
+    vi.mocked(isVSAgentWebMode).mockReturnValue(true)
+    try {
+      const markup = renderToStaticMarkup(
+        <SourceControlEntryContextMenu
+          currentWorktreeId="worktree-1"
+          absolutePath="/repo/src/example.ts"
+          relativePath="src/example.ts"
+          onRevealInExplorer={vi.fn()}
+        >
+          <div />
+        </SourceControlEntryContextMenu>
+      )
+
+      // "Customize apps..." only renders inside the "Open in" submenu, so its
+      // absence proves the whole submenu (and the separator gating it) is gone.
+      expect(markup).not.toContain('Customize apps')
+      const revealInExplorerItem = items.list.find(
+        (item) => childrenText(item.children) === 'Open in File Explorer'
+      )
+      expect(revealInExplorerItem).toBeDefined()
+    } finally {
+      vi.mocked(isVSAgentWebMode).mockReturnValue(false)
+    }
   })
 })

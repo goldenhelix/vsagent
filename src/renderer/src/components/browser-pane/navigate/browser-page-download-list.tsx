@@ -1,5 +1,6 @@
 import { CircleCheck, Download, ExternalLink, FolderOpen, OctagonX, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 import {
   formatBrowserDownloadProgress,
@@ -96,28 +97,35 @@ export function BrowserPageDownloadList({
                 </Button>
               ) : download.status === 'completed' ? (
                 <>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    className="h-6 shrink-0 gap-1"
-                    onClick={() => {
-                      void onOpenDownloadedFile(download)
-                    }}
-                  >
-                    <ExternalLink className="size-3" />
-                    {translate('auto.components.browser.pane.BrowserPane.756bfc25c9', 'Open')}
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="h-6 shrink-0 gap-1"
-                    onClick={() => {
-                      void onShowDownloadedFile(download)
-                    }}
-                  >
-                    <FolderOpen className="size-3" />
-                    {translate('auto.components.browser.pane.BrowserPane.09a9489aa5', 'Show')}
-                  </Button>
+                  {/* Why (VSAgent web): downloads land on the server host, so
+                      opening/revealing them there is meaningless from the
+                      browser client — hide both; "Dismiss" stays. */}
+                  {!isVSAgentWebMode() && (
+                    <>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        className="h-6 shrink-0 gap-1"
+                        onClick={() => {
+                          void onOpenDownloadedFile(download)
+                        }}
+                      >
+                        <ExternalLink className="size-3" />
+                        {translate('auto.components.browser.pane.BrowserPane.756bfc25c9', 'Open')}
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        className="h-6 shrink-0 gap-1"
+                        onClick={() => {
+                          void onShowDownloadedFile(download)
+                        }}
+                      >
+                        <FolderOpen className="size-3" />
+                        {translate('auto.components.browser.pane.BrowserPane.09a9489aa5', 'Show')}
+                      </Button>
+                    </>
+                  )}
                   <Button
                     size="icon-xs"
                     variant="ghost"

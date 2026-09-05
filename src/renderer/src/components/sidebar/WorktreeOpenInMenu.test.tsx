@@ -1,4 +1,5 @@
 import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DropdownMenuSubContent, DropdownMenuSubTrigger } from '@/components/ui/dropdown-menu'
 import {
@@ -7,6 +8,7 @@ import {
   getLocalFileManagerLabel,
   openOpenInAppsSettings,
   openWorktreePath,
+  WorktreeOpenInMenuItems,
   WorktreeOpenInSubMenu
 } from './WorktreeOpenInMenu'
 
@@ -112,6 +114,38 @@ describe('WorktreeOpenInMenu', () => {
     expect(getLocalFileManagerLabel('Mozilla/5.0 Mac OS X')).toBe('Finder')
     expect(getLocalFileManagerLabel('Mozilla/5.0 Windows NT 10.0')).toBe('File Explorer')
     expect(getLocalFileManagerLabel('Mozilla/5.0 X11 Linux x86_64')).toBe('File Manager')
+  })
+
+  it('renders nothing (submenu and items) in VSAgent web mode', () => {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        __ORCA_WEB_CLIENT__: true,
+        api: {
+          shell: {
+            openInFileManager: openInFileManagerMock,
+            openInExternalEditor: openInExternalEditorMock
+          }
+        }
+      }
+    })
+
+    expect(
+      WorktreeOpenInSubMenu({
+        worktreePath: '/tmp/workspace',
+        connectionId: null
+      })
+    ).toBeNull()
+    // Why render (not a direct call): WorktreeOpenInMenuItems calls hooks
+    // (useCallback), which only work inside React's render cycle.
+    expect(
+      renderToStaticMarkup(
+        React.createElement(WorktreeOpenInMenuItems, {
+          worktreePath: '/tmp/workspace',
+          connectionId: null
+        })
+      )
+    ).toBe('')
   })
 
   it('disables the Open in submenu while deleting', () => {

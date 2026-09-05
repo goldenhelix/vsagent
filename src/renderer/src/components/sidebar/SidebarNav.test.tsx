@@ -305,6 +305,16 @@ describe('SidebarNav', () => {
     expect(shouldShowMobileButton({ showMobileButton: false })).toBe(false)
   })
 
+  it('hides the Mobile entry in VSAgent web mode regardless of the setting', () => {
+    ;(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
+    try {
+      expect(shouldShowMobileButton(null)).toBe(false)
+      expect(shouldShowMobileButton({ showMobileButton: true })).toBe(false)
+    } finally {
+      delete (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
+    }
+  })
+
   it('updates localized labels when the language changes after mount', async () => {
     const container = await renderSidebarNav()
 
