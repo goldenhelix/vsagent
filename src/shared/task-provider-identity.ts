@@ -29,9 +29,20 @@ export type JiraTaskProviderIdentity = {
   projectKey?: string | null
 }
 
+// Why: Gitea's REST is GitHub-shaped, so its identity is flat owner/repo, but
+// self-hosted instances live on arbitrary hosts so the host travels with it.
+export type GiteaTaskProviderIdentity = {
+  provider: 'gitea'
+  owner?: string | null
+  repo?: string | null
+  host?: string | null
+  webUrl?: string | null
+}
+
 export type TaskProviderIdentity =
   | GitHubTaskProviderIdentity
   | GitLabTaskProviderIdentity
+  | GiteaTaskProviderIdentity
   | LinearTaskProviderIdentity
   | JiraTaskProviderIdentity
 
@@ -62,6 +73,14 @@ export function normalizeTaskProviderIdentity(
         projectId: normalizeNonEmptyString(raw.projectId),
         namespace: normalizeNonEmptyString(raw.namespace),
         project: normalizeNonEmptyString(raw.project),
+        webUrl: normalizeNonEmptyString(raw.webUrl)
+      }
+    case 'gitea':
+      return {
+        provider,
+        owner: normalizeNonEmptyString(raw.owner),
+        repo: normalizeNonEmptyString(raw.repo),
+        host: normalizeNonEmptyString(raw.host),
         webUrl: normalizeNonEmptyString(raw.webUrl)
       }
     case 'linear':
@@ -106,6 +125,8 @@ export function isStoredTaskProviderIdentity(provider: TaskProvider, identity: u
       return ['projectId', 'namespace', 'project', 'webUrl'].every((key) =>
         isNullableOptionalString(raw[key])
       )
+    case 'gitea':
+      return ['owner', 'repo', 'host', 'webUrl'].every((key) => isNullableOptionalString(raw[key]))
     case 'linear':
       return ['workspaceId', 'workspaceName', 'teamId', 'teamKey'].every((key) =>
         isNullableOptionalString(raw[key])
@@ -118,6 +139,7 @@ export function isStoredTaskProviderIdentity(provider: TaskProvider, identity: u
 const TASK_PROVIDER_IDENTITY_FIELDS: Record<TaskProvider, readonly string[]> = {
   github: ['owner', 'repo', 'host'],
   gitlab: ['projectId', 'namespace', 'project', 'webUrl'],
+  gitea: ['owner', 'repo', 'host', 'webUrl'],
   linear: ['workspaceId', 'workspaceName', 'teamId', 'teamKey'],
   jira: ['siteId', 'siteUrl', 'projectKey']
 }
@@ -153,6 +175,8 @@ export function taskProviderIdentityCachePart(
       return githubRepoIdentityKey(identity)
     case 'gitlab':
       return identity.projectId ?? [identity.namespace, identity.project].filter(Boolean).join('/')
+    case 'gitea':
+      return [identity.host, identity.owner, identity.repo].filter(Boolean).join('/')
     case 'linear':
       return [identity.workspaceId, identity.teamId ?? identity.teamKey].filter(Boolean).join('/')
     case 'jira':

@@ -129,6 +129,7 @@ describe('TasksPane', () => {
     mocks.readiness = {
       github: { connected: true, checking: false, visible: true },
       gitlab: { connected: true, checking: false, visible: true },
+      gitea: { connected: false, checking: false, visible: false },
       // Started-then-stalled: a Linear key is stored but agents have no skill.
       linear: {
         connected: true,

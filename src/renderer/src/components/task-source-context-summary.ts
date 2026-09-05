@@ -49,6 +49,7 @@ export function getTaskSourceContextSummary(args: {
   switch (args.provider) {
     case 'github':
     case 'gitlab':
+    case 'gitea':
       return getRepoBackedTaskSourceSummary(args)
     case 'linear':
       return getAccountBackedTaskSourceSummary(args.providerLabel, {
@@ -189,10 +190,11 @@ function getProviderIdentityLabel(
   }
   switch (identity.provider) {
     case 'github':
-      return `${identity.owner}/${identity.repo}`
+    case 'gitea':
+      return identity.repo ? `${identity.owner ?? identity.repo}/${identity.repo}` : null
     case 'gitlab':
-      return identity.namespace && identity.project
-        ? `${identity.namespace}/${identity.project}`
+      return identity.project
+        ? `${identity.namespace ?? identity.project}/${identity.project}`
         : (identity.projectId ?? null)
     case 'linear':
       return identity.workspaceName ?? identity.workspaceId ?? null

@@ -144,6 +144,10 @@ export function useTaskPageRepoSelection(model: TaskPageStoreBindingsModel) {
         preferredVisibleTaskProviders,
         {
           gitlabInstalled: preflightStatusCurrent && preflightStatus?.glab?.installed === true,
+          // Why: Gitea is available once a token is configured (ORCA_GITEA_TOKEN);
+          // per-repo "has a Gitea remote" is surfaced as an availability notice.
+          giteaConfigured:
+            preflightStatusCurrent && preflightStatus?.gitea?.tokenConfigured === true,
           linearConnected: linearConnected === true
         },
         defaultTaskSource
@@ -153,7 +157,8 @@ export function useTaskPageRepoSelection(model: TaskPageStoreBindingsModel) {
       linearConnected,
       preferredVisibleTaskProviders,
       preflightStatusCurrent,
-      preflightStatus?.glab?.installed
+      preflightStatus?.glab?.installed,
+      preflightStatus?.gitea?.tokenConfigured
     ]
   )
   const sourceOptions = getSourceOptions()
