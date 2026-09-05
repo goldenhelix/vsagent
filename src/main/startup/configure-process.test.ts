@@ -7,6 +7,9 @@ vi.mock('electron', () => {
   const paths = new Map<string, string>([['appData', '/tmp/app-data']])
   return {
     app: {
+      // Why: a dev-checkout-like app path (no VERSION marker) so
+      // resolveVSAgentUserDataDir's install detection is a no-op here.
+      getAppPath: vi.fn(() => '/tmp/dev-checkout'),
       getPath: vi.fn((name: string) => paths.get(name) ?? ''),
       setPath: vi.fn((name: string, value: string) => {
         paths.set(name, value)

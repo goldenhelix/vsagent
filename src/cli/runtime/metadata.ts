@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   findTransport,
   getRuntimeMetadataPath,
@@ -43,12 +43,24 @@ export function getDefaultUserDataPath(
   platform: NodeJS.Platform = process.platform,
   homeDir = homedir()
 ): string {
+  // Why (VSAgent fork): a VSAgent serve stores state under the stable
+  // `vsagent` dir (see resolveVSAgentUserDataDir); the CLI must find the same
+  // runtime metadata. Explicit pin first, then the vsagent dir when it exists,
+  // else fall through to upstream's `orca` resolution.
+  const vsagentDataDir = process.env.VSAGENT_DATA_DIR?.trim()
+  if (vsagentDataDir) {
+    return vsagentDataDir
+  }
   // Why: in dev mode (and for parallel Orca instances), the Electron app writes
   // runtime metadata to a separate userData directory (e.g. `orca-dev`) to avoid
   // clobbering the production app's metadata. The CLI needs to find the same
   // metadata file, so this env var lets the CLI target a specific instance.
   if (process.env.ORCA_USER_DATA_PATH) {
     return process.env.ORCA_USER_DATA_PATH
+  }
+  const vsagentDefault = getVSAgentDefaultUserDataPath(platform, homeDir)
+  if (vsagentDefault && existsSync(vsagentDefault)) {
+    return vsagentDefault
   }
   if (platform === 'darwin') {
     return join(homeDir, 'Library', 'Application Support', 'orca')
@@ -67,4 +79,16 @@ export function getDefaultUserDataPath(
   // runs, so this mirrors Electron's default userData base instead of inventing
   // a CLI-specific config path.
   return join(process.env.XDG_CONFIG_HOME || join(homeDir, '.config'), 'orca')
+}
+
+// Why (VSAgent fork): mirrors Electron's appData base per platform for the
+// stable `vsagent` dir a VSAgent serve resolves.
+function getVSAgentDefaultUserDataPath(platform: NodeJS.Platform, homeDir: string): string | null {
+  if (platform === 'darwin') {
+    return join(homeDir, 'Library', 'Application Support', 'vsagent')
+  }
+  if (platform === 'win32') {
+    return process.env.APPDATA ? join(process.env.APPDATA, 'vsagent') : null
+  }
+  return join(process.env.XDG_CONFIG_HOME || join(homeDir, '.config'), 'vsagent')
 }
