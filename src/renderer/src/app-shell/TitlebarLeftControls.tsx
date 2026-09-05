@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, MoreHorizontal, PanelLeft } from 'lucide-react'
 import logo from '../../../../resources/logo.svg'
+import vsagentLogo from '../../../../resources/vsagent.svg'
 import { translate } from '@/i18n/i18n'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -16,7 +17,12 @@ import {
 import { useShortcutLabel } from '../hooks/useShortcutLabel'
 import { useAppStore } from '../store'
 import { hasCustomTitleBar, isMac } from './app-window-chrome'
+import { isVSAgentWebMode } from '../lib/vsagent-web-mode'
 import type { AppChromeLayout } from './use-app-chrome-layout'
+
+// Why (VSAgent fork): the web client is a browser tab — no traffic lights, no
+// native app menu — and the deployment is branded VSAgent, not Orca.
+const isVSAgentBrand = isVSAgentWebMode()
 
 /**
  * The titlebar's left cluster: window chrome padding, app name, sidebar toggle, and the
@@ -42,7 +48,11 @@ export function TitlebarLeftControls({ layout }: { layout: AppChromeLayout }): R
       }`}
     >
       <div className="flex h-full items-center">
-        {isMac && !layout.isFullScreen ? (
+        {isVSAgentBrand ? (
+          /* Why: a browser tab has no traffic lights or native menu, so drop
+             the Mac spacer gap and left-align the VSAgent logo as the anchor. */
+          <img src={vsagentLogo} alt="" aria-hidden className="titlebar-brand-logo" />
+        ) : isMac && !layout.isFullScreen ? (
           <div className="titlebar-traffic-light-pad" />
         ) : hasCustomTitleBar ? (
           /* Why: Windows/Linux remove the native title bar, so render the logo plus a ··· button that pops the application menu (as Alt does). */
@@ -71,10 +81,10 @@ export function TitlebarLeftControls({ layout }: { layout: AppChromeLayout }): R
             <ContextMenuTrigger asChild>
               <div
                 className="titlebar-app-name"
-                aria-label={translate('auto.App.5096cbbc86', 'Orca')}
+                aria-label={isVSAgentBrand ? 'VSAgent' : translate('auto.App.5096cbbc86', 'Orca')}
               >
                 <span className="titlebar-app-name-main">
-                  {translate('auto.App.5096cbbc86', 'Orca')}
+                  {isVSAgentBrand ? 'VSAgent' : translate('auto.App.5096cbbc86', 'Orca')}
                 </span>
               </div>
             </ContextMenuTrigger>
