@@ -24,6 +24,18 @@ export function reconcileTransientPortScanFailures(
   }
 
   return results.map(({ key, result }) => {
+    // Why: a scanner that resolves without a result must not take the render tree
+    // down on the first `result.unavailableReason` read — report it as unavailable.
+    if (!result) {
+      const missing: WorkspacePortScanResult = {
+        platform: 'unknown',
+        scannedAt: Date.now(),
+        ports: [],
+        unavailableReason: 'Workspace port scan returned no result.'
+      }
+      state.set(key, { consecutiveFailures: 0, publishedResult: missing })
+      return { key, result: missing }
+    }
     const previous = state.get(key)
     const publishedResult = publishedScans[key]
     // A different object was published by another refresh path, so it breaks this poller's streak.

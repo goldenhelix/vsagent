@@ -179,4 +179,13 @@ describe('reconcileTransientPortScanFailures', () => {
 
     expect(next[0].result).toBe(manualResult)
   })
+
+  it('tolerates a missing result instead of crashing the render', () => {
+    const { apply, state } = createHarness()
+    const next = apply([{ key: 'h:all', result: undefined as unknown as WorkspacePortScanResult }])
+
+    expect(next[0].result.unavailableReason).toBe('Workspace port scan returned no result.')
+    expect(next[0].result.ports).toEqual([])
+    expect(state.get('h:all')?.consecutiveFailures).toBe(0)
+  })
 })
