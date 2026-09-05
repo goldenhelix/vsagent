@@ -15,6 +15,7 @@ import type { SshConnectionState, SshConnectionStatus } from '../../../../shared
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { PublicKnownRuntimeEnvironment } from '../../../../shared/runtime-environments'
 import { translate } from '@/i18n/i18n'
+import { dropLocalHostByKindInWebMode } from '@/lib/vsagent-web-mode-hosts'
 
 export type SidebarHostOption = {
   id: ExecutionHostId
@@ -65,7 +66,7 @@ export function buildSidebarHostOptions(args: {
   const activeRuntimeHostId = args.settings?.activeRuntimeEnvironmentId?.trim()
     ? (`runtime:${encodeURIComponent(args.settings.activeRuntimeEnvironmentId.trim())}` as const)
     : null
-  return buildExecutionHostRegistry({
+  const registryOptions: SidebarHostOption[] = buildExecutionHostRegistry({
     repos: args.repos,
     settings: args.settings,
     sshTargetLabels: args.sshTargetLabels,
@@ -95,6 +96,10 @@ export function buildSidebarHostOptions(args: {
       presence: host.id === activeRuntimeHostId ? 'active' : 'project'
     }
   })
+  // Why (VSAgent fork): every sidebar host surface (scope picker, jump palette,
+  // section headers, options menu, delete dialog, activity filter) funnels
+  // through this one choke point — the browser has no local execution host.
+  return dropLocalHostByKindInWebMode(registryOptions)
 }
 
 export function shouldShowHostScopeControls(hosts: readonly SidebarHostOption[]): boolean {

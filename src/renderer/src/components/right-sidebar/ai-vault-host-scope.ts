@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAppStore } from '@/store'
 import { getAiVaultResumeWorkspaceExecutionHostId } from '@/lib/ai-vault-resume-target'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import {
   ALL_EXECUTION_HOSTS_SCOPE,
   getExecutionHostLabel,
+  getSettingsFocusedExecutionHostId,
   LOCAL_EXECUTION_HOST_ID,
   parseExecutionHostId,
   toRuntimeExecutionHostId,
@@ -27,6 +30,7 @@ export function useAiVaultExecutionHostScope(args: {
   onExecutionHostScopeChange: (scope: ExecutionHostScope) => void
 } {
   const userChangedHostScopeRef = useRef(false)
+  const settings = useAppStore((s) => s.settings)
   const activeExecutionHostId = useMemo(
     () => getAiVaultResumeWorkspaceExecutionHostId(args.resumeTargetState, args.activeWorktreeId),
     [args.activeWorktreeId, args.resumeTargetState]
@@ -41,9 +45,20 @@ export function useAiVaultExecutionHostScope(args: {
   // for a user whose sessions all live on an SSH host (#13713). Widen to every host instead of
   // asserting one. A local workspace still resolves to `local` and is unaffected.
   const workspaceHostUnresolved = args.activeWorktreeId !== null && activeExecutionHostId === null
+  // Why (VSAgent fork): the web client has no local host, so fall back to the
+  // focused runtime env (Orca Server) instead of the phantom "Local Mac".
+  // getSettingsFocusedExecutionHostId itself defaults to LOCAL_EXECUTION_HOST_ID
+  // when no runtime env is focused yet (e.g. before the first pairing) — widen
+  // to every host in that case rather than resolving back to "local".
+  const focusedExecutionHostId = getSettingsFocusedExecutionHostId(settings)
+  const localFallbackScope: ExecutionHostScope = isVSAgentWebMode()
+    ? focusedExecutionHostId === LOCAL_EXECUTION_HOST_ID
+      ? ALL_EXECUTION_HOSTS_SCOPE
+      : focusedExecutionHostId
+    : LOCAL_EXECUTION_HOST_ID
   const defaultExecutionHostScope: ExecutionHostScope =
     activeExecutionHostScope ??
-    (workspaceHostUnresolved ? ALL_EXECUTION_HOSTS_SCOPE : LOCAL_EXECUTION_HOST_ID)
+    (workspaceHostUnresolved ? ALL_EXECUTION_HOSTS_SCOPE : localFallbackScope)
   const [executionHostScope, setExecutionHostScope] =
     useState<ExecutionHostScope>(defaultExecutionHostScope)
 
@@ -52,7 +67,7 @@ export function useAiVaultExecutionHostScope(args: {
     // rerenders, but reset to the new default once that choice no longer
     // applies to the active worktree's host.
     const allowedScopes = new Set<ExecutionHostScope>([
-      LOCAL_EXECUTION_HOST_ID,
+      localFallbackScope,
       ALL_EXECUTION_HOSTS_SCOPE,
       ...(activeExecutionHostScope ? [activeExecutionHostScope] : []),
       ...(args.availableExecutionHostScopes ?? [])
@@ -69,7 +84,8 @@ export function useAiVaultExecutionHostScope(args: {
     activeExecutionHostScope,
     args.availableExecutionHostScopes,
     defaultExecutionHostScope,
-    executionHostScope
+    executionHostScope,
+    localFallbackScope
   ])
 
   const handleExecutionHostScopeChange = useCallback(
@@ -114,7 +130,11 @@ export function buildAiVaultHostScopeOptions(args: {
     ? parseExecutionHostId(args.activeExecutionHostScope)
     : null
 
-  add({ id: LOCAL_EXECUTION_HOST_ID, label: getExecutionHostLabel(LOCAL_EXECUTION_HOST_ID) })
+  // Why (VSAgent fork): the web client has no local execution host, so keep it
+  // out of the Agents host dropdown — the runtime env is the only real host.
+  if (!isVSAgentWebMode()) {
+    add({ id: LOCAL_EXECUTION_HOST_ID, label: getExecutionHostLabel(LOCAL_EXECUTION_HOST_ID) })
+  }
   if (activeHost?.kind === 'ssh') {
     add({ id: activeHost.id, label: getExecutionHostLabel(activeHost.id) })
   }

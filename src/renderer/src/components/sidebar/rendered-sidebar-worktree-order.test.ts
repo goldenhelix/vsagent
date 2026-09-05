@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore } from '@/store'
 import {
   getVisibleWorktreeIds,
@@ -296,5 +296,42 @@ describe('closed-sidebar Cmd+1-9 ordering (#9497)', () => {
     expect(getVisibleWorktreeShortcutTargets()).toEqual([
       { id: 'repo1::/same', executionHostId: 'local' }
     ])
+  })
+
+  // C23 (S21): buildSidebarHostOptions drops the phantom "local" host from the
+  // picker in VSAgent web mode, but a repo/worktree still explicitly pinned to
+  // `executionHostId: 'local'` must still render — host-section-rows.ts falls
+  // back to a synthesized "local" header for any host id the trimmed option
+  // list doesn't recognize, so the section is never orphaned.
+  it('still renders a repo pinned to the local host in VSAgent web mode (S21/C23)', () => {
+    const localRepo = makeRepo('repo1', { executionHostId: 'local' })
+    const runtimeRepo = makeRepo('repo-runtime', { executionHostId: 'runtime:env-a' })
+    const localMain = makeMainWorktree('wt-local-main')
+    const runtimeMain = makeMainWorktree('wt-runtime-main', { repoId: 'repo-runtime' })
+    const storeOverrides = {
+      repos: [localRepo, runtimeRepo],
+      worktreesByRepo: {
+        repo1: [localMain],
+        'repo-runtime': [runtimeMain]
+      },
+      // Why two runtime envs: buildSidebarHostOptions must resolve to >=2
+      // host options after dropping "local" for host-section grouping to
+      // activate at all (a single remaining host is a no-op elsewhere).
+      runtimeEnvironments: [
+        { id: 'env-a', name: 'Env A' },
+        { id: 'env-b', name: 'Env B' }
+      ],
+      visibleWorkspaceHostIds: ['local', 'runtime:env-a', 'runtime:env-b']
+    } as unknown as Partial<AppState>
+
+    seedStore([], storeOverrides)
+    vi.stubGlobal('window', { __ORCA_WEB_CLIENT__: true })
+    try {
+      const order = getVisibleWorktreeIds()
+      expect(order).toContain('wt-local-main')
+      expect(order).toContain('wt-runtime-main')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

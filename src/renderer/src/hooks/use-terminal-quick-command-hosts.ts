@@ -10,6 +10,7 @@ import {
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
 import { buildExecutionHostRegistry } from '../../../shared/execution-host-registry'
 import type { PublicKnownRuntimeEnvironment } from '../../../shared/runtime-environments'
+import { dropLocalHostByIdInWebMode } from '@/lib/vsagent-web-mode-hosts'
 import { useAppStore } from '@/store'
 import type {
   RuntimeTerminalQuickCommands,
@@ -89,13 +90,15 @@ export function getTerminalQuickCommandHostOptions(
   settings: GlobalSettings | null | undefined,
   runtimeEnvironments: readonly Pick<PublicKnownRuntimeEnvironment, 'id' | 'name'>[]
 ): { id: ExecutionHostId; label: string }[] {
-  return buildExecutionHostRegistry({
-    repos: [],
-    settings,
-    hostSource: 'configured-only',
-    runtimeEnvironments,
-    hostLabelOverrides: getHostDisplayLabelOverrides(settings)
-  }).map((host) => ({ id: host.id, label: host.label }))
+  return dropLocalHostByIdInWebMode(
+    buildExecutionHostRegistry({
+      repos: [],
+      settings,
+      hostSource: 'configured-only',
+      runtimeEnvironments,
+      hostLabelOverrides: getHostDisplayLabelOverrides(settings)
+    })
+  ).map((host) => ({ id: host.id, label: host.label }))
 }
 
 export function useTerminalQuickCommandHosts(
