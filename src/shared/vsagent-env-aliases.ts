@@ -13,6 +13,8 @@ const VSAGENT_ENV_ALIASES = {
   VSAGENT_DIAGNOSTICS_DISABLED: 'ORCA_DIAGNOSTICS_DISABLED',
   VSAGENT_SERVE_KEEP_STALE_SINGLETON_LOCK: 'ORCA_SERVE_KEEP_STALE_SINGLETON_LOCK',
   VSAGENT_E2E_USER_DATA_DIR: 'ORCA_E2E_USER_DATA_DIR',
+  // Read by src/main/webpreview/{proxy,forward-request}.ts.
+  VSAGENT_PROXY_DEBUG: 'ORCA_WEBPREVIEW_DEBUG',
   // Why: reserved ahead of the upstream-port steps that read these ORCA_*
   // names directly (serve --name/--storage-namespace, the displayless-serve
   // fallback, the managed-install skip) — keeping every VSAGENT_*->ORCA_*

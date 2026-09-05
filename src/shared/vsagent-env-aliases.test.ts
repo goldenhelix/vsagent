@@ -58,4 +58,10 @@ describe('applyVSAgentEnvAliases', () => {
     expect(env.ORCA_STORAGE_NAMESPACE).toBe('team-a')
     expect(env.ORCA_MANAGED_INSTALL).toBe('1')
   })
+
+  it('maps the webpreview proxy debug alias', () => {
+    const env: NodeJS.ProcessEnv = { VSAGENT_PROXY_DEBUG: '1' }
+    applyVSAgentEnvAliases(env)
+    expect(env.ORCA_WEBPREVIEW_DEBUG).toBe('1')
+  })
 })
