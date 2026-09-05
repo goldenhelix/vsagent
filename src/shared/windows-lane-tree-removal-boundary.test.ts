@@ -3,32 +3,33 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The Windows CI lane runs a fixed list of specs on `windows-2022`, and every one of them removes
- * a temporary tree when it is done. On Windows those removals race a handle the OS has not
+ * A fixed list of specs exercises Windows-specific behaviour, and every one of them removes a
+ * temporary tree when it is done. On Windows those removals race a handle the OS has not
  * released yet — a just-exited child, an indexer, a dlopen'd native module — so a raw
  * `rmSync(dir, { recursive: true, force: true })` throws EPERM after the test's assertions have
- * all passed, and the lane reports a green test as a failure.
+ * all passed, and the run reports a green test as a failure.
  *
- * `removeTree`/`removeTreeSync` carry the repo's `maxRetries: 8` policy. This keeps the lane on
- * them: a new spec that hand-rolls the removal fails here rather than intermittently on Windows.
+ * `removeTree`/`removeTreeSync` carry the repo's `maxRetries: 8` policy. This keeps those specs on
+ * them: a new one that hand-rolls the removal fails here rather than intermittently on Windows.
+ *
+ * Upstream reads the list out of the `package (windows)` job of `.github/workflows/pr.yml`. This
+ * fork ships no PR workflow (S37 / DECISIONS Q11), so it is repo-owned in the manifest below.
  */
 const REPO_ROOT = join(__dirname, '..', '..')
-const WORKFLOW_PATH = join(REPO_ROOT, '.github', 'workflows', 'pr.yml')
-const WINDOWS_STEP_NAME = 'Test Windows-specific boundaries'
+const SPEC_MANIFEST_PATH = join(REPO_ROOT, 'config', 'windows-lane-specs.txt')
+const SPEC_PATH = /^(src|tests|config)\/.+\.(test|spec)\.(ts|tsx|mjs)$/
 
-/** The spec paths the `package (windows)` job passes to vitest, read from the workflow itself. */
+/** The spec paths the manifest lists, one per line, `#` comments and blanks skipped. */
 function readWindowsLaneSpecs(): string[] {
-  const workflow = readFileSync(WORKFLOW_PATH, 'utf8')
-  const stepIndex = workflow.indexOf(`- name: ${WINDOWS_STEP_NAME}`)
-  expect(stepIndex, `${WORKFLOW_PATH} no longer has a "${WINDOWS_STEP_NAME}" step`).toBeGreaterThan(
-    -1
-  )
-  const nextStepIndex = workflow.indexOf('\n      - name:', stepIndex + 1)
-  const step = workflow.slice(stepIndex, nextStepIndex === -1 ? undefined : nextStepIndex)
-  return step
+  return readFileSync(SPEC_MANIFEST_PATH, 'utf8')
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => /^(src|tests|config)\/.+\.(test|spec)\.(ts|tsx|mjs)$/.test(line))
+    .filter((line) => line !== '' && !line.startsWith('#'))
+    .map((line) => {
+      // Why assert rather than filter: a typo'd path must fail loudly, not silently shrink the scan.
+      expect(line, `${SPEC_MANIFEST_PATH} has a line that is not a spec path`).toMatch(SPEC_PATH)
+      return line
+    })
 }
 
 /** `node:fs` and `node:fs/promises`, spelled with or without the `node:` prefix. */

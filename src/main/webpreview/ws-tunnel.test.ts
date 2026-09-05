@@ -20,7 +20,7 @@ let sessionId: string
 
 beforeAll(async () => {
   // Upstream: echo every frame back, preserving binary-ness.
-  upstream = new WebSocketServer({ port: 0 })
+  upstream = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   upstream.on('connection', (ws) => {
     ws.on('message', (data, isBinary) => ws.send(data, { binary: isBinary }))
   })

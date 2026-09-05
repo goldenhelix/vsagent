@@ -33,8 +33,7 @@ import {
   recordRuntimeRpcStartFailure,
   showRuntimeRpcStartupFailureDialog
 } from '../runtime/runtime-rpc-startup-failure'
-import { CliInstaller } from '../cli/cli-installer'
-import { installLinuxBareOrcaDispatcher } from '../cli/linux-bare-orca-dispatcher'
+import { installServeCliLaunchers } from './serve-cli-launcher-install'
 import { scheduleAllPendingHistoryTreeRemovals } from '../terminal-history-deletion'
 import { triggerStartupNotificationRegistration } from '../ipc/startup-notification-registration'
 import { mainProcessState as state } from './main-process-state'
@@ -167,53 +166,7 @@ async function launchServeMode(
   settleDesktopActivation()
   // Why: every attempt must reach app.quit(); a page beforeunload can veto an earlier signal.
   registerServeSignalHandlers(process, () => app.quit())
-  // Why (VSAgent fork): a tarball install links the CLI launchers itself, so the serve process must
-  // neither race nor overwrite them. Gates both install blocks below.
-  const cliLaunchersExternallyManaged = process.env.ORCA_MANAGED_INSTALL === '1'
-  // Why: headless serve has no renderer to run the normal cli:install flow; do it here for macOS/Linux only (Windows-excluded: install() only mutates registry PATH, not child terminals).
-  if (
-    !cliLaunchersExternallyManaged &&
-    (process.platform === 'darwin' || process.platform === 'linux')
-  ) {
-    try {
-      // Why: serve is headless — a fallback osascript admin prompt would hang it; skip elevation since ~/.local/bin needs none.
-      const cliStatus = await new CliInstaller({
-        privilegedRunner: async () => {
-          throw new Error('serve CLI auto-install must not request administrator privileges')
-        }
-      }).install()
-      console.log(
-        `[serve] orca CLI install: ${cliStatus.state}${cliStatus.commandPath ? ` (${cliStatus.commandPath})` : ''}`
-      )
-    } catch (error) {
-      console.warn(
-        '[serve] orca CLI install skipped:',
-        error instanceof Error ? error.message : String(error)
-      )
-    }
-  }
-  // Why: Linux CLI installs as `orca-ide`, but the Claude Team launcher invokes bare `orca`; drop a ~/.local/bin dispatcher (ahead of /usr/bin) so it resolves. Best-effort.
-  if (
-    !cliLaunchersExternallyManaged &&
-    process.platform === 'linux' &&
-    app.isPackaged &&
-    process.resourcesPath
-  ) {
-    try {
-      const dispatcher = await installLinuxBareOrcaDispatcher({
-        resourcesPath: process.resourcesPath
-      })
-      console.log(
-        `[serve] bare orca dispatcher ${dispatcher.state}: ${dispatcher.dispatcherPath}` +
-          `${dispatcher.target ? ` -> ${dispatcher.target}` : ''}`
-      )
-    } catch (error) {
-      console.warn(
-        '[serve] bare orca dispatcher install skipped:',
-        error instanceof Error ? error.message : String(error)
-      )
-    }
-  }
+  await installServeCliLaunchers()
   // Why: headless serve never opens a renderer, so arm scheduled automation dispatch here.
   state.automations?.start()
   // Why: serve deletes worktrees too, and the history GC that normally drains delete tombstones is
