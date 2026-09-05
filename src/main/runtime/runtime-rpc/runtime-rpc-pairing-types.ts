@@ -113,6 +113,10 @@ export const DEVICE_REGISTRY_UNAVAILABLE_GUIDANCE =
 export const E2EE_KEY_UNAVAILABLE_GUIDANCE =
   'The E2EE identity is unavailable. Verify that the Orca data directory is writable.'
 
+// Why (VSAgent fork): the trusted-proxy redirect looks its shared device up BY NAME, so this label is
+// the identity of that credential — renaming it strands the old entry and mints a second one.
+export const SHARED_ACCESS_DEVICE_NAME = 'Shared web access (trusted proxy)'
+
 export type MobileRelayPairingProvider = {
   createPairingRelay(
     relayDeviceId: string

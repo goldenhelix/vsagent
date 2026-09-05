@@ -20,6 +20,7 @@ import {
   DEVICE_REGISTRY_UNAVAILABLE_GUIDANCE,
   E2EE_KEY_UNAVAILABLE_GUIDANCE,
   pairingUnavailable,
+  SHARED_ACCESS_DEVICE_NAME,
   type MobileRelayPairingProvider
 } from './runtime-rpc-pairing-types'
 
@@ -37,6 +38,11 @@ export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
       // way in, or its grant re-publishes the runtime on every interface one restart later.
       ...(args.reach ? { reach: args.reach } : {})
     })
+
+  // Why (VSAgent fork): the trusted-proxy redirect is served by the lifecycle mixin below this one,
+  // so the minting ability is published the same way `mintRuntimePairingOffer` is.
+  protected override mintSharedAccessPairingUrl = (endpoint: string): string | null =>
+    this.createSharedAccessPairingUrl(endpoint)
 
   getDeviceRegistry(): DeviceRegistry | null {
     return this.deviceRegistry
@@ -200,6 +206,46 @@ export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
       serverName: serverName ?? null,
       webClientUrl:
         this.webClientRoot && scope === 'runtime' ? createWebClientUrl(endpoint, pairingUrl) : null
+    }
+  }
+
+  // Why (VSAgent fork): trusted-reverse-proxy deployments redirect `GET /` to the web client with a
+  // pairing offer baked in. Every visitor shares ONE persistent device so the registry does not gain
+  // an entry per page load and the operator has a single revocation unit; the endpoint comes from the
+  // proxied request, so the same serve works through any hostname that reaches it.
+  // SECURITY: this hands a full runtime-scope credential to anyone who can reach `GET /`. Only the
+  // header-secret mode (ORCA_SERVE_PAIRING_PROXY_SECRET) is safe on a shared network.
+  createSharedAccessPairingUrl(endpoint: string): string | null {
+    const publicKeyB64 = this.getE2EEPublicKey()
+    if (!this.deviceRegistry || !publicKeyB64 || !this.getWebSocketEndpoint()) {
+      return null
+    }
+    try {
+      // Why synchronous end to end: concurrent `GET /` requests cannot interleave between the lookup
+      // and the mint, so the shared entry stays unique without a lock.
+      const device =
+        this.deviceRegistry
+          .listDevices()
+          .find((entry) => entry.scope === 'runtime' && entry.name === SHARED_ACCESS_DEVICE_NAME) ??
+        // Why 'network' explicitly: STA-2370 counts it at the next launch, so the listener stays wide
+        // for a trusted-proxy deployment even if `--serve-host` is later dropped. That is the intent
+        // here — the proxy, not the bind host, is the access boundary.
+        this.deviceRegistry.addDevice(SHARED_ACCESS_DEVICE_NAME, 'runtime', 'network')
+      const serverName = boundedPairingOfferName(this.serverDisplayName)
+      return encodePairingOffer({
+        v: PAIRING_OFFER_VERSION,
+        endpoint,
+        deviceToken: device.token,
+        publicKeyB64,
+        pairedDeviceId: device.deviceId,
+        ...(serverName ? { name: serverName } : {}),
+        scope: 'runtime'
+      })
+    } catch (error) {
+      // Why: the endpoint is attacker-influenced (Host / X-Forwarded-*), so a registry write failure or
+      // a rejected offer must fall through to the static handler rather than 502 the whole page load.
+      console.error('[runtime] Failed to mint the shared web-access pairing offer:', error)
+      return null
     }
   }
 

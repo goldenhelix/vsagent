@@ -97,6 +97,9 @@ export class RuntimeRpcState {
   protected mintRuntimePairingOffer:
     | ((args: RuntimePairingOfferParams) => RuntimePairingOfferResult)
     | null = null
+  // Why (VSAgent fork): same installation pattern for the trusted-proxy redirect — the serve HTTP
+  // handler is wired by the lifecycle mixin, which sits below the pairing mixin that can mint.
+  protected mintSharedAccessPairingUrl: ((endpoint: string) => string | null) | null = null
   protected onUnpairedDeviceAuthFailure: (() => void) | null = null
   protected unpairedDeviceAuthThrottle: UnpairedDeviceAuthThrottle | null = null
   protected readonly binaryMessageRouter = new RuntimeBinaryMessageRouter()

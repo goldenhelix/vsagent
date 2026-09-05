@@ -4,6 +4,7 @@ import type { RpcTransport } from '../rpc/transport'
 import { UnixSocketTransport } from '../rpc/unix-socket-transport'
 import { WebSocketTransport } from '../rpc/ws-transport'
 import { readWsFallbackPort, writeWsFallbackPort } from '../rpc/ws-fallback-port-store'
+import { handleOpenPairingRedirect, readOpenPairingConfig } from '../rpc/open-pairing-redirect'
 import {
   handleLeakedPreviewRequest,
   handleWebPreview,
@@ -180,6 +181,10 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
     // Why resolved here and not once at start(): the pairing-time rebind comes back through this
     // method, and the cached material keeps the rebound listener on the same certificate.
     const tlsMaterial = this.resolveServeTlsMaterial()
+    // Why read here and not per request: one read per transport start, as the fork did — the serve
+    // process's environment is fixed, and the pairing-time rebind comes back through this method so
+    // both listeners agree without re-reading on every unauthenticated hit.
+    const openPairingConfig = readOpenPairingConfig()
     const wsTransport = new WebSocketTransport({
       host: options.host,
       port: options.port,
@@ -191,8 +196,18 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
       // clients on the same origin as the web-client bundle. Session ids are unguessable 128-bit
       // capabilities minted only over the authenticated webpreview.* RPC methods. Both handlers
       // must stay stateless — this runs again on the pairing-time loopback→wide rebind — which the
-      // module-level session registry satisfies.
+      // module-level session registry and the by-name shared-device lookup both satisfy.
+      // Chain order: open-pairing redirect → webpreview → leaked-asset rescue → static web client.
       extraHttpHandler: async (req, res) => {
+        // Why first in the chain: only the bare `GET /` is claimed, and claiming it before the static
+        // handler is the whole point — otherwise the web client loads with no pairing offer.
+        if (
+          handleOpenPairingRedirect(req, res, openPairingConfig, (endpoint) =>
+            this.mintSharedAccessPairingUrl?.(endpoint) ?? null
+          )
+        ) {
+          return true
+        }
         if (isWebPreviewPath(req.url)) {
           await handleWebPreview(req, res)
           return true
