@@ -1,5 +1,6 @@
 import { app, type BrowserWindow } from 'electron'
 import { parseSkillShareId } from '../shared/skill-share-link'
+import { applyVSAgentEnvAliases } from '../shared/vsagent-env-aliases'
 import { createMacAppActivationHandler } from './window/macos-app-activation'
 import {
   focusExistingWindow as focusExistingWindowAction,
@@ -73,6 +74,11 @@ const handleMacAppActivation = createMacAppActivationHandler({
   getWindow: () => state.mainWindow,
   requestActivation: requestDesktopActivation
 })
+
+// Why (VSAgent fork): map VSAGENT_* env aliases onto their ORCA_* targets before any
+// env-dependent startup logic reads them. The CLI runs this too, but a serve unit launches
+// Electron directly, so the main process cannot rely on the CLI having gone first.
+applyVSAgentEnvAliases()
 
 const preflightReady = runMainProcessPreflight({
   focusExistingWindow,

@@ -5,15 +5,22 @@ export type ServeOptionValidationInput = {
   mobilePairing: boolean
   recipeJson: boolean
   projectRoot: string | null | undefined
+  https?: boolean | undefined
   tlsCertPath?: string | null | undefined
   tlsKeyPath?: string | null | undefined
 }
 
 export function getServeOptionValidationError(options: ServeOptionValidationInput): string | null {
-  if (Boolean(options.tlsCertPath) !== Boolean(options.tlsKeyPath)) {
+  const hasCert = Boolean(options.tlsCertPath)
+  if (hasCert !== Boolean(options.tlsKeyPath)) {
     // Why: half a keypair silently falls back to the self-signed certificate, so the operator would
     // believe their own certificate is in use.
     return 'Use --cert and --key together; a TLS certificate needs both files.'
+  }
+  if (hasCert && !options.https) {
+    // Why: TLS material is read only when --https is on, so without it the server stays plain HTTP
+    // while the operator believes they configured a certificate.
+    return 'Use --cert and --key with --https; without it the server serves plain HTTP.'
   }
   if (options.noPairing && options.mobilePairing) {
     return 'Use either --mobile-pairing or --no-pairing, not both.'

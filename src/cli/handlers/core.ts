@@ -59,10 +59,7 @@ function getOptionalServePort(flags: Map<string, string | boolean>): string | nu
 }
 
 /** Same missing-value contract as --port, for the serve flags that carry a free-form string. */
-function getOptionalServeString(
-  flags: Map<string, string | boolean>,
-  name: string
-): string | null {
+function getOptionalServeString(flags: Map<string, string | boolean>, name: string): string | null {
   if (!flags.has(name)) {
     return null
   }
@@ -113,6 +110,7 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
     const noPairing = flags.get('no-pairing') === true
     const mobilePairing = flags.get('mobile-pairing') === true
     const recipeJson = flags.get('recipe-json') === true
+    const https = flags.get('https') === true
     const certPath = getOptionalServeString(flags, 'cert')
     const keyPath = getOptionalServeString(flags, 'key')
     const validationError = getServeOptionValidationError({
@@ -120,6 +118,7 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       mobilePairing,
       recipeJson,
       projectRoot,
+      https,
       tlsCertPath: certPath,
       tlsKeyPath: keyPath
     })
@@ -136,7 +135,7 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       host,
       pairingAddress: typeof pairingAddressValue === 'string' ? pairingAddressValue : null,
       serverName,
-      https: flags.get('https') === true,
+      https,
       certPath,
       keyPath,
       noPairing,
