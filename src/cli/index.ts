@@ -20,6 +20,11 @@ import { printHelp } from './help'
 import type { RuntimeClient } from './runtime-client'
 import { COMMAND_SPECS } from './specs'
 import { resolveOrchestrationCliExecutable } from './runtime/orchestration-recovery-command'
+import { applyVSAgentEnvAliases } from '../shared/vsagent-env-aliases'
+
+// Why (VSAgent fork): map VSAGENT_* env aliases onto their ORCA_* targets
+// before any command reads the environment.
+applyVSAgentEnvAliases()
 
 export { COMMAND_SPECS } from './specs'
 export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selectors'
