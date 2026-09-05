@@ -4,9 +4,11 @@ import type { RuntimeGitHubReviewMutationCommands } from './runtime-github-revie
 import type { RuntimeGitHubReviewQueryCommands } from './runtime-github-review-query-commands'
 import type { RuntimeGitLabMutationCommands } from './runtime-gitlab-mutation-commands'
 import type { RuntimeGitLabQueryCommands } from './runtime-gitlab-query-commands'
+import type { RuntimeGiteaCommands } from './runtime-gitea-commands'
 
 type GitLabQueryName = Exclude<keyof RuntimeGitLabQueryCommands, 'constructor'>
 type GitLabMutationName = Exclude<keyof RuntimeGitLabMutationCommands, 'constructor'>
+type GiteaCommandName = Exclude<keyof RuntimeGiteaCommands, 'constructor'>
 type GitHubProjectName = Exclude<keyof RuntimeGitHubProjectCommands, 'constructor'>
 type GitHubReviewQueryName =
   | 'getRepoIssue'
@@ -36,6 +38,7 @@ type GitHubIssueCommentName =
 
 export type RuntimeReviewCommandSurface = {} & Pick<RuntimeGitLabQueryCommands, GitLabQueryName> &
   Pick<RuntimeGitLabMutationCommands, GitLabMutationName> &
+  Pick<RuntimeGiteaCommands, GiteaCommandName> &
   Pick<RuntimeGitHubReviewQueryCommands, GitHubReviewQueryName> &
   Pick<RuntimeGitHubReviewMutationCommands, GitHubReviewMutationName> &
   Pick<RuntimeGitHubIssueCommentCommands, GitHubIssueCommentName> &
@@ -44,6 +47,7 @@ export type RuntimeReviewCommandSurface = {} & Pick<RuntimeGitLabQueryCommands, 
 type RuntimeReviewCommandOwners = {
   gitLabQueries: RuntimeGitLabQueryCommands
   gitLabMutations: RuntimeGitLabMutationCommands
+  gitea: RuntimeGiteaCommands
   gitHubReviewQueries: RuntimeGitHubReviewQueryCommands
   gitHubReviewMutations: RuntimeGitHubReviewMutationCommands
   gitHubIssueComments: RuntimeGitHubIssueCommentCommands
@@ -56,6 +60,7 @@ export function installRuntimeReviewCommandSurface(
 ): void {
   const glq = owners.gitLabQueries
   const glm = owners.gitLabMutations
+  const gitea = owners.gitea
   const ghq = owners.gitHubReviewQueries
   const ghm = owners.gitHubReviewMutations
   const comments = owners.gitHubIssueComments
@@ -82,6 +87,14 @@ export function installRuntimeReviewCommandSurface(
     updateGitLabRepoMRState: glm.updateGitLabRepoMRState.bind(glm),
     updateGitLabRepoMR: glm.updateGitLabRepoMR.bind(glm),
     updateGitLabRepoMRReviewers: glm.updateGitLabRepoMRReviewers.bind(glm),
+    listGiteaRepoIssues: gitea.listGiteaRepoIssues.bind(gitea),
+    diagnoseGiteaAuth: gitea.diagnoseGiteaAuth.bind(gitea),
+    listGiteaRepoLabels: gitea.listGiteaRepoLabels.bind(gitea),
+    listGiteaRepoMilestones: gitea.listGiteaRepoMilestones.bind(gitea),
+    updateGiteaRepoIssue: gitea.updateGiteaRepoIssue.bind(gitea),
+    addGiteaRepoIssueComment: gitea.addGiteaRepoIssueComment.bind(gitea),
+    getGiteaRepoWorkItemDetails: gitea.getGiteaRepoWorkItemDetails.bind(gitea),
+    getGiteaRepoWorkItemByPath: gitea.getGiteaRepoWorkItemByPath.bind(gitea),
     getRepoIssue: ghq.getRepoIssue.bind(ghq),
     getRepoPRChecks: ghq.getRepoPRChecks.bind(ghq),
     getRepoPRCheckDetails: ghq.getRepoPRCheckDetails.bind(ghq),
