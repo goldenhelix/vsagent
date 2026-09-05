@@ -54,6 +54,23 @@ describe('serve-mode-argv', () => {
     }
     // A directory named `help` is a value, not a help request.
     expect(argvRequestsServeMode(['/AppRun', 'serve', '--project-root', 'help'])).toBe(true)
+    // Same for every other value flag, in either spelling — the VALUE_TAKING_FLAGS superset.
+    for (const flag of [
+      '--host',
+      '--serve-host',
+      '--name',
+      '--serve-name',
+      '--cert',
+      '--serve-cert',
+      '--key',
+      '--serve-key',
+      '--storage-namespace',
+      '--serve-storage-namespace'
+    ]) {
+      expect(argvRequestsServeMode(['/AppRun', 'serve', flag, 'help']), flag).toBe(true)
+      // …and a value of `serve` is a value, not the subcommand.
+      expect(findServeSubcommandIndex(['/AppRun', flag, 'serve']), flag).toBe(-1)
+    }
     // Past an operator's terminator nothing is reinterpreted, help flags included.
     expect(argvRequestsServeMode(['/AppRun', 'serve', '--', '--help'])).toBe(true)
   })

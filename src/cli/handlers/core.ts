@@ -58,6 +58,21 @@ function getOptionalServePort(flags: Map<string, string | boolean>): string | nu
   return rawPort
 }
 
+/** Same missing-value contract as --port, for the serve flags that carry a free-form string. */
+function getOptionalServeString(
+  flags: Map<string, string | boolean>,
+  name: string
+): string | null {
+  if (!flags.has(name)) {
+    return null
+  }
+  const value = flags.get(name)
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new RuntimeClientError('invalid_argument', `Missing value for --${name}.`)
+  }
+  return value
+}
+
 export const CORE_HANDLERS: Record<string, CommandHandler> = {
   'claude-teams': async ({ client, rawArgs }) => {
     if (process.platform === 'win32') {
@@ -98,21 +113,32 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
     const noPairing = flags.get('no-pairing') === true
     const mobilePairing = flags.get('mobile-pairing') === true
     const recipeJson = flags.get('recipe-json') === true
+    const certPath = getOptionalServeString(flags, 'cert')
+    const keyPath = getOptionalServeString(flags, 'key')
     const validationError = getServeOptionValidationError({
       noPairing,
       mobilePairing,
       recipeJson,
-      projectRoot
+      projectRoot,
+      tlsCertPath: certPath,
+      tlsKeyPath: keyPath
     })
     if (validationError) {
       throw new RuntimeClientError('invalid_argument', validationError)
     }
     const port = getOptionalServePort(flags)
+    const host = getOptionalServeString(flags, 'host')
+    const serverName = getOptionalServeString(flags, 'name')
     const pairingAddressValue = flags.get('pairing-address')
     const exitCode = await serveOrcaApp({
       json,
       port,
+      host,
       pairingAddress: typeof pairingAddressValue === 'string' ? pairingAddressValue : null,
+      serverName,
+      https: flags.get('https') === true,
+      certPath,
+      keyPath,
       noPairing,
       mobilePairing,
       recipeJson,

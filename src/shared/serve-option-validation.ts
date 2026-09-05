@@ -5,9 +5,16 @@ export type ServeOptionValidationInput = {
   mobilePairing: boolean
   recipeJson: boolean
   projectRoot: string | null | undefined
+  tlsCertPath?: string | null | undefined
+  tlsKeyPath?: string | null | undefined
 }
 
 export function getServeOptionValidationError(options: ServeOptionValidationInput): string | null {
+  if (Boolean(options.tlsCertPath) !== Boolean(options.tlsKeyPath)) {
+    // Why: half a keypair silently falls back to the self-signed certificate, so the operator would
+    // believe their own certificate is in use.
+    return 'Use --cert and --key together; a TLS certificate needs both files.'
+  }
   if (options.noPairing && options.mobilePairing) {
     return 'Use either --mobile-pairing or --no-pairing, not both.'
   }
@@ -37,10 +44,20 @@ const SERVE_SECURITY_FLAG_NAMES = [
 const SERVE_VALUE_FLAG_NAMES = new Set([
   '--port',
   '--serve-port',
+  '--host',
+  '--serve-host',
   '--pairing-address',
   '--serve-pairing-address',
   '--project-root',
   '--serve-project-root',
+  '--cert',
+  '--serve-cert',
+  '--key',
+  '--serve-key',
+  '--name',
+  '--serve-name',
+  '--storage-namespace',
+  '--serve-storage-namespace',
   '--pairing-code',
   '--environment'
 ])

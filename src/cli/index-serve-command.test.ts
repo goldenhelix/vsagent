@@ -43,6 +43,21 @@ vi.mock('child_process', async () => {
 import { main } from './index'
 import { useWorktreeAwarenessEnvironment } from './index-test-harness'
 
+const NO_SERVE_FLAGS = {
+  json: false,
+  port: null,
+  host: null,
+  pairingAddress: null,
+  serverName: null,
+  https: false,
+  certPath: null,
+  keyPath: null,
+  noPairing: false,
+  mobilePairing: false,
+  recipeJson: false,
+  projectRoot: null
+}
+
 describe('orca cli worktree awareness', () => {
   useWorktreeAwarenessEnvironment({
     callMock,
@@ -63,13 +78,11 @@ describe('orca cli worktree awareness', () => {
     )
 
     expect(serveOrcaAppMock).toHaveBeenCalledWith({
+      ...NO_SERVE_FLAGS,
       json: true,
       port: '6768',
       pairingAddress: '100.64.1.20',
-      noPairing: true,
-      mobilePairing: false,
-      recipeJson: false,
-      projectRoot: null
+      noPairing: true
     })
   })
 
@@ -82,13 +95,10 @@ describe('orca cli worktree awareness', () => {
     )
 
     expect(serveOrcaAppMock).toHaveBeenCalledWith({
+      ...NO_SERVE_FLAGS,
       json: true,
-      port: null,
       pairingAddress: '100.64.1.20',
-      noPairing: false,
-      mobilePairing: true,
-      recipeJson: false,
-      projectRoot: null
+      mobilePairing: true
     })
   })
 
@@ -108,14 +118,72 @@ describe('orca cli worktree awareness', () => {
     )
 
     expect(serveOrcaAppMock).toHaveBeenCalledWith({
-      json: false,
-      port: null,
+      ...NO_SERVE_FLAGS,
       pairingAddress: 'wss://sandbox.example.com',
-      noPairing: false,
-      mobilePairing: false,
       recipeJson: true,
       projectRoot: '/workspace/repo'
     })
+  })
+
+  it('forwards the bind host, server name, and TLS flags', async () => {
+    serveOrcaAppMock.mockResolvedValue(0)
+
+    await main(
+      [
+        'serve',
+        '--host',
+        '100.64.1.20',
+        '--name',
+        'build-box',
+        '--https',
+        '--cert',
+        '/etc/orca/server.crt',
+        '--key',
+        '/etc/orca/server.key'
+      ],
+      '/tmp/repo'
+    )
+
+    expect(serveOrcaAppMock).toHaveBeenCalledWith({
+      ...NO_SERVE_FLAGS,
+      host: '100.64.1.20',
+      serverName: 'build-box',
+      https: true,
+      certPath: '/etc/orca/server.crt',
+      keyPath: '/etc/orca/server.key'
+    })
+  })
+
+  it('rejects half a TLS keypair before launching the app', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const priorExitCode = process.exitCode
+
+    await main(['serve', '--https', '--cert', '/etc/orca/server.crt'], '/tmp/repo')
+
+    expect(serveOrcaAppMock).not.toHaveBeenCalled()
+    expect([...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')).toContain(
+      'Use --cert and --key together'
+    )
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
+  })
+
+  it('rejects a value-less --host before launching the app', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const priorExitCode = process.exitCode
+
+    await main(['serve', '--host', '--json'], '/tmp/repo')
+
+    expect(serveOrcaAppMock).not.toHaveBeenCalled()
+    expect([...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')).toContain(
+      'Missing value for --host.'
+    )
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
   })
 
   it('rejects recipe JSON output without a project root', async () => {

@@ -13,6 +13,7 @@ import {
 } from '../../shared/ephemeral-vm-recipes'
 import { getDefaultUserDataPath } from './metadata'
 import { getMacAppBundlePath } from './mac-app-update-bundle'
+import { buildServeChildArgs, type ServeChildArgs } from './serve-child-argv'
 import {
   readServeUpdateHandoffSync,
   resumeInterruptedServeUpdate,
@@ -77,44 +78,9 @@ function spawnDetached(command: string, args: string[], options: SpawnOptions): 
   child.unref()
 }
 
-export function serveOrcaApp(
-  args: {
-    json?: boolean
-    port?: string | null
-    pairingAddress?: string | null
-    noPairing?: boolean
-    mobilePairing?: boolean
-    recipeJson?: boolean
-    projectRoot?: string | null
-  } = {}
-): Promise<number> {
+export function serveOrcaApp(args: ServeChildArgs = {}): Promise<number> {
   const executable = resolveForegroundOrcaExecutable()
-  const childArgs = [...getExecutableAppArgs(executable)]
-  childArgs.push('--serve')
-  if (args.json) {
-    childArgs.push('--serve-json')
-  }
-  if (args.port) {
-    childArgs.push('--serve-port', args.port)
-  }
-  if (args.pairingAddress) {
-    childArgs.push('--serve-pairing-address', args.pairingAddress)
-  }
-  if (args.noPairing) {
-    childArgs.push('--serve-no-pairing')
-  }
-  if (args.mobilePairing) {
-    childArgs.push('--serve-mobile-pairing')
-  }
-  if (args.recipeJson) {
-    if (!args.projectRoot) {
-      throw new RuntimeClientError(
-        'invalid_argument',
-        'Recipe JSON output requires --project-root.'
-      )
-    }
-    childArgs.push('--serve-recipe-json', '--serve-project-root', args.projectRoot)
-  }
+  const childArgs = [...getExecutableAppArgs(executable), ...buildServeChildArgs(args)]
 
   const handoffPath =
     args.recipeJson !== true && getMacAppBundlePath(executable)

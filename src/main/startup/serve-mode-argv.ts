@@ -12,13 +12,18 @@ const CLI_TO_SERVE_FLAG = new Map([
   ['--json', '--serve-json'],
   ['--no-pairing', '--serve-no-pairing'],
   ['--mobile-pairing', '--serve-mobile-pairing'],
-  ['--recipe-json', '--serve-recipe-json']
+  ['--recipe-json', '--serve-recipe-json'],
+  ['--https', '--serve-https']
 ])
 
 const CLI_TO_SERVE_VALUE_FLAG = new Map([
   ['--port', '--serve-port'],
+  ['--host', '--serve-host'],
   ['--pairing-address', '--serve-pairing-address'],
-  ['--project-root', '--serve-project-root']
+  ['--project-root', '--serve-project-root'],
+  ['--cert', '--serve-cert'],
+  ['--key', '--serve-key'],
+  ['--name', '--serve-name']
 ])
 
 /**
@@ -29,8 +34,15 @@ const CLI_TO_SERVE_VALUE_FLAG = new Map([
 export const VALUE_TAKING_FLAGS = new Set([
   ...CLI_TO_SERVE_VALUE_FLAG.keys(),
   '--serve-port',
+  '--serve-host',
   '--serve-pairing-address',
   '--serve-project-root',
+  '--serve-cert',
+  '--serve-key',
+  '--serve-name',
+  // Electron-argv only (no CLI spelling to translate), so both forms are listed by hand.
+  '--storage-namespace',
+  '--serve-storage-namespace',
   '--disable-features',
   '--user-data-dir',
   '--proxy-server',

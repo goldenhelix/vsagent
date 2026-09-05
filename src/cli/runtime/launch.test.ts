@@ -353,6 +353,50 @@ describe('serveOrcaApp', () => {
     )
   })
 
+  it('passes the bind host, server name, and TLS flags to the foreground server child', async () => {
+    const child = {
+      kill: vi.fn(),
+      once: vi.fn(
+        (event: string, handler: (code: number | null, signal: string | null) => void) => {
+          if (event === 'exit') {
+            queueMicrotask(() => handler(0, null))
+          }
+          return child
+        }
+      )
+    }
+    spawnMock.mockReturnValue(child)
+
+    await expect(
+      serveOrcaApp({
+        host: '100.64.1.20',
+        serverName: 'build-box',
+        https: true,
+        certPath: '/etc/orca/server.crt',
+        keyPath: '/etc/orca/server.key'
+      })
+    ).resolves.toBe(0)
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      '/Applications/Orca.app/Contents/MacOS/Orca',
+      [
+        '--serve',
+        '--serve-host',
+        '100.64.1.20',
+        '--serve-name',
+        'build-box',
+        '--serve-https',
+        '--serve-cert',
+        '/etc/orca/server.crt',
+        '--serve-key',
+        '/etc/orca/server.key'
+      ],
+      expect.objectContaining({
+        cwd: resolve(__dirname, '../../..')
+      })
+    )
+  })
+
   it('passes mobile pairing through to the foreground server child', async () => {
     const child = {
       kill: vi.fn(),

@@ -55,7 +55,10 @@ describe('serve flag parity between the CLI spec and the Electron argv rewrite',
   it('emits the same --serve-* names the CLI spawns with and the main process reads', () => {
     // Why source text: serveOrcaApp spawns a real process; keeping both names visible here makes
     // the rewrite/parser contract fail loudly if either side drifts.
-    const launchSource = readFileSync(join(process.cwd(), 'src/cli/runtime/launch.ts'), 'utf8')
+    const launchSource = readFileSync(
+      join(process.cwd(), 'src/cli/runtime/serve-child-argv.ts'),
+      'utf8'
+    )
     const serveOptionsSource = readFileSync(
       join(process.cwd(), 'src/main/startup/serve-options.ts'),
       'utf8'
