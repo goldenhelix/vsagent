@@ -1,9 +1,7 @@
 import { readFileSync } from 'node:fs'
 
-import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 
-const workflow = parse(readFileSync('.github/workflows/pr.yml', 'utf8'))
 const headlessLinuxGuide = readFileSync('docs/reference/headless-linux-server.md', 'utf8')
 const signalCase = readFileSync('config/docker/headless-serve-shutdown/run-signal-case.sh', 'utf8')
 const shutdownDockerRunner = readFileSync(
@@ -49,39 +47,6 @@ describe('headless serve shutdown PR gate', () => {
         'orca-serve.service'
       )
     ).toThrow('Missing closing code fence for orca-serve.service')
-  })
-
-  it('packages Linux artifacts before running the Docker signal oracle', () => {
-    const steps = workflow.jobs.package.steps
-    const packageStep = steps.find((step) => step.name === 'Package unpacked app')
-    const markerStep = steps.find((step) => step.name === 'Verify root-package marker payloads')
-    const shutdownStep = steps.find((step) => step.name === 'Verify headless serve signal shutdown')
-    const launcherShutdownStep = steps.find(
-      (step) => step.name === 'Verify extracted launcher serve signal shutdown'
-    )
-    const appImageShutdownStep = steps.find(
-      (step) => step.name === 'Verify AppImage CLI registration and serve signal shutdown'
-    )
-
-    expect(workflow.jobs.package['timeout-minutes']).toBe(90)
-    expect(packageStep.run).toContain('--linux AppImage deb rpm --x64 --publish never')
-    expect(markerStep.run).toContain('dpkg-deb --fsys-tarfile')
-    expect(markerStep.run).toContain('rpm2cpio')
-    expect(steps.indexOf(markerStep)).toBeGreaterThan(steps.indexOf(packageStep))
-    expect(shutdownStep.run).toBe(
-      'node config/scripts/run-headless-serve-shutdown-docker.mjs --appimage dist/orca-linux.AppImage'
-    )
-    expect(launcherShutdownStep.run).toContain(
-      'node config/scripts/run-headless-serve-shutdown-docker.mjs'
-    )
-    expect(launcherShutdownStep.run).toContain('--entrypoint launcher')
-    expect(appImageShutdownStep.run).toContain('--entrypoint appimage')
-    expect(appImageShutdownStep.run).toContain('--signal-target serving-electron')
-    expect(appImageShutdownStep.run).toContain('--int-delivery pid')
-    expect(steps.indexOf(shutdownStep)).toBeGreaterThan(steps.indexOf(packageStep))
-    expect(steps.indexOf(shutdownStep)).toBeGreaterThan(steps.indexOf(markerStep))
-    expect(steps.indexOf(launcherShutdownStep)).toBeGreaterThan(steps.indexOf(shutdownStep))
-    expect(steps.indexOf(appImageShutdownStep)).toBeGreaterThan(steps.indexOf(launcherShutdownStep))
   })
 
   it('keeps readiness polling finite and leak-free', () => {

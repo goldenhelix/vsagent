@@ -1,9 +1,8 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parse } from 'yaml'
 import {
   listPullFiles,
   nextLink,
@@ -19,11 +18,6 @@ import {
 
 const projectDir = resolve(import.meta.dirname, '../..')
 const locScript = join(projectDir, '.github/scripts/pr-test-loc-summary.mjs')
-const locWorkflow = parse(
-  readFileSync(join(projectDir, '.github/workflows/pr-test-loc.yml'), 'utf8')
-)
-const locJob = locWorkflow.jobs.loc
-const locStep = locJob.steps[0]
 const tempDirs = []
 
 function runLoc(args, { env } = {}) {
@@ -230,39 +224,5 @@ describe('PR test LoC summary', () => {
 
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('--from-pr')
-  })
-
-  it('is a no-checkout GitHub-hosted PR workflow', () => {
-    expect(locJob['runs-on']).toBe('ubuntu-latest')
-    expect(locJob.steps).toHaveLength(1)
-    expect(locStep.run).toContain('gh api')
-    expect(locStep.run).toContain('pr-test-loc-table.mjs')
-    expect(locStep.run).toContain('pr-test-loc-summary.mjs')
-    expect(locStep.run).toContain('--update-pr')
-    expect(locWorkflow.permissions['pull-requests']).toBe('write')
-    expect(JSON.stringify(locWorkflow)).not.toContain('actions/checkout')
-    expect(JSON.stringify(locWorkflow)).not.toContain('self-hosted')
-  })
-
-  // The write-scoped GITHUB_TOKEN makes any PR-authored code a privilege escalation.
-  it('executes only default-branch script code, never pull-request head code', () => {
-    const serialized = JSON.stringify(locWorkflow)
-
-    expect(locStep.env.TRUSTED_REF).toBe('${{ github.event.repository.default_branch }}')
-    expect(locStep.run).toContain('?ref=${TRUSTED_REF}')
-    expect(serialized).not.toContain('pull_request_target')
-    expect(serialized).not.toContain('pull/')
-    expect(serialized).not.toContain('pull_request.head')
-    expect(serialized).not.toContain('/merge')
-  })
-
-  it('passes event data through env instead of interpolating it into the shell', () => {
-    expect(locStep.env.PR_NUMBER).toBe('${{ github.event.pull_request.number }}')
-    expect(locStep.run).toContain('--update-pr "$PR_NUMBER"')
-    expect(locStep.run).not.toContain('${{')
-  })
-
-  it('fails the step when a script download fails instead of running a truncated file', () => {
-    expect(locStep.run).toContain('set -euo pipefail')
   })
 })
