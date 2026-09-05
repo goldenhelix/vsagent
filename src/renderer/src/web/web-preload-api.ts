@@ -47,6 +47,7 @@ import { createWebTelemetryApi } from './preload-api/web-telemetry-api'
 import { createPtyApi, createSshApi } from './preload-api/web-terminal-api'
 import { createWebUiApi } from './preload-api/web-ui-api'
 import { createUpdaterApi } from './preload-api/web-updater-api'
+import { createWebPreviewApi } from './preload-api/web-webpreview-api'
 import { createWebWorkspacePortsApi } from './preload-api/web-workspace-ports-api'
 import { createWebWorkspaceSessionApi } from './preload-api/web-workspace-session-api'
 import { createWorktreesApi } from './preload-api/web-worktrees-api'
@@ -120,6 +121,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     updater: createUpdaterApi(),
     shell: createShellApi(),
     skills: createSkillsApi(),
+    webPreview: createWebPreviewApi(),
     pty: createPtyApi(),
     ssh: createSshApi(),
     wsl: {

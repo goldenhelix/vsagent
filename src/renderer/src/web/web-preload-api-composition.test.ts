@@ -65,6 +65,7 @@ describe('web preload API composition', () => {
       'updater',
       'shell',
       'skills',
+      'webPreview',
       'pty',
       'ssh',
       'wsl',
