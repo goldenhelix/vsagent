@@ -2,6 +2,7 @@ import type { Automation } from '../../../../shared/automations-types'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
 import type { AutomationHostTarget } from './automation-host-client'
 import { getRuntimeAutomationAvailability } from './automation-runtime-target-availability'
+import { unavailable } from './automation-target-unavailable'
 import type { SshConnectionState } from '../../../../shared/ssh-types'
 import type { TaskSourceContext } from '../../../../shared/task-source-context'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
@@ -269,11 +270,4 @@ function getAutomationSshTargetId(automation: Automation, repo: Repo): string | 
     return automation.executionTargetId
   }
   return repo.connectionId?.trim() || null
-}
-
-function unavailable(
-  reason: Exclude<AutomationTargetAvailability['reason'], 'available'>,
-  message: string
-): AutomationTargetAvailability {
-  return { canRunNow: false, reason, message }
 }

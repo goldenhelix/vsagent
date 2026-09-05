@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/protocol-version'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { AutomationTargetAvailability } from './automation-target-availability'
+import { unavailable } from './automation-target-unavailable'
 
 export function getRuntimeAutomationAvailability(
   environmentId: string,
@@ -17,25 +18,22 @@ export function getRuntimeAutomationAvailability(
 ): AutomationTargetAvailability {
   const entry = runtimeStatusByEnvironmentId?.get(environmentId)
   if (!entry) {
-    return {
-      canRunNow: false,
-      reason: 'runtime-checking',
-      message: 'Checking the selected remote server before running manually.'
-    }
+    return unavailable(
+      'runtime-checking',
+      'Checking the selected remote server before running manually.'
+    )
   }
   if (!entry.status) {
-    return {
-      canRunNow: false,
-      reason: 'runtime-unavailable',
-      message: 'Reconnect this remote server before running manually.'
-    }
+    return unavailable(
+      'runtime-unavailable',
+      'Reconnect this remote server before running manually.'
+    )
   }
   if (entry.status.graphStatus !== 'ready') {
-    return {
-      canRunNow: false,
-      reason: 'runtime-unavailable',
-      message: 'The selected remote server is not ready to run automations yet.'
-    }
+    return unavailable(
+      'runtime-unavailable',
+      'The selected remote server is not ready to run automations yet.'
+    )
   }
   const compat = evaluateRuntimeCompat({
     clientProtocolVersion: RUNTIME_PROTOCOL_VERSION,
@@ -45,11 +43,7 @@ export function getRuntimeAutomationAvailability(
       entry.status.minCompatibleRuntimeClientVersion ?? entry.status.minCompatibleMobileVersion
   })
   if (compat.kind === 'blocked') {
-    return {
-      canRunNow: false,
-      reason: 'runtime-update-required',
-      message: describeRuntimeCompatBlock(compat)
-    }
+    return unavailable('runtime-update-required', describeRuntimeCompatBlock(compat))
   }
   return { canRunNow: true, reason: 'available', message: null }
 }

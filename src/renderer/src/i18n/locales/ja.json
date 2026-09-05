@@ -635,7 +635,13 @@
       "blocked": {
         "notification": {
           "fallback": {
-            "de50bef680": "macOS が Orca の通知をブロックしています"
+            "de50bef680": "macOS が Orca の通知をブロックしています",
+            "web": {
+              "blocked": "ブラウザが通知をブロックしています",
+              "allow": "Agent のアラートを受け取るには、このサイトの通知を許可してください。",
+              "reenable": "ブラウザの設定でこのサイトの通知を再度有効にしてください。",
+              "enable": "通知を有効にする"
+            }
           }
         }
       },
@@ -1919,7 +1925,15 @@
         "jiraLinkSourceUnavailable": "この Jira Issue をリンクできませんでした。Jira に再接続するか該当するサイトを選択してから、もう一度お試しください。",
         "loadPageUnreachable": "ページ {{value0}} は GitHub 検索が返せる範囲を超えています。",
         "loadPageFailed": "GitHub からページ {{value0}} を読み込めませんでした。",
-        "loadPageNoMoreResults": "ページ {{value0}} にはこれ以上結果がありません。"
+        "loadPageNoMoreResults": "ページ {{value0}} にはこれ以上結果がありません。",
+        "gitea": {
+          "refreshIssues": "Gitea の Issue を更新",
+          "allMilestones": "すべてのマイルストーン",
+          "searchIssues": "Issue を検索..."
+        },
+        "gitlab": {
+          "searchItems": "項目を検索..."
+        }
       },
       "Terminal": {
         "73768427cf": "閉じる",
@@ -9001,7 +9015,8 @@
             "setup": "セットアップ",
             "apiKey": "APIキー",
             "skill": "スキル",
-            "connect": "接続"
+            "connect": "接続",
+            "gitea": "gitea"
           }
         },
         "terminal": {
@@ -13715,6 +13730,24 @@
                 }
               }
             }
+          },
+          "WebBrowserPane": {
+            "more": "その他のオプション",
+            "copy": {
+              "url": "URL をコピー"
+            },
+            "open": {
+              "tab": "ブラウザタブで開く"
+            },
+            "go": {
+              "to": "移動"
+            },
+            "invalid": {
+              "url": "無効な URL"
+            },
+            "frame": {
+              "title": "ブラウザ"
+            }
           }
         }
       },
@@ -14389,7 +14422,9 @@
         "noGitLabMrsTitle": "GitLab の MR はありません",
         "noGitLabMrsDescription": "このフィルターに一致する GitLab の MR はありません。",
         "noGitLabWorkTitle": "GitLab の作業はありません",
-        "noGitLabWorkDescription": "このフィルターに一致する GitLab の作業はありません。"
+        "noGitLabWorkDescription": "このフィルターに一致する GitLab の作業はありません。",
+        "noGiteaIssuesTitle": "Gitea の Issue はありません",
+        "noGiteaIssuesDescription": "このフィルターに一致する Gitea の Issue はありません。"
       },
       "taskSourceContextSummary": {
         "sourceUnavailable": "{{value0}} のソースを利用できません: {{value1}}",
@@ -14527,6 +14562,9 @@
         "description": "このワークスペースをサイドバー内の別のワークスペースの配下にネストします。ベースブランチは変更されません。",
         "searchPlaceholder": "ワークスペースを検索...",
         "noMatches": "一致する項目がありません。"
+      },
+      "taskPageLocalizedOptions": {
+        "gitea": "Gitea"
       }
     },
     "i18n": {
