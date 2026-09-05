@@ -635,7 +635,13 @@
       "blocked": {
         "notification": {
           "fallback": {
-            "de50bef680": "macOS está bloqueando las notificaciones de Orca"
+            "de50bef680": "macOS está bloqueando las notificaciones de Orca",
+            "web": {
+              "blocked": "Tu navegador está bloqueando las notificaciones",
+              "allow": "Permite las notificaciones de este sitio para recibir alertas del agente.",
+              "reenable": "Vuelve a activar las notificaciones de este sitio en la configuración de tu navegador.",
+              "enable": "Activar notificaciones"
+            }
           }
         }
       },
@@ -1919,7 +1925,15 @@
         "jiraLinkSourceUnavailable": "Couldn’t link this Jira issue. Reconnect Jira or pick the matching site, then try again.",
         "loadPageUnreachable": "La página {{value0}} está más allá de lo que la búsqueda de GitHub puede devolver.",
         "loadPageFailed": "No se pudo cargar la página {{value0}} desde GitHub.",
-        "loadPageNoMoreResults": "No hay más resultados en la página {{value0}}."
+        "loadPageNoMoreResults": "No hay más resultados en la página {{value0}}.",
+        "gitea": {
+          "refreshIssues": "Actualizar issues de Gitea",
+          "allMilestones": "Todos los hitos",
+          "searchIssues": "Buscar issues..."
+        },
+        "gitlab": {
+          "searchItems": "Buscar elementos..."
+        }
       },
       "Terminal": {
         "73768427cf": "Cerrar",
@@ -8980,7 +8994,8 @@
             "setup": "configuración",
             "apiKey": "clave de API",
             "skill": "habilidad",
-            "connect": "conectar"
+            "connect": "conectar",
+            "gitea": "gitea"
           }
         },
         "terminal": {
@@ -13716,6 +13731,24 @@
                 }
               }
             }
+          },
+          "WebBrowserPane": {
+            "more": "Más opciones",
+            "copy": {
+              "url": "Copiar URL"
+            },
+            "open": {
+              "tab": "Abrir en una pestaña del navegador"
+            },
+            "go": {
+              "to": "Ir a"
+            },
+            "invalid": {
+              "url": "URL no válida"
+            },
+            "frame": {
+              "title": "Navegador"
+            }
           }
         }
       },
@@ -14362,7 +14395,9 @@
         "noGitLabMrsTitle": "No hay merge requests de GitLab",
         "noGitLabMrsDescription": "Ningún MR de GitLab coincide con este filtro.",
         "noGitLabWorkTitle": "No hay trabajo de GitLab",
-        "noGitLabWorkDescription": "Ningún trabajo de GitLab coincide con este filtro."
+        "noGitLabWorkDescription": "Ningún trabajo de GitLab coincide con este filtro.",
+        "noGiteaIssuesTitle": "No hay issues de Gitea",
+        "noGiteaIssuesDescription": "Ningún issue de Gitea coincide con este filtro."
       },
       "taskSourceContextSummary": {
         "sourceUnavailable": "Origen {{value0}} no disponible: {{value1}}",
@@ -14500,6 +14535,9 @@
         "description": "Anida este espacio de trabajo bajo otro en la barra lateral. No cambia la rama base.",
         "searchPlaceholder": "Buscar espacios de trabajo...",
         "noMatches": "No hay coincidencias."
+      },
+      "taskPageLocalizedOptions": {
+        "gitea": "Gitea"
       }
     },
     "i18n": {

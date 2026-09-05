@@ -745,7 +745,13 @@
       "blocked": {
         "notification": {
           "fallback": {
-            "de50bef680": "macOS bloque les notifications Orca"
+            "de50bef680": "macOS bloque les notifications Orca",
+            "web": {
+              "blocked": "Votre navigateur bloque les notifications",
+              "allow": "Autorisez les notifications de ce site pour recevoir les alertes de l'agent.",
+              "reenable": "Réactivez les notifications de ce site dans les paramètres de votre navigateur.",
+              "enable": "Activer les notifications"
+            }
           }
         }
       },
@@ -2082,7 +2088,15 @@
         "linearModeHasWorktreeTooltip": "Tickets Linear liés à un espace de travail Orca",
         "linearEmptyHasWorktree": "Aucun ticket Linear n'est encore lié à un espace de travail Orca. Démarrez le travail depuis une issue Linear pour le voir ici.",
         "linearOpenAttachedWorkspace": "Ouvrir l'espace de travail attaché à {{value0}}",
-        "linearWorktreesColumn": "Espaces de travail"
+        "linearWorktreesColumn": "Espaces de travail",
+        "gitea": {
+          "refreshIssues": "Actualiser les issues Gitea",
+          "allMilestones": "Tous les jalons",
+          "searchIssues": "Rechercher des issues..."
+        },
+        "gitlab": {
+          "searchItems": "Rechercher des éléments..."
+        }
       },
       "Terminal": {
         "73768427cf": "Fermer",
@@ -9830,7 +9844,8 @@
             "setup": "configuration",
             "apiKey": "clé API",
             "skill": "skill",
-            "connect": "connect"
+            "connect": "connect",
+            "gitea": "gitea"
           }
         },
         "terminal": {
@@ -15008,6 +15023,24 @@
                 }
               }
             }
+          },
+          "WebBrowserPane": {
+            "more": "Plus d'options",
+            "copy": {
+              "url": "Copier l'URL"
+            },
+            "open": {
+              "tab": "Ouvrir dans un onglet du navigateur"
+            },
+            "go": {
+              "to": "Aller à"
+            },
+            "invalid": {
+              "url": "URL invalide"
+            },
+            "frame": {
+              "title": "Navigateur"
+            }
           }
         },
         "profile": {
@@ -15652,7 +15685,9 @@
         "noGitLabMrsTitle": "Aucune merge request GitLab",
         "noGitLabMrsDescription": "Aucune MR GitLab ne correspond à ce filtre.",
         "noGitLabWorkTitle": "Aucun travail GitLab",
-        "noGitLabWorkDescription": "Aucun work GitLab ne correspond à ce filtre."
+        "noGitLabWorkDescription": "Aucun work GitLab ne correspond à ce filtre.",
+        "noGiteaIssuesTitle": "Aucun ticket Gitea",
+        "noGiteaIssuesDescription": "Aucune issue Gitea ne correspond à ce filtre."
       },
       "taskSourceContextSummary": {
         "sourceUnavailable": "Source {{value0}} indisponible : {{value1}}",
@@ -15914,6 +15949,9 @@
         "expiredCompact": "Expiré",
         "typeMarkdown": "Markdown",
         "typeHtml": "HTML"
+      },
+      "taskPageLocalizedOptions": {
+        "gitea": "Gitea"
       }
     },
     "i18n": {

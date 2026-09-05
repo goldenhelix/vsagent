@@ -638,7 +638,13 @@
       "blocked": {
         "notification": {
           "fallback": {
-            "de50bef680": "macOS가 Orca 알림을 차단하고 있습니다"
+            "de50bef680": "macOS가 Orca 알림을 차단하고 있습니다",
+            "web": {
+              "blocked": "브라우저가 알림을 차단하고 있습니다",
+              "allow": "에이전트 알림을 받으려면 이 사이트의 알림을 허용하세요.",
+              "reenable": "브라우저 설정에서 이 사이트의 알림을 다시 활성화하세요.",
+              "enable": "알림 활성화"
+            }
           }
         }
       },
@@ -1924,7 +1930,15 @@
         "jiraLinkSourceUnavailable": "Couldn’t link this Jira issue. Reconnect Jira or pick the matching site, then try again.",
         "loadPageUnreachable": "{{value0}} 페이지는 GitHub 검색이 반환할 수 있는 범위를 벗어났습니다.",
         "loadPageFailed": "GitHub에서 {{value0}} 페이지를 불러오지 못했습니다.",
-        "loadPageNoMoreResults": "{{value0}} 페이지에 더 이상 결과가 없습니다."
+        "loadPageNoMoreResults": "{{value0}} 페이지에 더 이상 결과가 없습니다.",
+        "gitea": {
+          "refreshIssues": "Gitea 이슈 새로고침",
+          "allMilestones": "모든 마일스톤",
+          "searchIssues": "이슈 검색..."
+        },
+        "gitlab": {
+          "searchItems": "항목 검색..."
+        }
       },
       "Terminal": {
         "73768427cf": "닫기",
@@ -8970,7 +8984,8 @@
             "setup": "설정",
             "apiKey": "API 키",
             "skill": "스킬",
-            "connect": "연결"
+            "connect": "연결",
+            "gitea": "gitea"
           }
         },
         "terminal": {
@@ -13794,6 +13809,24 @@
                 }
               }
             }
+          },
+          "WebBrowserPane": {
+            "more": "추가 옵션",
+            "copy": {
+              "url": "URL 복사"
+            },
+            "open": {
+              "tab": "브라우저 탭에서 열기"
+            },
+            "go": {
+              "to": "이동"
+            },
+            "invalid": {
+              "url": "잘못된 URL"
+            },
+            "frame": {
+              "title": "브라우저"
+            }
           }
         }
       },
@@ -14440,7 +14473,9 @@
         "noGitLabMrsTitle": "GitLab MR 없음",
         "noGitLabMrsDescription": "이 필터와 일치하는 GitLab MR이 없습니다.",
         "noGitLabWorkTitle": "GitLab 작업 없음",
-        "noGitLabWorkDescription": "이 필터와 일치하는 GitLab 작업이 없습니다."
+        "noGitLabWorkDescription": "이 필터와 일치하는 GitLab 작업이 없습니다.",
+        "noGiteaIssuesTitle": "Gitea 이슈 없음",
+        "noGiteaIssuesDescription": "이 필터와 일치하는 Gitea 이슈가 없습니다."
       },
       "taskSourceContextSummary": {
         "sourceUnavailable": "{{value0}} 소스를 사용할 수 없음: {{value1}}",
@@ -14578,6 +14613,9 @@
         "description": "이 워크스페이스를 사이드바의 다른 워크스페이스 아래에 중첩합니다. 기준 브랜치는 변경되지 않습니다.",
         "searchPlaceholder": "워크스페이스 검색...",
         "noMatches": "일치하는 항목이 없습니다."
+      },
+      "taskPageLocalizedOptions": {
+        "gitea": "Gitea"
       }
     },
     "i18n": {

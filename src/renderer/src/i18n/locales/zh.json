@@ -638,7 +638,13 @@
       "blocked": {
         "notification": {
           "fallback": {
-            "de50bef680": "macOS 正在阻止 Orca 通知"
+            "de50bef680": "macOS 正在阻止 Orca 通知",
+            "web": {
+              "blocked": "您的浏览器正在阻止通知",
+              "allow": "允许此网站发送通知以接收智能体提醒。",
+              "reenable": "请在浏览器设置中重新启用此网站的通知。",
+              "enable": "启用通知"
+            }
           }
         }
       },
@@ -1922,7 +1928,15 @@
         "jiraLinkSourceUnavailable": "无法关联此 Jira 议题。请重新连接 Jira 或选择匹配的站点，然后重试。",
         "loadPageUnreachable": "第 {{value0}} 页超出了 GitHub 搜索可返回的范围。",
         "loadPageFailed": "无法从 GitHub 加载第 {{value0}} 页。",
-        "loadPageNoMoreResults": "第 {{value0}} 页没有更多结果。"
+        "loadPageNoMoreResults": "第 {{value0}} 页没有更多结果。",
+        "gitea": {
+          "refreshIssues": "刷新 Gitea 议题",
+          "allMilestones": "所有里程碑",
+          "searchIssues": "搜索议题..."
+        },
+        "gitlab": {
+          "searchItems": "搜索项目..."
+        }
       },
       "Terminal": {
         "73768427cf": "关闭",
@@ -9013,7 +9027,8 @@
             "setup": "设置",
             "apiKey": "API 密钥",
             "skill": "技能",
-            "connect": "连接"
+            "connect": "连接",
+            "gitea": "Gitea"
           }
         },
         "terminal": {
@@ -13772,6 +13787,24 @@
                 }
               }
             }
+          },
+          "WebBrowserPane": {
+            "more": "更多选项",
+            "copy": {
+              "url": "复制网址"
+            },
+            "open": {
+              "tab": "在浏览器标签页中打开"
+            },
+            "go": {
+              "to": "前往"
+            },
+            "invalid": {
+              "url": "无效的网址"
+            },
+            "frame": {
+              "title": "浏览器"
+            }
           }
         }
       },
@@ -14418,7 +14451,9 @@
         "noGitLabMrsTitle": "没有 GitLab 合并请求",
         "noGitLabMrsDescription": "没有 GitLab MR 匹配此筛选器。",
         "noGitLabWorkTitle": "没有 GitLab 工作",
-        "noGitLabWorkDescription": "没有 GitLab 工作匹配此筛选器。"
+        "noGitLabWorkDescription": "没有 GitLab 工作匹配此筛选器。",
+        "noGiteaIssuesTitle": "没有 Gitea 议题",
+        "noGiteaIssuesDescription": "没有 Gitea 议题匹配此筛选器。"
       },
       "taskSourceContextSummary": {
         "sourceUnavailable": "{{value0}} 来源不可用：{{value1}}",
@@ -14556,6 +14591,9 @@
         "description": "在侧边栏中将此工作区嵌套到另一个工作树下。不会更改基础分支。",
         "searchPlaceholder": "搜索工作树...",
         "noMatches": "无匹配项。"
+      },
+      "taskPageLocalizedOptions": {
+        "gitea": "Gitea"
       }
     },
     "i18n": {

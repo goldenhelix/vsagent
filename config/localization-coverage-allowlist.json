@@ -89,5 +89,33 @@
     "text": "ghostty",
     "dynamic": false,
     "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/app-shell/TitlebarLeftControls.tsx",
+    "kind": "jsx-attribute:aria-label",
+    "text": "VSAgent",
+    "dynamic": false,
+    "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/app-shell/TitlebarLeftControls.tsx",
+    "kind": "jsx-expression",
+    "text": "VSAgent",
+    "dynamic": false,
+    "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/components/Landing.tsx",
+    "kind": "jsx-attribute:alt",
+    "text": "VSAgent logo",
+    "dynamic": false,
+    "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/components/Landing.tsx",
+    "kind": "jsx-expression",
+    "text": "VSAgent",
+    "dynamic": false,
+    "count": 1
   }
 ]
