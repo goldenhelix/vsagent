@@ -148,6 +148,11 @@ export class RuntimeRpcWebSocketDispatch extends RuntimeRpcRequestAdmission {
               }
             : undefined,
         pairing: pairingContext,
+        // Why: minting an offer hands out a runtime-scope credential, so only a device that already
+        // holds one may ask for another. This scope gate is the security boundary for the feature;
+        // the mobile method allowlist refuses the call a second time.
+        createRuntimePairingOffer:
+          device.scope === 'runtime' ? (this.mintRuntimePairingOffer ?? undefined) : undefined,
         signal: abortRegistration?.signal,
         sendBinary,
         registerBinaryStreamHandler: (streamId, handler) =>

@@ -9,6 +9,10 @@ import type {
 import { encodePairingOffer, PAIRING_OFFER_VERSION } from '../../../shared/pairing'
 import { boundedPairingOfferName } from '../../../shared/mobile-relay-pairing-offer'
 import type { RuntimePairingReach } from '../../../shared/runtime-pairing-reach'
+import type {
+  RuntimePairingOfferParams,
+  RuntimePairingOfferResult
+} from '../../../shared/runtime-pairing-offer'
 import { resolveAdvertisedPairingEndpoint } from '../pairing-endpoint'
 import { RuntimeRpcNetworkExposure } from './runtime-rpc-network-exposure'
 import {
@@ -16,11 +20,24 @@ import {
   DEVICE_REGISTRY_UNAVAILABLE_GUIDANCE,
   E2EE_KEY_UNAVAILABLE_GUIDANCE,
   pairingUnavailable,
-  type MobileRelayPairingProvider,
-  type PairingOfferUnavailable
+  type MobileRelayPairingProvider
 } from './runtime-rpc-pairing-types'
 
 export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
+  // Why: publishes this mixin's minting ability to the dispatch layers above it (see RuntimeRpcState).
+  // Always runtime scope — the callers that receive it already hold a runtime-scope credential.
+  protected override mintRuntimePairingOffer = (
+    args: RuntimePairingOfferParams
+  ): RuntimePairingOfferResult =>
+    this.createPairingOffer({
+      address: args.address,
+      rotate: args.rotate,
+      scope: 'runtime',
+      // Why: STA-2370 — a caller that declined off-host reach must not have that choice dropped on the
+      // way in, or its grant re-publishes the runtime on every interface one restart later.
+      ...(args.reach ? { reach: args.reach } : {})
+    })
+
   getDeviceRegistry(): DeviceRegistry | null {
     return this.deviceRegistry
   }
@@ -121,16 +138,7 @@ export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
     // Why: STA-2370 — recorded on the grant so a "This computer only" client reconnecting cannot make the
     // next launch bind every interface. Defaults to network reach, which is what every other caller means.
     reach?: RuntimePairingReach
-  }):
-    | PairingOfferUnavailable
-    | {
-        available: true
-        pairingUrl: string
-        endpoint: string
-        deviceId: string
-        webClientUrl: string | null
-        serverName: string | null
-      } {
+  }): RuntimePairingOfferResult {
     if (this.pairingInitializationFailure) {
       return this.pairingInitializationFailure
     }
@@ -149,7 +157,13 @@ export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
       return pairingUnavailable('e2ee_key_unavailable', E2EE_KEY_UNAVAILABLE_GUIDANCE)
     }
 
-    const advertised = resolveAdvertisedPairingEndpoint(rawEndpoint, args.address)
+    // Why: an offer minted after startup (`orca pairing-url`, the web client's Share button) carries no
+    // address of its own; without the serve's configured one it would advertise an unreachable 127.0.0.1.
+    // Blank counts as absent — a caller with nothing to advertise sends '' (an empty picker), not null.
+    const advertised = resolveAdvertisedPairingEndpoint(
+      rawEndpoint,
+      args.address?.trim() ? args.address : this.defaultPairingAddress
+    )
     if (!advertised.ok) {
       return pairingUnavailable(advertised.reason, advertised.guidance)
     }

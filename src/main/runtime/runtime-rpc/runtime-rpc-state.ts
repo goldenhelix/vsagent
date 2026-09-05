@@ -29,6 +29,10 @@ import type {
   PairingOfferUnavailable
 } from './runtime-rpc-pairing-types'
 import { DEFAULT_WS_PORT } from './runtime-rpc-pairing-types'
+import type {
+  RuntimePairingOfferParams,
+  RuntimePairingOfferResult
+} from '../../../shared/runtime-pairing-offer'
 
 export class RuntimeRpcState {
   protected readonly runtime: OrcaRuntimeService
@@ -87,6 +91,12 @@ export class RuntimeRpcState {
     request: Promise<MobilePairingOffer>
   } | null = null
   protected mobilePairingOfferGeneration = 0
+  // Why: the two dispatch layers hand this capability to RPC handlers, but `createPairingOffer` is
+  // implemented by the pairing mixin further down the chain — it installs itself here so the layers
+  // above never reach for a method their own type cannot see.
+  protected mintRuntimePairingOffer:
+    | ((args: RuntimePairingOfferParams) => RuntimePairingOfferResult)
+    | null = null
   protected onUnpairedDeviceAuthFailure: (() => void) | null = null
   protected unpairedDeviceAuthThrottle: UnpairedDeviceAuthThrottle | null = null
   protected readonly binaryMessageRouter = new RuntimeBinaryMessageRouter()

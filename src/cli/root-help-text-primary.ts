@@ -7,6 +7,7 @@ export const ROOT_HELP_TEXT_PRIMARY = [
   '  open                      Launch Orca and wait for the runtime to be reachable',
   '  serve                     Start a headless Orca runtime server',
   '  status                    Show app/runtime/graph readiness',
+  '  pairing-url               Print a pairing URL to add this runtime elsewhere',
   '',
   'Diagnostics:',
   '  diagnostics memory        Collect a memory snapshot for Orca and managed terminals',

@@ -4,6 +4,30 @@ import { formatCliStatus, formatStatus, printResult } from '../format'
 import { RuntimeClientError, serveOrcaApp } from '../runtime-client'
 import { stripElectronRunAsNode } from '../runtime/launch'
 import { getServeOptionValidationError } from '../../shared/serve-option-validation'
+import type { RuntimePairingOfferResult } from '../../shared/runtime-pairing-offer'
+
+function formatRuntimePairingOffer(offer: RuntimePairingOfferResult): string {
+  // Why: match the name the operator invoked — the vsagent launcher sets VSAGENT_BRAND_CLI, the same
+  // seam the root help text uses. Both names run this one CLI.
+  const bin = process.env.VSAGENT_BRAND_CLI === '1' ? 'vsagent' : 'orca'
+  if (!offer.available) {
+    return [`Pairing is unavailable (${offer.reason}).`, offer.guidance].join('\n')
+  }
+  const lines = [`Pairing URL: ${offer.pairingUrl}`, `Endpoint:    ${offer.endpoint}`]
+  if (offer.webClientUrl) {
+    lines.push(`Web client:  ${offer.webClientUrl}`)
+  }
+  const name = offer.serverName ?? '<name>'
+  lines.push(
+    '',
+    'In a web client: Settings → Remote Servers → Add Server, paste the pairing URL',
+    "  (adds this server's projects alongside the current ones).",
+    '',
+    `For CLI access from another host (\`${bin} --environment ${name} ...\`):`,
+    `  ${bin} environment add --name ${name} --pairing-code '${offer.pairingUrl}'`
+  )
+  return lines.join('\n')
+}
 
 function envRecord(): Record<string, string> {
   // Why: the `orca` launcher runs Orca's Electron binary as Node, so this CLI
@@ -58,8 +82,8 @@ function getOptionalServePort(flags: Map<string, string | boolean>): string | nu
   return rawPort
 }
 
-/** Same missing-value contract as --port, for the serve flags that carry a free-form string. */
-function getOptionalServeString(flags: Map<string, string | boolean>, name: string): string | null {
+/** Same missing-value contract as --port, for the flags that carry a free-form string. */
+function getOptionalStringFlag(flags: Map<string, string | boolean>, name: string): string | null {
   if (!flags.has(name)) {
     return null
   }
@@ -111,8 +135,8 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
     const mobilePairing = flags.get('mobile-pairing') === true
     const recipeJson = flags.get('recipe-json') === true
     const https = flags.get('https') === true
-    const certPath = getOptionalServeString(flags, 'cert')
-    const keyPath = getOptionalServeString(flags, 'key')
+    const certPath = getOptionalStringFlag(flags, 'cert')
+    const keyPath = getOptionalStringFlag(flags, 'key')
     const validationError = getServeOptionValidationError({
       noPairing,
       mobilePairing,
@@ -126,8 +150,8 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       throw new RuntimeClientError('invalid_argument', validationError)
     }
     const port = getOptionalServePort(flags)
-    const host = getOptionalServeString(flags, 'host')
-    const serverName = getOptionalServeString(flags, 'name')
+    const host = getOptionalStringFlag(flags, 'host')
+    const serverName = getOptionalStringFlag(flags, 'name')
     const pairingAddressValue = flags.get('pairing-address')
     const exitCode = await serveOrcaApp({
       json,
@@ -151,5 +175,16 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       process.exitCode = 1
     }
     printResult(result, json, formatStatus)
+  },
+  'pairing-url': async ({ client, flags, json }) => {
+    const address = getOptionalStringFlag(flags, 'address')
+    const result = await client.call<RuntimePairingOfferResult>('pairing.createRuntimeOffer', {
+      address,
+      rotate: flags.get('rotate') === true
+    })
+    if (!json && !result.result.available) {
+      process.exitCode = 1
+    }
+    printResult(result, json, formatRuntimePairingOffer)
   }
 }

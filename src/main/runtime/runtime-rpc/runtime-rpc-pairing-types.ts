@@ -5,7 +5,10 @@ import type { E2EEKeypair } from '../e2ee-keypair'
 import type { MobileSocketTransportMetadata } from '../rpc/mobile-socket-wiring'
 import type { PairingRelay } from '../../../shared/mobile-relay-pairing-offer'
 import type { MobilePairingConnectionMode } from '../../../shared/mobile-pairing-connection-mode'
-import type { MobileRelayMintFailure } from '../../../shared/mobile-relay-mint-failure'
+import type {
+  PairingOfferUnavailable,
+  PairingOfferUnavailableReason
+} from '../../../shared/runtime-pairing-offer'
 import type {
   DeviceCredentialInstalled,
   PairingGetEndpointsParams,
@@ -75,21 +78,12 @@ export type OrcaRuntimeRpcServerOptions = {
   methods?: readonly RpcAnyMethod[]
 }
 
-export type PairingOfferUnavailableReason =
-  | 'websocket_unavailable'
-  | 'device_registry_unavailable'
-  | 'e2ee_key_unavailable'
-  | 'invalid_advertised_endpoint'
-  | 'relay_mint_failed'
-  | 'network_exposure_failed'
-
-export type PairingOfferUnavailable = {
-  available: false
-  reason: PairingOfferUnavailableReason
-  guidance: string
-  /** Present when an Anywhere mint refused to silently fall back to LAN-only. */
-  relayFailure?: MobileRelayMintFailure
-}
+// Why: the failure shape now travels to the CLI over `pairing.createRuntimeOffer`, so it is defined
+// in shared/ (src/cli cannot import src/main) and re-exported here for the existing main callers.
+export type {
+  PairingOfferUnavailable,
+  PairingOfferUnavailableReason
+} from '../../../shared/runtime-pairing-offer'
 
 export type MobilePairingOfferAvailable = {
   available: true
