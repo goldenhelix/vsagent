@@ -14,9 +14,20 @@ export type GitLabRepoSelectorArgs = {
   repoOwnerExecutionHostId?: string
 }
 
-function findRegisteredGitLabRepo(args: GitLabRepoSelectorArgs, store: Store): Repo | undefined {
+// Why: Gitea reuses the GitLab issue contract end to end (same selector args,
+// same list normalizers, same GitLabWorkItem rows), so it shares this guard
+// instead of duplicating it — only the source-context provider match differs.
+const FORGE_SOURCE_PROVIDER_LABELS = { gitlab: 'GitLab', gitea: 'Gitea' } as const
+
+export type ForgeSourceProvider = keyof typeof FORGE_SOURCE_PROVIDER_LABELS
+
+function findRegisteredForgeRepo(
+  args: GitLabRepoSelectorArgs,
+  store: Store,
+  provider: ForgeSourceProvider
+): Repo | undefined {
   const sourceRepoId =
-    args.sourceContext?.provider === 'gitlab' ? args.sourceContext.repoId?.trim() : null
+    args.sourceContext?.provider === provider ? args.sourceContext.repoId?.trim() : null
   const repoId = args.repoId?.trim() || sourceRepoId || null
   if (args.repoOwnerExecutionHostId) {
     const resolvedRepoPath = resolve(args.repoPath)
@@ -44,16 +55,22 @@ function findRegisteredGitLabRepo(args: GitLabRepoSelectorArgs, store: Store): R
 // must never operate on a path the user hasn't explicitly registered as
 // a repo (filesystem-auth boundary). Source context adds a host check so a
 // task fetched from one machine cannot mutate a same-path repo on another.
-export function assertRegisteredRepo(args: GitLabRepoSelectorArgs, store: Store): Repo {
-  const repo = findRegisteredGitLabRepo(args, store)
+export function assertRegisteredRepo(
+  args: GitLabRepoSelectorArgs,
+  store: Store,
+  provider: ForgeSourceProvider = 'gitlab'
+): Repo {
+  const repo = findRegisteredForgeRepo(args, store, provider)
   if (!repo) {
     throw new Error('Access denied: unknown repository path')
   }
   if (
-    args.sourceContext?.provider === 'gitlab' &&
+    args.sourceContext?.provider === provider &&
     args.sourceContext.hostId !== getRepoExecutionHostId(repo)
   ) {
-    throw new Error('Access denied: GitLab source host does not match repository host')
+    throw new Error(
+      `Access denied: ${FORGE_SOURCE_PROVIDER_LABELS[provider]} source host does not match repository host`
+    )
   }
   return repo
 }

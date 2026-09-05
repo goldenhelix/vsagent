@@ -117,6 +117,7 @@ export class OrcaRuntimeWithStateFields extends OrcaRuntimeWithLinearCommands {
     installRuntimeReviewCommandSurface(runtime, {
       gitLabQueries: this.gitLabQueryCommands,
       gitLabMutations: this.gitLabMutationCommands,
+      gitea: this.giteaCommands,
       gitHubReviewQueries: this.gitHubReviewQueries,
       gitHubReviewMutations: this.gitHubReviewMutations,
       gitHubIssueComments: this.gitHubIssueComments,

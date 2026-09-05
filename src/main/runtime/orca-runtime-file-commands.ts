@@ -11,6 +11,7 @@ import { RuntimeGitHubRepositoryQueryCommands } from './runtime-github-repositor
 import { RuntimeGitLabQueryCommands } from './runtime-gitlab-query-commands'
 import { recordGitLabProjectRecent } from '../gitlab/gitlab-project-recents'
 import { RuntimeGitLabMutationCommands } from './runtime-gitlab-mutation-commands'
+import { RuntimeGiteaCommands } from './runtime-gitea-commands'
 import { RuntimeGitHubReviewQueryCommands } from './runtime-github-review-query-commands'
 import { RuntimeGitHubReviewMutationCommands } from './runtime-github-review-mutation-commands'
 import { RuntimeGitHubIssueCommentCommands } from './runtime-github-issue-comment-commands'
@@ -174,6 +175,11 @@ export class OrcaRuntimeWithFileCommands extends OrcaRuntimeWithPreservedBranchC
   })
 
   protected readonly gitLabMutationCommands = new RuntimeGitLabMutationCommands({
+    resolveRepo: (selector) => this.resolveRepoSelector(selector),
+    getLocalGitArgs: (repo) => this.getLocalGitExecutionOptionArgs(repo)
+  })
+
+  protected readonly giteaCommands = new RuntimeGiteaCommands({
     resolveRepo: (selector) => this.resolveRepoSelector(selector),
     getLocalGitArgs: (repo) => this.getLocalGitExecutionOptionArgs(repo)
   })
