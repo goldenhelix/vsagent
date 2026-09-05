@@ -85,6 +85,9 @@ export function useSmartWorkspaceFieldAvailability({
     () =>
       filterAvailableTaskProviders(['github', 'gitlab', 'linear'], {
         gitlabInstalled: gitlabSourceAvailable,
+        // Why: the Smart name field's provider list omits Gitea, so its
+        // availability flag is irrelevant here — keep the contract satisfied.
+        giteaConfigured: false,
         linearConnected: linearStatus.connected === true
       }),
     [gitlabSourceAvailable, linearStatus.connected]

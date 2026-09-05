@@ -20,6 +20,7 @@ import type { Repo } from './repo-types'
 export type {
   GitHubTaskProviderIdentity,
   GitLabTaskProviderIdentity,
+  GiteaTaskProviderIdentity,
   JiraTaskProviderIdentity,
   LinearTaskProviderIdentity,
   TaskProviderIdentity
@@ -206,6 +207,7 @@ function normalizeTaskProvider(value: unknown): TaskProvider | null {
   switch (value) {
     case 'github':
     case 'gitlab':
+    case 'gitea':
     case 'linear':
     case 'jira':
       return value
