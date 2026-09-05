@@ -1,10 +1,18 @@
 import type { PublicKnownRuntimeEnvironment } from '../../../shared/runtime-environments'
 import type { WebPairingOffer } from './web-pairing'
+import {
+  readWebRuntimeEnvironments,
+  saveWebRuntimeEnvironments
+} from './web-runtime-environment-registry'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { translate } from '@/i18n/i18n'
 
 export type StoredWebRuntimeEnvironment = Omit<PublicKnownRuntimeEnvironment, 'endpoints'> & {
   compatibleEnvironmentIds?: string[]
+  // Why: 'origin' = paired from this page's own pairing fragment (the serving
+  // app itself), 'manual' = deliberately added via Add Server. Origin pairings
+  // of an ephemeral deployment are prunable lineage; manual ones must survive.
+  pairedVia?: 'origin' | 'manual'
   endpoints: {
     id: string
     kind: 'websocket'
@@ -15,60 +23,12 @@ export type StoredWebRuntimeEnvironment = Omit<PublicKnownRuntimeEnvironment, 'e
   }[]
 }
 
-const ENVIRONMENT_STORAGE_KEY = 'orca.web.runtimeEnvironment.v1'
-
-export function readStoredWebRuntimeEnvironment(): StoredWebRuntimeEnvironment | null {
-  const raw = window.localStorage.getItem(ENVIRONMENT_STORAGE_KEY)
-  if (!raw) {
-    return null
-  }
-  try {
-    const parsed = JSON.parse(raw) as StoredWebRuntimeEnvironment
-    if (
-      !parsed.id ||
-      !parsed.name ||
-      !Array.isArray(parsed.endpoints) ||
-      parsed.endpoints.length === 0
-    ) {
-      return null
-    }
-    const compatibleEnvironmentIds = Array.isArray(parsed.compatibleEnvironmentIds)
-      ? parsed.compatibleEnvironmentIds.filter(
-          (environmentId): environmentId is string => typeof environmentId === 'string'
-        )
-      : []
-    const pairedDeviceId =
-      typeof parsed.pairedDeviceId === 'string' && parsed.pairedDeviceId.trim().length > 0
-        ? parsed.pairedDeviceId.trim()
-        : null
-    const {
-      compatibleEnvironmentIds: _unvalidatedIds,
-      pairedDeviceId: _unvalidatedDeviceId,
-      ...environment
-    } = parsed
-    return {
-      ...environment,
-      ...(pairedDeviceId ? { pairedDeviceId } : {}),
-      ...(compatibleEnvironmentIds.length > 0 ? { compatibleEnvironmentIds } : {})
-    }
-  } catch {
-    return null
-  }
-}
-
-export function saveStoredWebRuntimeEnvironment(environment: StoredWebRuntimeEnvironment): void {
-  window.localStorage.setItem(ENVIRONMENT_STORAGE_KEY, JSON.stringify(environment))
-}
-
-export function clearStoredWebRuntimeEnvironment(): void {
-  window.localStorage.removeItem(ENVIRONMENT_STORAGE_KEY)
-}
-
 export function createStoredWebRuntimeEnvironment(args: {
   name: string
   offer: WebPairingOffer
   previousEnvironment?: StoredWebRuntimeEnvironment | null
   connectionDependency?: 'ssh-tunnel'
+  pairedVia?: 'origin' | 'manual'
 }): StoredWebRuntimeEnvironment {
   const id = `web-${createBrowserUuid()}`
   const now = Date.now()
@@ -80,6 +40,7 @@ export function createStoredWebRuntimeEnvironment(args: {
     updatedAt: now,
     lastUsedAt: null,
     runtimeId: null,
+    ...(args.pairedVia ? { pairedVia: args.pairedVia } : {}),
     ...(args.offer.pairedDeviceId ? { pairedDeviceId: args.offer.pairedDeviceId } : {}),
     ...(args.connectionDependency ? { connectionDependency: args.connectionDependency } : {}),
     ...(compatibleEnvironmentIds.length > 0 ? { compatibleEnvironmentIds } : {}),
@@ -110,7 +71,11 @@ function getCompatibleEnvironmentIds(
 export function redactStoredWebRuntimeEnvironment(
   environment: StoredWebRuntimeEnvironment
 ): PublicKnownRuntimeEnvironment {
-  const { compatibleEnvironmentIds: _compatibleEnvironmentIds, ...publicEnvironment } = environment
+  const {
+    compatibleEnvironmentIds: _compatibleEnvironmentIds,
+    pairedVia: _pairedVia,
+    ...publicEnvironment
+  } = environment
   return {
     ...publicEnvironment,
     endpoints: environment.endpoints.map(
@@ -151,7 +116,14 @@ export function updateStoredEnvironmentRuntimeId(
     updatedAt: Date.now(),
     lastUsedAt: Date.now()
   }
-  saveStoredWebRuntimeEnvironment(next)
+  const environments = readWebRuntimeEnvironments()
+  // Why: a response that lands after its server was removed must not resurrect the pairing.
+  if (!environments.some((entry) => entry.id === environment.id)) {
+    return next
+  }
+  saveWebRuntimeEnvironments(
+    environments.map((entry) => (entry.id === environment.id ? next : entry))
+  )
   return next
 }
 

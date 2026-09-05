@@ -4,28 +4,31 @@ import type { RuntimeRpcResponse } from '../../../../shared/runtime-rpc-envelope
 import type { Worktree } from '../../../../shared/worktree/types'
 import { WebRuntimeClient } from '../web-runtime-client'
 import {
-  clearStoredWebRuntimeEnvironment,
   getPreferredWebPairingOffer,
-  readStoredWebRuntimeEnvironment,
   updateStoredEnvironmentRuntimeId
 } from '../web-runtime-environment'
 import type { StoredWebRuntimeEnvironment } from '../web-runtime-environment'
+import {
+  readActiveStoredWebRuntimeEnvironment,
+  readWebRuntimeEnvironments,
+  removeStoredWebRuntimeEnvironment
+} from '../web-runtime-environment-registry'
 import { translate } from '@/i18n/i18n'
 
 export const webRuntimeState: {
   activeEnvironment: StoredWebRuntimeEnvironment | null
   worktreeVisibilityDefaultsRuntimeEnvironmentId: string | null
   worktreeVisibilityDefaultsRuntimeValue: WorktreeVisibilityDefaults | null
-  activeClient: WebRuntimeClient | null
-  activeClientEnvironmentId: string | null
+  // Why (VSAgent): one live client per paired server, so a second server's
+  // projects load without evicting the first server's socket.
+  clientsByEnvironmentId: Map<string, WebRuntimeClient>
   cachedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null
   cachedDetectedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null
 } = {
-  activeEnvironment: readStoredWebRuntimeEnvironment(),
+  activeEnvironment: readActiveStoredWebRuntimeEnvironment(),
   worktreeVisibilityDefaultsRuntimeEnvironmentId: null,
   worktreeVisibilityDefaultsRuntimeValue: null,
-  activeClient: null,
-  activeClientEnvironmentId: null,
+  clientsByEnvironmentId: new Map(),
   cachedWorktrees: null,
   cachedDetectedWorktrees: null
 }
@@ -45,32 +48,50 @@ export function getClientForEnvironment(
   if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
     throw new Error('runtime_manually_disconnected')
   }
-  if (
-    !webRuntimeState.activeClient ||
-    webRuntimeState.activeClientEnvironmentId !== environment.id
-  ) {
-    webRuntimeState.activeClient?.close()
-    webRuntimeState.activeClient = new WebRuntimeClient(getPreferredWebPairingOffer(environment))
-    webRuntimeState.activeClientEnvironmentId = environment.id
+  const existing = webRuntimeState.clientsByEnvironmentId.get(environment.id)
+  if (existing) {
+    return existing
   }
-  return webRuntimeState.activeClient
+  const client = new WebRuntimeClient(getPreferredWebPairingOffer(environment))
+  webRuntimeState.clientsByEnvironmentId.set(environment.id, client)
+  return client
 }
 
-export function closeActiveRuntimeClients(): void {
-  webRuntimeState.activeClient?.close()
-  webRuntimeState.activeClient = null
-  webRuntimeState.activeClientEnvironmentId = null
+export function peekRuntimeClientForEnvironment(environmentId: string): WebRuntimeClient | null {
+  return webRuntimeState.clientsByEnvironmentId.get(environmentId) ?? null
+}
+
+export function closeRuntimeClientForEnvironment(environmentId: string): void {
+  const client = webRuntimeState.clientsByEnvironmentId.get(environmentId)
+  if (!client) {
+    return
+  }
+  client.close()
+  webRuntimeState.clientsByEnvironmentId.delete(environmentId)
   invalidateRuntimeWorktreeCaches()
 }
 
-export function disconnectActiveRuntimeEnvironment(): void {
-  closeActiveRuntimeClients()
+export function disconnectRuntimeEnvironment(environmentId: string): void {
+  manuallyDisconnectedEnvironmentIds.add(environmentId)
+  closeRuntimeClientForEnvironment(environmentId)
 }
 
-export function removeActiveRuntimeEnvironment(): void {
-  disconnectActiveRuntimeEnvironment()
-  clearStoredWebRuntimeEnvironment()
-  webRuntimeState.activeEnvironment = null
+/** Un-pair one server: drops its live client and its stored device token. */
+export function forgetRuntimeEnvironment(environmentId: string): void {
+  closeRuntimeClientForEnvironment(environmentId)
+  manuallyDisconnectedEnvironmentIds.delete(environmentId)
+  removeStoredWebRuntimeEnvironment(environmentId)
+  refreshActiveRuntimeEnvironment()
+}
+
+export function refreshActiveRuntimeEnvironment(): StoredWebRuntimeEnvironment | null {
+  const previousId = webRuntimeState.activeEnvironment?.id ?? null
+  webRuntimeState.activeEnvironment = readActiveStoredWebRuntimeEnvironment()
+  if ((webRuntimeState.activeEnvironment?.id ?? null) !== previousId) {
+    // Why: the worktree caches describe the focused server only.
+    invalidateRuntimeWorktreeCaches()
+  }
+  return webRuntimeState.activeEnvironment
 }
 
 export function manuallyDisconnectedResponse(
@@ -91,28 +112,32 @@ export function manuallyDisconnectedResponse(
 }
 
 export function resolveEnvironment(selector: string): StoredWebRuntimeEnvironment {
-  const environment = requireActiveEnvironment()
-  if (selector === environment.id || selector === environment.name || selector === 'active') {
-    return environment
+  if (selector === 'active') {
+    return requireActiveEnvironment()
   }
-  if (environment.compatibleEnvironmentIds?.includes(selector)) {
-    return environment
+  const environments = readWebRuntimeEnvironments()
+  const match =
+    environments.find((entry) => entry.id === selector || entry.name === selector) ??
+    // Why: a re-pair of the same server key mints a new id while persisted tab
+    // and terminal selectors still name the old one.
+    environments.find((entry) => entry.compatibleEnvironmentIds?.includes(selector))
+  if (match) {
+    return match
   }
   throw new Error(`Unknown Orca runtime environment: ${selector}`)
 }
 
 export function requireActiveEnvironment(): StoredWebRuntimeEnvironment {
-  webRuntimeState.activeEnvironment =
-    webRuntimeState.activeEnvironment ?? readStoredWebRuntimeEnvironment()
-  if (!webRuntimeState.activeEnvironment) {
+  const environment = requireActiveEnvironmentOrNull()
+  if (!environment) {
     throw new Error('Pair this web client with an Orca server first.')
   }
-  return webRuntimeState.activeEnvironment
+  return environment
 }
 
 export function requireActiveEnvironmentOrNull(): StoredWebRuntimeEnvironment | null {
   webRuntimeState.activeEnvironment =
-    webRuntimeState.activeEnvironment ?? readStoredWebRuntimeEnvironment()
+    webRuntimeState.activeEnvironment ?? readActiveStoredWebRuntimeEnvironment()
   return webRuntimeState.activeEnvironment
 }
 
@@ -126,9 +151,6 @@ export function updateEnvironmentFromResponse(
   environment: StoredWebRuntimeEnvironment,
   response: RuntimeRpcResponse<unknown>
 ): void {
-  if (webRuntimeState.activeEnvironment?.id !== environment.id) {
-    return
-  }
   const runtimeId = response.ok ? response._meta.runtimeId : (response._meta?.runtimeId ?? null)
   const pairedDeviceId =
     response.ok &&
@@ -137,9 +159,9 @@ export function updateEnvironmentFromResponse(
     typeof (response.result as { pairedDeviceId?: unknown }).pairedDeviceId === 'string'
       ? (response.result as { pairedDeviceId: string }).pairedDeviceId
       : undefined
-  webRuntimeState.activeEnvironment = updateStoredEnvironmentRuntimeId(
-    environment,
-    runtimeId,
-    pairedDeviceId
-  )
+  // Why: every paired server keeps its own runtime metadata fresh, not just the focused one.
+  const updated = updateStoredEnvironmentRuntimeId(environment, runtimeId, pairedDeviceId)
+  if (webRuntimeState.activeEnvironment?.id === environment.id) {
+    webRuntimeState.activeEnvironment = updated
+  }
 }

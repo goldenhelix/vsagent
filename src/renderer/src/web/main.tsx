@@ -15,11 +15,16 @@ import {
   defaultWebEnvironmentName,
   readPairingInputFromLocation
 } from './web-pairing'
+import { createStoredWebRuntimeEnvironment } from './web-runtime-environment'
 import {
-  createStoredWebRuntimeEnvironment,
-  readStoredWebRuntimeEnvironment,
-  saveStoredWebRuntimeEnvironment
-} from './web-runtime-environment'
+  findWebRuntimeEnvironmentByOfferKey,
+  pruneStaleOriginPairings,
+  readWebRuntimeEnvironments,
+  upsertStoredWebRuntimeEnvironment,
+  writeActiveWebRuntimeEnvironmentId
+} from './web-runtime-environment-registry'
+import { sessionStorageKeyForHost } from './preload-api/web-workspace-session-api'
+import { toRuntimeExecutionHostId } from '../../../shared/execution-host'
 import { installWebPreloadApi } from './web-preload-api'
 import { I18nProvider } from '../i18n/I18nProvider'
 import { translate } from '../i18n/i18n'
@@ -33,7 +38,7 @@ function WebRoot(): React.JSX.Element {
   const startupDecision = useMemo(() => {
     const decision = decideWebPairingStartup({
       initialPairingInput,
-      hasStoredEnvironment: readStoredWebRuntimeEnvironment() !== null
+      hasStoredEnvironment: readWebRuntimeEnvironments().length > 0
     })
     if (
       decision.kind === 'auto-save-runtime-offer' ||
@@ -45,13 +50,29 @@ function WebRoot(): React.JSX.Element {
   }, [initialPairingInput])
   const [hasEnvironment, setHasEnvironment] = useState(() => {
     if (startupDecision.kind === 'auto-save-runtime-offer') {
-      saveStoredWebRuntimeEnvironment(
+      // Why: a URL-fragment pairing comes from the page-origin server — the
+      // browser's PRIMARY. A re-pair of the same server key keeps saved
+      // secondaries and their persisted sessions intact.
+      const stored = upsertStoredWebRuntimeEnvironment(
         createStoredWebRuntimeEnvironment({
           name: defaultWebEnvironmentName(startupDecision.offer),
           offer: startupDecision.offer,
-          previousEnvironment: readStoredWebRuntimeEnvironment()
+          previousEnvironment: findWebRuntimeEnvironmentByOfferKey(
+            startupDecision.offer.publicKeyB64
+          ),
+          pairedVia: 'origin'
         })
       )
+      writeActiveWebRuntimeEnvironmentId(stored.id)
+      // Why: ephemeral deployments mint a new backend per rebuild and re-pair
+      // through this fragment every boot; earlier same-host origin pairings are
+      // dead instances — drop them and their session state so the sidebar and
+      // Remote Hosts list stop accumulating corpses.
+      for (const removedId of pruneStaleOriginPairings(stored.id)) {
+        window.localStorage.removeItem(
+          sessionStorageKeyForHost(toRuntimeExecutionHostId(removedId))
+        )
+      }
       return true
     }
     return startupDecision.kind === 'use-stored-environment'

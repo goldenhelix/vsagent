@@ -15,6 +15,7 @@ import {
 } from './web-preferences-store'
 import type { WebSettingsApi } from './web-preferences-store'
 import {
+  refreshActiveRuntimeEnvironment,
   requireActiveEnvironmentOrNull,
   resolveEnvironment,
   webRuntimeState
@@ -95,6 +96,9 @@ export function createWebSettingsApi(): Partial<PreloadApi> {
           activeRuntimeEnvironmentId
         })
         writeStoredSettings(next, activeRuntimeEnvironmentId)
+        // Why: the focus pointer selects which paired server the active-runtime
+        // routes reach, so the cached active environment has to follow it.
+        refreshActiveRuntimeEnvironment()
         return next
       },
       updatePRBotAuthorOverride: (args) => updateRuntimePRBotAuthorOverride(args),

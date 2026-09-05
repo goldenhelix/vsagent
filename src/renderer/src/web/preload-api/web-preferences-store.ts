@@ -19,7 +19,7 @@ import {
 import { normalizeTerminalCursorStyleDefault } from '../../../../shared/terminal-cursor-style-settings'
 import { normalizeTerminalCustomThemes } from '../../../../shared/terminal-custom-themes'
 import { normalizeUiLanguage } from '../../../../shared/ui-language'
-import { readStoredWebRuntimeEnvironment } from '../web-runtime-environment'
+import { readActiveStoredWebRuntimeEnvironment } from '../web-runtime-environment-registry'
 import { mergeSettings, mergeWebUIState } from './web-preference-normalization'
 import { callRuntimeResult } from './web-runtime-calls'
 import { requireActiveEnvironmentOrNull, webRuntimeState } from './web-runtime-session'
@@ -29,7 +29,7 @@ export type WebSettingsApi = NonNullable<PreloadApi['settings']>
 
 export function getStoredSettings(): GlobalSettings {
   webRuntimeState.activeEnvironment =
-    webRuntimeState.activeEnvironment ?? readStoredWebRuntimeEnvironment()
+    webRuntimeState.activeEnvironment ?? readActiveStoredWebRuntimeEnvironment()
   const defaults = getDefaultSettings('~')
   const rawStoredSettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
   const stored = readJson<Partial<GlobalSettings>>(SETTINGS_STORAGE_KEY, {})
