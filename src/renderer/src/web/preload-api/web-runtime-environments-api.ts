@@ -1,4 +1,5 @@
 import type { PreloadApi } from '../../../../preload/api-types'
+import { toRuntimeExecutionHostId } from '../../../../shared/execution-host'
 import { parseHostAccessLink } from '../../../../shared/remote-pairing-address'
 import { verifyRemotePairingRuntimeStatus } from '../../../../shared/remote-pairing-verification'
 import type { RuntimeRpcResponse } from '../../../../shared/runtime-rpc-envelope'
@@ -8,46 +9,58 @@ import { WebRuntimeClient } from '../web-runtime-client'
 import { isWebRuntimeUnauthorizedError } from '../web-runtime-client-error'
 import {
   createStoredWebRuntimeEnvironment,
-  redactStoredWebRuntimeEnvironment,
-  saveStoredWebRuntimeEnvironment
+  redactStoredWebRuntimeEnvironment
 } from '../web-runtime-environment'
+import type { StoredWebRuntimeEnvironment } from '../web-runtime-environment'
+import {
+  findWebRuntimeEnvironmentByOfferKey,
+  getSupersededEnvironmentIds,
+  readWebRuntimeEnvironments,
+  upsertStoredWebRuntimeEnvironment
+} from '../web-runtime-environment-registry'
 import { translate } from '@/i18n/i18n'
 import { translateHostAccessLinkError } from '@/lib/remote-pairing-copy'
 import { callEnvironmentEnvelope } from './web-runtime-calls'
 import {
-  closeActiveRuntimeClients,
-  disconnectActiveRuntimeEnvironment,
+  closeRuntimeClientForEnvironment,
+  disconnectRuntimeEnvironment,
+  forgetRuntimeEnvironment,
   getClientForEnvironment,
   manuallyDisconnectedEnvironmentIds,
-  removeActiveRuntimeEnvironment,
-  requireActiveEnvironmentOrNull,
-  resolveEnvironment,
-  webRuntimeState
+  refreshActiveRuntimeEnvironment,
+  resolveEnvironment
 } from './web-runtime-session'
+import { sessionStorageKeyForHost } from './web-workspace-session-api'
+
+// Why: pairing is ADDITIVE — only the entry this pairing supersedes (a re-pair
+// of the same server key) loses its live client and its disconnect fence.
+function retireSupersededRuntimeClients(environment: StoredWebRuntimeEnvironment): void {
+  for (const environmentId of getSupersededEnvironmentIds(environment)) {
+    closeRuntimeClientForEnvironment(environmentId)
+    manuallyDisconnectedEnvironmentIds.delete(environmentId)
+  }
+}
 
 export function createRuntimeEnvironmentsApi(): NonNullable<
   Partial<PreloadApi>['runtimeEnvironments']
 > {
   return {
-    list: async () => {
-      const environment = requireActiveEnvironmentOrNull()
-      return environment ? [redactStoredWebRuntimeEnvironment(environment)] : []
-    },
+    list: async () => readWebRuntimeEnvironments().map(redactStoredWebRuntimeEnvironment),
     addFromPairingCode: async ({ name, pairingCode }) => {
       const offer = parseWebPairingInput(pairingCode)
       if (!offer) {
         throw new Error('Invalid Orca pairing code.')
       }
-      const previousEnvironment = webRuntimeState.activeEnvironment
-      closeActiveRuntimeClients()
-      webRuntimeState.activeEnvironment = createStoredWebRuntimeEnvironment({
+      const environment = createStoredWebRuntimeEnvironment({
         name,
         offer,
-        previousEnvironment
+        previousEnvironment: findWebRuntimeEnvironmentByOfferKey(offer.publicKeyB64),
+        pairedVia: 'manual'
       })
-      manuallyDisconnectedEnvironmentIds.clear()
-      saveStoredWebRuntimeEnvironment(webRuntimeState.activeEnvironment)
-      return { environment: redactStoredWebRuntimeEnvironment(webRuntimeState.activeEnvironment) }
+      upsertStoredWebRuntimeEnvironment(environment)
+      retireSupersededRuntimeClients(environment)
+      refreshActiveRuntimeEnvironment()
+      return { environment: redactStoredWebRuntimeEnvironment(environment) }
     },
     verifyAndAddFromPairingCode: async ({ name, pairingCode, allowLoopback }) => {
       const parsed = parseHostAccessLink(pairingCode)
@@ -125,14 +138,17 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
         ...createStoredWebRuntimeEnvironment({
           name,
           offer: parsed.value.pairing,
-          previousEnvironment: webRuntimeState.activeEnvironment,
+          previousEnvironment: findWebRuntimeEnvironmentByOfferKey(
+            parsed.value.pairing.publicKeyB64
+          ),
+          pairedVia: 'manual',
           ...(usesSshTunnel ? { connectionDependency: 'ssh-tunnel' as const } : {})
         }),
         ...(runtimeStatus.pairedDeviceId ? { pairedDeviceId: runtimeStatus.pairedDeviceId } : {})
       }
-      // Why: a browser storage failure must leave the currently active host usable.
+      // Why: a browser storage failure must leave every already-paired host usable.
       try {
-        saveStoredWebRuntimeEnvironment(nextEnvironment)
+        upsertStoredWebRuntimeEnvironment(nextEnvironment)
       } catch {
         return {
           ok: false,
@@ -143,9 +159,8 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
           )
         }
       }
-      manuallyDisconnectedEnvironmentIds.clear()
-      closeActiveRuntimeClients()
-      webRuntimeState.activeEnvironment = nextEnvironment
+      retireSupersededRuntimeClients(nextEnvironment)
+      refreshActiveRuntimeEnvironment()
       return {
         ok: true,
         environment: redactStoredWebRuntimeEnvironment(nextEnvironment),
@@ -156,18 +171,17 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
       redactStoredWebRuntimeEnvironment(resolveEnvironment(selector)),
     remove: async ({ selector }) => {
       const environment = resolveEnvironment(selector)
-      if (webRuntimeState.activeEnvironment?.id === environment.id) {
-        removeActiveRuntimeEnvironment()
-      }
-      manuallyDisconnectedEnvironmentIds.delete(environment.id)
+      forgetRuntimeEnvironment(environment.id)
+      // Why: the removed server's persisted workspace session would otherwise
+      // linger in localStorage with no host left to describe it.
+      window.localStorage.removeItem(
+        sessionStorageKeyForHost(toRuntimeExecutionHostId(environment.id))
+      )
       return { removed: redactStoredWebRuntimeEnvironment(environment) }
     },
     disconnect: async ({ selector }) => {
       const environment = resolveEnvironment(selector)
-      if (webRuntimeState.activeEnvironment?.id === environment.id) {
-        manuallyDisconnectedEnvironmentIds.add(environment.id)
-        disconnectActiveRuntimeEnvironment()
-      }
+      disconnectRuntimeEnvironment(environment.id)
       return { disconnected: redactStoredWebRuntimeEnvironment(environment) }
     },
     connect: ({ selector, timeoutMs }) => {

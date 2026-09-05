@@ -112,6 +112,9 @@ describe('web repos preload API', () => {
       name: 'Server B',
       pairingCode
     })
+    await globals.window.api.settings.setActiveRuntimeEnvironmentPreference({
+      environmentId: paired.environment.id
+    })
 
     resolveCatalog({
       id: 'repo-list',
@@ -134,9 +137,15 @@ describe('web repos preload API', () => {
     await expect(catalogPromise).resolves.toMatchObject([
       { id: 'repo-a', executionHostId: 'runtime:web-server-a' }
     ])
+    // Why (VSAgent D1): pairing is additive, so both servers stay listed — only
+    // the Active Server pointer moved.
     await expect(globals.window.api.runtimeEnvironments.list()).resolves.toMatchObject([
+      { id: 'web-server-a' },
       { id: paired.environment.id, name: 'Server B' }
     ])
+    await expect(
+      globals.window.api.runtimeEnvironments.resolve({ selector: 'active' })
+    ).resolves.toMatchObject({ id: paired.environment.id })
   })
 
   it.each([
@@ -327,6 +336,11 @@ describe('web worktree preload API', () => {
     const paired = await globals.window.api.runtimeEnvironments.addFromPairingCode({
       name: 'Server B',
       pairingCode: encodePairingCode({ publicKeyB64: 'server-b-key' })
+    })
+    // Why (VSAgent D1): pairing no longer evicts a server, so "the next server"
+    // is whichever one Active Server points at.
+    await globals.window.api.settings.setActiveRuntimeEnvironmentPreference({
+      environmentId: paired.environment.id
     })
     resolveServerA?.({
       id: 'server-a-list',
@@ -528,9 +542,12 @@ describe('web worktree preload API', () => {
 
     const detected = globals.window.api.worktrees.listDetected({ repoId: 'repo-1' })
     await vi.waitFor(() => expect(resolveDetected).toBeTypeOf('function'))
-    await globals.window.api.runtimeEnvironments.addFromPairingCode({
+    const paired = await globals.window.api.runtimeEnvironments.addFromPairingCode({
       name: 'Server B',
       pairingCode: encodePairingCode({ publicKeyB64: 'server-b-key' })
+    })
+    await globals.window.api.settings.setActiveRuntimeEnvironmentPreference({
+      environmentId: paired.environment.id
     })
     resolveDetected?.({
       id: 'detected-list',

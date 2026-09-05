@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import { MIN_COMPATIBLE_RUNTIME_SERVER_VERSION } from '../../../shared/protocol-version'
 import {
+  RUNTIME_ENVIRONMENT_REGISTRY_KEY,
   encodePairingCode,
   installBrowserGlobals,
+  readStoredRuntimeEnvironment,
+  readStoredRuntimeEnvironments,
   writeStoredRuntimeEnvironment
 } from './web-preload-api-test-harness'
 
@@ -23,14 +26,141 @@ describe('web runtime environment identity', () => {
     const { installWebPreloadApi } = await import('./web-preload-api')
     installWebPreloadApi()
 
-    await globals.window.api.runtimeEnvironments.addFromPairingCode({
+    const serverB = await globals.window.api.runtimeEnvironments.addFromPairingCode({
       name: 'Server B',
       pairingCode: encodePairingCode({ publicKeyB64: 'server-b-key' })
     })
 
+    // Why (VSAgent D1): pairing is additive, so the old selector still names its
+    // own server — it must never be answered by the differently keyed new one.
     await expect(
       globals.window.api.runtimeEnvironments.resolve({ selector: 'web-server-a' })
-    ).rejects.toThrow('Unknown Orca runtime environment: web-server-a')
+    ).resolves.toMatchObject({ id: 'web-server-a', name: 'Test runtime' })
+    expect(serverB.environment.id).not.toBe('web-server-a')
+    await expect(
+      globals.window.api.runtimeEnvironments.resolve({ selector: 'web-server-missing' })
+    ).rejects.toThrow('Unknown Orca runtime environment: web-server-missing')
+  })
+
+  it('pairs additional servers without evicting the ones already paired', async () => {
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage, 'web-server-a')
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const serverB = await globals.window.api.runtimeEnvironments.addFromPairingCode({
+      name: 'Server B',
+      pairingCode: encodePairingCode({ publicKeyB64: 'server-b-key' })
+    })
+
+    await expect(globals.window.api.runtimeEnvironments.list()).resolves.toMatchObject([
+      { id: 'web-server-a', name: 'Test runtime' },
+      { id: serverB.environment.id, name: 'Server B' }
+    ])
+    // The first paired server stays the active one until Active Server moves.
+    expect(globals.window.api.settings.getSync()?.activeRuntimeEnvironmentId).toBeNull()
+    await globals.window.api.settings.setActiveRuntimeEnvironmentPreference({
+      environmentId: serverB.environment.id
+    })
+    await expect(
+      globals.window.api.runtimeEnvironments.resolve({ selector: 'active' })
+    ).resolves.toMatchObject({ id: serverB.environment.id })
+  })
+
+  it('removes one paired server without disturbing the others', async () => {
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage, 'web-server-a')
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+    const serverB = await globals.window.api.runtimeEnvironments.addFromPairingCode({
+      name: 'Server B',
+      pairingCode: encodePairingCode({ publicKeyB64: 'server-b-key' })
+    })
+    const sessionKey = `orca.web.workspaceSession.v1.runtime:${encodeURIComponent(serverB.environment.id)}`
+    globals.storage.setItem(sessionKey, JSON.stringify({ activeWorktreeId: 'w-1' }))
+
+    await expect(
+      globals.window.api.runtimeEnvironments.remove({ selector: serverB.environment.id })
+    ).resolves.toMatchObject({ removed: { id: serverB.environment.id } })
+
+    await expect(globals.window.api.runtimeEnvironments.list()).resolves.toMatchObject([
+      { id: 'web-server-a' }
+    ])
+    expect(globals.storage.getItem(sessionKey)).toBeNull()
+  })
+
+  it('gives every paired server its own live client', async () => {
+    const constructed: string[] = []
+    const closed: string[] = []
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        constructor(offer: { publicKeyB64: string }) {
+          constructed.push(offer.publicKeyB64)
+          this.key = offer.publicKeyB64
+        }
+
+        key: string
+
+        call(method: string): Promise<RuntimeRpcResponse<unknown>> {
+          return Promise.resolve({
+            id: method,
+            ok: true,
+            result: {},
+            _meta: { runtimeId: `runtime-${this.key}` }
+          })
+        }
+
+        close(): void {
+          closed.push(this.key)
+        }
+      }
+    }))
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage, 'web-server-a')
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+    const serverB = await globals.window.api.runtimeEnvironments.addFromPairingCode({
+      name: 'Server B',
+      pairingCode: encodePairingCode({ publicKeyB64: 'server-b-key' })
+    })
+
+    await globals.window.api.runtimeEnvironments.call({
+      selector: 'web-server-a',
+      method: 'repos.list'
+    })
+    await globals.window.api.runtimeEnvironments.call({
+      selector: serverB.environment.id,
+      method: 'repos.list'
+    })
+    await globals.window.api.runtimeEnvironments.call({
+      selector: 'web-server-a',
+      method: 'repos.list'
+    })
+
+    expect(constructed).toEqual(['public-key', 'server-b-key'])
+    expect(closed).toEqual([])
+    expect(readStoredRuntimeEnvironment(globals.storage, 'web-server-a')).toMatchObject({
+      runtimeId: 'runtime-public-key'
+    })
+    expect(
+      readStoredRuntimeEnvironment(globals.storage, serverB.environment.id)
+    ).toMatchObject({ runtimeId: 'runtime-server-b-key' })
+  })
+
+  it('migrates the legacy single slot into the registry once', async () => {
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage, 'web-server-a')
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    await expect(globals.window.api.runtimeEnvironments.list()).resolves.toMatchObject([
+      { id: 'web-server-a' }
+    ])
+    expect(globals.storage.getItem('orca.web.runtimeEnvironment.v1')).toBeNull()
+    expect(readStoredRuntimeEnvironments(globals.storage)).toMatchObject([{ id: 'web-server-a' }])
+
+    await globals.window.api.runtimeEnvironments.remove({ selector: 'web-server-a' })
+    await expect(globals.window.api.runtimeEnvironments.list()).resolves.toEqual([])
   })
 
   it('keeps pairing state separate from generic Active Server settings writes', async () => {
@@ -69,9 +199,9 @@ describe('web runtime environment identity', () => {
     })
 
     expect(paired.environment.pairedDeviceId).toBe('paired-device-a')
-    expect(
-      JSON.parse(globals.storage.getItem('orca.web.runtimeEnvironment.v1') ?? '{}')
-    ).toMatchObject({ pairedDeviceId: 'paired-device-a' })
+    expect(readStoredRuntimeEnvironment(globals.storage)).toMatchObject({
+      pairedDeviceId: 'paired-device-a'
+    })
   })
 
   it('persists an explicit Active Server choice across unrelated web settings writes', async () => {
@@ -239,9 +369,9 @@ describe('web runtime environment identity', () => {
     ).resolves.toMatchObject({ ok: true })
     expect(clientCount).toBe(2)
     expect(calls).toEqual(['status.get', 'status.get'])
-    expect(
-      JSON.parse(globals.storage.getItem('orca.web.runtimeEnvironment.v1') ?? '{}')
-    ).toMatchObject({ pairedDeviceId: 'paired-device-a' })
+    expect(readStoredRuntimeEnvironment(globals.storage, 'web-server-a')).toMatchObject({
+      pairedDeviceId: 'paired-device-a'
+    })
   })
 
   it('fences a web runtime response that completes after manual disconnect', async () => {
@@ -361,9 +491,9 @@ describe('web runtime environment identity', () => {
     }))
     const globals = installBrowserGlobals('Linux')
     writeStoredRuntimeEnvironment(globals.storage, 'web-server-a')
-    const previousStored = globals.storage.getItem('orca.web.runtimeEnvironment.v1')
     const { installWebPreloadApi } = await import('./web-preload-api')
     installWebPreloadApi()
+    const previousStored = globals.storage.getItem(RUNTIME_ENVIRONMENT_REGISTRY_KEY)
 
     await expect(
       globals.window.api.runtimeEnvironments.verifyAndAddFromPairingCode({
@@ -371,7 +501,7 @@ describe('web runtime environment identity', () => {
         pairingCode: encodePairingCode()
       })
     ).resolves.toMatchObject({ ok: false, kind: 'protocol-incompatible' })
-    expect(globals.storage.getItem('orca.web.runtimeEnvironment.v1')).toBe(previousStored)
+    expect(globals.storage.getItem(RUNTIME_ENVIRONMENT_REGISTRY_KEY)).toBe(previousStored)
     await expect(globals.window.api.runtimeEnvironments.list()).resolves.toMatchObject([
       { id: 'web-server-a' }
     ])
@@ -470,9 +600,9 @@ describe('web runtime environment identity', () => {
       environment: { connectionDependency: 'ssh-tunnel' }
     })
     expect(call).toHaveBeenCalledOnce()
-    expect(
-      JSON.parse(globals.storage.getItem('orca.web.runtimeEnvironment.v1') ?? '{}')
-    ).toMatchObject({ connectionDependency: 'ssh-tunnel' })
+    expect(readStoredRuntimeEnvironment(globals.storage)).toMatchObject({
+      connectionDependency: 'ssh-tunnel'
+    })
   })
 
   it('returns a structured failure when the browser client cannot be constructed', async () => {
@@ -562,9 +692,9 @@ describe('web runtime environment identity', () => {
       result: { method: 'status.first' },
       _meta: { runtimeId: 'runtime-a' }
     })
-    expect(
-      JSON.parse(globals.storage.getItem('orca.web.runtimeEnvironment.v1') ?? '{}')
-    ).toMatchObject({ runtimeId: 'runtime-a' })
+    expect(readStoredRuntimeEnvironment(globals.storage, 'web-server-a')).toMatchObject({
+      runtimeId: 'runtime-a'
+    })
 
     installWebPreloadApi()
     const secondApi = globals.window.api

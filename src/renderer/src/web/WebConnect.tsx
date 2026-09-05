@@ -3,13 +3,13 @@ import { Cable, Loader2, Server, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { createStoredWebRuntimeEnvironment, isMixedContentWebSocket } from './web-runtime-environment'
 import {
-  clearStoredWebRuntimeEnvironment,
-  createStoredWebRuntimeEnvironment,
-  isMixedContentWebSocket,
-  readStoredWebRuntimeEnvironment,
-  saveStoredWebRuntimeEnvironment
-} from './web-runtime-environment'
+  readActiveStoredWebRuntimeEnvironment,
+  removeStoredWebRuntimeEnvironment,
+  upsertStoredWebRuntimeEnvironment,
+  writeActiveWebRuntimeEnvironmentId
+} from './web-runtime-environment-registry'
 import { defaultWebEnvironmentName, parseWebPairingInput } from './web-pairing'
 import { WebRuntimeClient } from './web-runtime-client'
 import type { RuntimeStatus } from '../../../shared/runtime-types'
@@ -24,7 +24,7 @@ export default function WebConnect({
   initialPairingInput,
   onConnected
 }: WebConnectProps): React.JSX.Element {
-  const existingEnvironment = readStoredWebRuntimeEnvironment()
+  const existingEnvironment = readActiveStoredWebRuntimeEnvironment()
   const [name, setName] = useState(() => {
     if (existingEnvironment?.name) {
       return existingEnvironment.name
@@ -63,10 +63,13 @@ export default function WebConnect({
       return
     }
     setConnecting(true)
+    // Why: this screen only runs for the page's own (deep-linked or pasted)
+    // server, so it pairs the browser's PRIMARY — 'origin' lineage.
     const environment = createStoredWebRuntimeEnvironment({
       name,
       offer: parsedOffer,
-      previousEnvironment: existingEnvironment
+      previousEnvironment: existingEnvironment,
+      pairedVia: 'origin'
     })
     const client = new WebRuntimeClient(parsedOffer)
     try {
@@ -85,11 +88,12 @@ export default function WebConnect({
         )
         return
       }
-      saveStoredWebRuntimeEnvironment({
+      upsertStoredWebRuntimeEnvironment({
         ...environment,
         runtimeId: response._meta.runtimeId,
         lastUsedAt: Date.now()
       })
+      writeActiveWebRuntimeEnvironmentId(environment.id)
       onConnected()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -112,7 +116,12 @@ export default function WebConnect({
   }, [initialPairingInput, parsedOffer])
 
   const clear = (): void => {
-    clearStoredWebRuntimeEnvironment()
+    // Why: the button says "Clear saved server" — drop the stored active
+    // pairing (registry-aware), never the whole registry.
+    const active = readActiveStoredWebRuntimeEnvironment()
+    if (active) {
+      removeStoredWebRuntimeEnvironment(active.id)
+    }
     setPairingCode('')
     setError(null)
   }

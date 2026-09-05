@@ -52,10 +52,10 @@ import { createWebPreviewApi } from './preload-api/web-webpreview-api'
 import { createWebWorkspacePortsApi } from './preload-api/web-workspace-ports-api'
 import { createWebWorkspaceSessionApi } from './preload-api/web-workspace-session-api'
 import { createWorktreesApi } from './preload-api/web-worktrees-api'
-import { readStoredWebRuntimeEnvironment } from './web-runtime-environment'
+import { readActiveStoredWebRuntimeEnvironment } from './web-runtime-environment-registry'
 
 export function installWebPreloadApi(): void {
-  webRuntimeState.activeEnvironment = readStoredWebRuntimeEnvironment()
+  webRuntimeState.activeEnvironment = readActiveStoredWebRuntimeEnvironment()
   const webWindow = window as unknown as { __ORCA_WEB_CLIENT__?: boolean }
   webWindow.__ORCA_WEB_CLIENT__ = true
   window.electron = createFallbackProxy(['electron']) as Window['electron']

@@ -92,6 +92,28 @@ export function writeStoredRuntimeEnvironment(storage: Storage, environmentId = 
   )
 }
 
+export const RUNTIME_ENVIRONMENT_REGISTRY_KEY = 'orca.web.runtimeEnvironments.v2'
+
+/** Paired servers as persisted by the web registry (post v1 migration). */
+export function readStoredRuntimeEnvironments(storage: Storage): Record<string, unknown>[] {
+  return JSON.parse(storage.getItem(RUNTIME_ENVIRONMENT_REGISTRY_KEY) ?? '[]') as Record<
+    string,
+    unknown
+  >[]
+}
+
+export function readStoredRuntimeEnvironment(
+  storage: Storage,
+  environmentId?: string
+): Record<string, unknown> {
+  const environments = readStoredRuntimeEnvironments(storage)
+  return (
+    (environmentId
+      ? environments.find((environment) => environment.id === environmentId)
+      : environments[0]) ?? {}
+  )
+}
+
 export function encodePairingCode(overrides: Record<string, unknown> = {}): string {
   return Buffer.from(
     JSON.stringify({

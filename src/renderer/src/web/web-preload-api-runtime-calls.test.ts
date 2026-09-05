@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import {
   installBrowserGlobals,
+  readStoredRuntimeEnvironment,
   writeStoredRuntimeEnvironment
 } from './web-preload-api-test-harness'
 
@@ -50,9 +51,9 @@ describe('web preload runtime calls', () => {
       result: { value: 42 },
       _meta: { runtimeId: 'runtime-success' }
     })
-    expect(
-      JSON.parse(globals.storage.getItem('orca.web.runtimeEnvironment.v1') ?? '{}')
-    ).toMatchObject({ runtimeId: 'runtime-success' })
+    expect(readStoredRuntimeEnvironment(globals.storage, 'web-server-a')).toMatchObject({
+      runtimeId: 'runtime-success'
+    })
 
     await expect(globals.window.api.runtime.call({ method: 'runtime.failure' })).resolves.toEqual({
       id: 'runtime.failure',
@@ -60,9 +61,9 @@ describe('web preload runtime calls', () => {
       error: { code: 'remote_failure', message: 'Remote failed', data: { retry: false } },
       _meta: { runtimeId: 'runtime-failure' }
     })
-    expect(
-      JSON.parse(globals.storage.getItem('orca.web.runtimeEnvironment.v1') ?? '{}')
-    ).toMatchObject({ runtimeId: 'runtime-failure' })
+    expect(readStoredRuntimeEnvironment(globals.storage, 'web-server-a')).toMatchObject({
+      runtimeId: 'runtime-failure'
+    })
   })
 
   it('unwraps domain failures with their code after persisting failure metadata', async () => {
@@ -103,9 +104,9 @@ describe('web preload runtime calls', () => {
       throw new Error('Expected a domain Error rejection')
     }
     expect(Reflect.get(rejection, 'code')).toBe('repo_unavailable')
-    expect(
-      JSON.parse(globals.storage.getItem('orca.web.runtimeEnvironment.v1') ?? '{}')
-    ).toMatchObject({ runtimeId: 'runtime-domain-failure' })
+    expect(readStoredRuntimeEnvironment(globals.storage, 'web-server-a')).toMatchObject({
+      runtimeId: 'runtime-domain-failure'
+    })
   })
 
   it('surfaces per-environment queue overload without invoking the client', async () => {

@@ -11,11 +11,11 @@ import { callRuntimeResult } from './web-runtime-calls'
 import type { WebRuntimeEnvelopeCaller, WebRuntimeResultCaller } from './web-runtime-calls'
 import {
   getClientForEnvironment,
+  peekRuntimeClientForEnvironment,
   requireActiveEnvironment,
   requireActiveEnvironmentOrNull,
   runtimeCallQueuePool,
-  updateEnvironmentFromResponse,
-  webRuntimeState
+  updateEnvironmentFromResponse
 } from './web-runtime-session'
 import { isMissingPathError, resolveRuntimeFilePath } from './web-runtime-worktree-catalog'
 import { noopUnsubscribe } from './web-storage'
@@ -143,7 +143,7 @@ export function captureWebFileMutationSession(): {
   const client = getClientForEnvironment(environment)
   const assertCurrent = (): void => {
     if (
-      webRuntimeState.activeClient !== client ||
+      peekRuntimeClientForEnvironment(environment.id) !== client ||
       requireActiveEnvironmentOrNull()?.id !== environment.id
     ) {
       throw new Error('Runtime pairing changed; refresh and try again')
