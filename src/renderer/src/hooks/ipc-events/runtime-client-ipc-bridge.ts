@@ -27,6 +27,7 @@ import {
   getRuntimeClientEventEnvironmentIds,
   invalidateRuntimeClientEventReplay
 } from './runtime-environment-subscription-selection'
+import { isRelayedFileOpenEvent, openRelayedFileTab } from './remote-open-file-tab'
 import type { WorktreeEventRuntime } from './worktree-event-runtime'
 
 /** Backoff for re-asking status.get after a probe that failed on its own socket. */
@@ -130,6 +131,11 @@ export function registerRuntimeClientIpcBridge(
           executionHostId: toRuntimeExecutionHostId(environmentId)
         })
       )
+      return
+    }
+    // Why: a headless serve has no window of its own to take `orca file open`.
+    if (isRelayedFileOpenEvent(event)) {
+      openRelayedFileTab(environmentId, event)
       return
     }
     if (event.type === 'linearLinkedIssueUpdated') {

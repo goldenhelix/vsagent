@@ -46,6 +46,26 @@ export type RuntimeClientEvent =
       startup?: WorktreeStartupLaunch
       defaultTabs?: WorktreeDefaultTabsLaunch
     }
+  // Why: a headless `orca serve` has no desktop window to take the `file open` /
+  // `file diff` notifier call, so the instruction is relayed to paired clients
+  // and the browser/remote client opens the editor tab instead.
+  // Wire compatibility: an old client's `isRuntimeClientEvent` allow-list drops
+  // these silently, so the CLI command is a no-op there rather than a crash.
+  | {
+      type: 'openFile'
+      worktreeId: string
+      filePath: string
+      relativePath: string
+      runtimeEnvironmentId?: string
+    }
+  | {
+      type: 'openDiff'
+      worktreeId: string
+      filePath: string
+      relativePath: string
+      staged: boolean
+      runtimeEnvironmentId?: string
+    }
 
 export type RuntimeClientEventStreamMessage =
   | ({ type: 'ready'; subscriptionId: string } & {

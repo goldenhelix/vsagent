@@ -37,6 +37,11 @@ export class RuntimeClientEventBus {
     }
   }
 
+  /** Whether any client would receive an emit — the difference between "relay it" and "nobody is home". */
+  hasListeners(): boolean {
+    return this.listeners.size > 0
+  }
+
   countTerminalSideEffectConsumers(): number {
     return this.listeners.size - this.excludedTerminalSideEffectListeners.size
   }

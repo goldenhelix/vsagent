@@ -92,6 +92,11 @@ function isRuntimeClientEvent(
     message.type === 'automationsChanged' ||
     message.type === 'linearLinkedIssueUpdated' ||
     message.type === 'activateWorktree' ||
-    message.type === 'worktreeTerminalSleepState'
+    message.type === 'worktreeTerminalSleepState' ||
+    // Why: `orca file open` / `file diff` relayed from a headless serve. A host
+    // that sends these to an older client is dropped here, which is the
+    // intended degradation (no-op, not a crash).
+    message.type === 'openFile' ||
+    message.type === 'openDiff'
   )
 }

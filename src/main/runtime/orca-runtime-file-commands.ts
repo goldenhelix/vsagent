@@ -1,6 +1,7 @@
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
 import { OrcaRuntimeWithPreservedBranchCleanup } from './orca-runtime-preserved-branch-cleanup'
 import { RuntimeFileCommands } from './orca-runtime-files'
+import { createRuntimeFileOpenRelay } from './runtime-file-open-relay'
 import { nativeChatTranscriptIncludesPath } from '../native-chat/native-chat-file-provenance'
 import { createRuntimeFileWatcherRemoval } from './runtime-file-watcher-removal'
 import { RuntimeGitCommands } from './orca-runtime-git'
@@ -25,6 +26,12 @@ import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry-insta
 import type { RuntimeLeafRecord } from './runtime-terminal-state-records'
 
 export class OrcaRuntimeWithFileCommands extends OrcaRuntimeWithPreservedBranchCleanup {
+  protected readonly fileOpenRelay = createRuntimeFileOpenRelay({
+    getNotifier: () => this.notifier,
+    hasClientEventListeners: () => this.clientEvents.hasListeners(),
+    emitClientEvent: (event) => this.emitClientEvent(event)
+  })
+
   protected readonly fileCommands = new RuntimeFileCommands({
     getRuntimeId: () => this.runtimeId,
     requireStore: () => this.requireStore(),
@@ -46,18 +53,8 @@ export class OrcaRuntimeWithFileCommands extends OrcaRuntimeWithPreservedBranchC
         absolutePath
       }),
     resolveRuntimeGitTarget: (selector) => this.resolveRuntimeGitTarget(selector),
-    openFile: (worktreeId, filePath, relativePath, runtimeEnvironmentId) => {
-      if (!this.notifier?.openFile) {
-        throw new Error('renderer_unavailable')
-      }
-      this.notifier.openFile(worktreeId, filePath, relativePath, runtimeEnvironmentId)
-    },
-    openDiff: (worktreeId, filePath, relativePath, staged, runtimeEnvironmentId) => {
-      if (!this.notifier?.openDiff) {
-        throw new Error('renderer_unavailable')
-      }
-      this.notifier.openDiff(worktreeId, filePath, relativePath, staged, runtimeEnvironmentId)
-    }
+    openFile: this.fileOpenRelay.openFile,
+    openDiff: this.fileOpenRelay.openDiff
   })
 
   protected readonly fileWatcherRemoval = createRuntimeFileWatcherRemoval(this.fileCommands)

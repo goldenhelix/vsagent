@@ -1,56 +1,19 @@
 import { CLOSE_TERMINAL_PANE_EVENT } from '@/constants/terminal'
 import type { CloseTerminalPaneDetail } from '@/constants/terminal'
 import { closeTerminalTab } from '@/components/terminal/terminal-tab-actions'
-import { detectLanguage } from '@/lib/language-detect'
 import { runSleepWorktree } from '@/components/sidebar/sleep-worktree-flow'
 import { buildWorkspaceSessionPayload } from '@/lib/workspace-session'
 import { persistWorkspaceSessionByHost } from '@/lib/workspace-session-host-persistence'
 import { useAppStore } from '../../store'
+import { openDiffFromRemote, openFileFromRemote } from './remote-open-file-tab'
 
 export function registerMobileAndTerminalCloseIpcBridge(
   unsubs: (() => void)[],
   requestSleepingAgentWake: (worktreeId: string) => void
 ): void {
-  unsubs.push(
-    window.api.ui.onOpenFileFromMobile(
-      ({ worktreeId, filePath, relativePath, runtimeEnvironmentId }) => {
-        const store = useAppStore.getState()
-        const basename = relativePath.split(/[\\/]/).pop() || relativePath
-        store.setActiveWorktree(worktreeId)
-        store.markWorktreeVisited(worktreeId)
-        store.setActiveView('terminal')
-        // Why: renderer owns tab creation so grouped order and markdown bridges share the desktop File Explorer's store path.
-        store.openFile({
-          filePath,
-          relativePath,
-          worktreeId,
-          language: detectLanguage(basename),
-          runtimeEnvironmentId,
-          mode: 'edit'
-        })
-        store.setActiveTabType('editor')
-        store.revealWorktreeInSidebar(worktreeId)
-      }
-    )
-  )
+  unsubs.push(window.api.ui.onOpenFileFromMobile(openFileFromRemote))
 
-  unsubs.push(
-    window.api.ui.onOpenDiffFromMobile(
-      ({ worktreeId, filePath, relativePath, staged, runtimeEnvironmentId }) => {
-        const store = useAppStore.getState()
-        const language = detectLanguage(relativePath)
-        store.setActiveWorktree(worktreeId)
-        store.markWorktreeVisited(worktreeId)
-        store.setActiveView('terminal')
-        // Why: mobile renders diffs from metadata; the editor-local Changes shortcut would send plain markdown back to mobile.
-        store.openDiff(worktreeId, filePath, relativePath, language, staged, {
-          runtimeEnvironmentId
-        })
-        store.setActiveTabType('editor')
-        store.revealWorktreeInSidebar(worktreeId)
-      }
-    )
-  )
+  unsubs.push(window.api.ui.onOpenDiffFromMobile(openDiffFromRemote))
 
   unsubs.push(
     window.api.ui.onCloseTerminal(({ tabId, paneRuntimeId }) => {
