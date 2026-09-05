@@ -1,4 +1,8 @@
-import { createRemoteRefProbeCache } from '../git/remote-ref-probe-cache'
+import { _resetGitRemoteNameListingCache, listGitRemoteNames } from '../git/remote-name-listing'
+import {
+  createRemoteRefProbeCache,
+  type RemoteRefLocalGitOptions
+} from '../git/remote-ref-probe-cache'
 
 export type GiteaRepoRef = {
   host: string
@@ -8,9 +12,10 @@ export type GiteaRepoRef = {
   webBaseUrl: string
 }
 
-type LocalGitExecOptions = {
-  wslDistro?: string
-}
+// Why: callers already pass the probe cache's own option bag (hosted review
+// threads an `admissionTier` through it), so name it as such — the remote-name
+// listing has to spend the same git admission budget as the ref probes.
+type LocalGitExecOptions = RemoteRefLocalGitOptions
 
 const KNOWN_NON_GITEA_HOSTS = new Set([
   'github.com',
@@ -21,9 +26,11 @@ const KNOWN_NON_GITEA_HOSTS = new Set([
 ])
 const repoRefProbeCache = createRemoteRefProbeCache(parseGiteaRepoRef)
 
-/** @internal - exposed for tests only */
+/** @internal - exposed for tests only. Clears the remote-name listing too, since
+ *  the non-origin scan resolves through both caches. */
 export function _resetGiteaRepoRefCache(): void {
   repoRefProbeCache.clear()
+  _resetGitRemoteNameListingCache()
 }
 
 /** @internal - exposed for tests only */
@@ -137,10 +144,47 @@ export async function getGiteaRepoRefForRemote(
   return repoRefProbeCache.get(repoPath, remoteName, connectionId, localGitOptions)
 }
 
+/**
+ * Resolve the repo's Gitea ref from whichever remote carries it.
+ *
+ * Why: the forge remote is not always `origin` — a repo can review on a `gitea`
+ * remote while `origin` points at a GitHub mirror, or have no `origin` at all.
+ * `origin` stays the fast path so the common case still costs one probe, and
+ * each per-remote probe goes through the shared cache, so scanning inherits its
+ * TTL, coalescing and SSH-generation stamping.
+ *
+ * TODO(upstream): "the forge remote is named origin" is assumed by every
+ * provider, not just this one — the same fallback belongs in
+ * `src/main/gitlab/gitlab-project-ref-resolution.ts` and the GitHub ref path.
+ */
 export async function getGiteaRepoRef(
   repoPath: string,
   connectionId?: string | null,
   localGitOptions: LocalGitExecOptions = {}
 ): Promise<GiteaRepoRef | null> {
-  return getGiteaRepoRefForRemote(repoPath, 'origin', connectionId, localGitOptions)
+  const fromOrigin = await getGiteaRepoRefForRemote(
+    repoPath,
+    'origin',
+    connectionId,
+    localGitOptions
+  )
+  if (fromOrigin) {
+    return fromOrigin
+  }
+  const remoteNames = await listGitRemoteNames({
+    repoPath,
+    connectionId,
+    ...(localGitOptions.wslDistro ? { wslDistro: localGitOptions.wslDistro } : {}),
+    ...(localGitOptions.admissionTier ? { admissionTier: localGitOptions.admissionTier } : {})
+  })
+  for (const remoteName of remoteNames) {
+    if (remoteName === 'origin') {
+      continue
+    }
+    const ref = await getGiteaRepoRefForRemote(repoPath, remoteName, connectionId, localGitOptions)
+    if (ref) {
+      return ref
+    }
+  }
+  return null
 }

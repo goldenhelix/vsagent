@@ -11,41 +11,19 @@ import {
 } from '../source-control/hosted-review-api-request'
 import { readHostedPullRequestTemplate } from '../source-control/pull-request-template'
 import { getGiteaPullRequestForBranch, invalidateGiteaPullRequestScanForRepo } from './client'
+import {
+  buildGiteaApiUrl,
+  getGiteaAuthConfig,
+  giteaAuthRequestHeaders,
+  giteaRepoPathSegment
+} from './gitea-api-request'
 import { mapGiteaPullRequest, type RawGiteaPullRequest } from './pull-request-mappers'
-import { getGiteaRepoRef, type GiteaRepoRef } from './repository-ref'
+import { getGiteaRepoRef } from './repository-ref'
 
 const CREATE_REQUEST_TIMEOUT_MS = 60_000
 
-function envValue(name: string): string | null {
-  const value = process.env[name]?.trim() ?? ''
-  return value.length > 0 ? value : null
-}
-
-function normalizeApiBaseUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, '')
-  return /\/api\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/api/v1`
-}
-
-function configuredApiBaseUrl(repo: GiteaRepoRef): string {
-  const configured = envValue('ORCA_GITEA_API_BASE_URL')
-  return configured ? normalizeApiBaseUrl(configured) : repo.apiBaseUrl
-}
-
 export function isGiteaReviewCreationAuthenticated(): boolean {
-  return envValue('ORCA_GITEA_TOKEN') !== null
-}
-
-function authHeaders(): Record<string, string> {
-  const token = envValue('ORCA_GITEA_TOKEN')
-  return token ? { Authorization: `token ${token}` } : {}
-}
-
-function apiUrl(repo: GiteaRepoRef, path: string): URL {
-  return new URL(`${configuredApiBaseUrl(repo).replace(/\/+$/, '')}${path}`)
-}
-
-function encodedRepoPath(repo: GiteaRepoRef): string {
-  return `${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}`
+  return getGiteaAuthConfig().token !== null
 }
 
 function apiErrorMessage(error: unknown): string {
@@ -174,13 +152,13 @@ export async function createGiteaPullRequest(
 
   try {
     const raw = await requestHostedReviewJson<RawGiteaPullRequest>(
-      apiUrl(repo, `/repos/${encodedRepoPath(repo)}/pulls`),
+      buildGiteaApiUrl(repo, `/repos/${giteaRepoPathSegment(repo)}/pulls`),
       {
         method: 'POST',
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          ...authHeaders()
+          ...giteaAuthRequestHeaders()
         },
         body: JSON.stringify(requestBody)
       },

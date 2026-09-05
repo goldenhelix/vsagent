@@ -127,6 +127,61 @@ describe('Gitea repository ref parsing', () => {
     })
   })
 
+  it('falls back to a non-origin remote when there is no origin', async () => {
+    // origin get-url fails (no origin), then `git remote` lists names, then the
+    // gitea remote's URL parses as a Gitea host.
+    gitExecFileAsyncMock
+      .mockRejectedValueOnce(new Error("fatal: No such remote 'origin'"))
+      .mockResolvedValueOnce({ stdout: 'gitea\n', stderr: '' })
+      .mockResolvedValueOnce({
+        stdout: 'git@gitea.example.com:goldenhelix/varseq.git\n',
+        stderr: ''
+      })
+
+    await expect(getGiteaRepoRef('/repo')).resolves.toMatchObject({
+      host: 'gitea.example.com',
+      owner: 'goldenhelix',
+      repo: 'varseq'
+    })
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(['remote'], {
+      cwd: '/repo',
+      timeout: REMOTE_URL_PROBE_TIMEOUT_MS
+    })
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(['remote', 'get-url', 'gitea'], {
+      cwd: '/repo',
+      timeout: REMOTE_URL_PROBE_TIMEOUT_MS
+    })
+  })
+
+  it('skips remotes another provider owns while scanning past a mirror origin', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: 'https://github.com/team/mirror.git\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'origin\nupstream\ngitea\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'https://gitlab.com/team/mirror.git\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'https://git.example.com/team/project.git\n', stderr: '' })
+
+    await expect(getGiteaRepoRef('/repo')).resolves.toMatchObject({
+      host: 'git.example.com',
+      owner: 'team',
+      repo: 'project'
+    })
+    // origin is probed once as the fast path, never again during the scan.
+    const originProbes = gitExecFileAsyncMock.mock.calls.filter(
+      (call) => (call[0] as string[])[2] === 'origin'
+    )
+    expect(originProbes).toHaveLength(1)
+  })
+
+  it('does not scan other remotes when origin already resolves', async () => {
+    gitExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: 'https://git.example.com/team/project.git\n',
+      stderr: ''
+    })
+
+    await expect(getGiteaRepoRef('/repo')).resolves.toMatchObject({ owner: 'team' })
+    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps local host and local WSL repository-ref cache entries separate', async () => {
     gitExecFileAsyncMock
       .mockResolvedValueOnce({
