@@ -114,6 +114,10 @@ export type RpcContext = {
   // only where the caller already holds one — the 0o600 Unix socket and runtime-scope WebSocket
   // devices. Absent (and the method then fails) for mobile-scope devices.
   createRuntimePairingOffer?: (args: RuntimePairingOfferParams) => RuntimePairingOfferResult
+  // Why: the webpreview proxy runs on this same server, but a handler has no live HTTP
+  // request to derive its own address from — only the transport layer knows the bound
+  // host/port. Null when no WebSocket transport is up (Unix-socket-only hosts).
+  webPreviewHttpOrigin?: string | null
   // Why: mobile terminal traffic bypasses JSON streaming; undefined on Unix/socket and non-E2EE WebSocket paths.
   sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
   // Why: binary terminal frames arrive outside JSON-RPC once a stream is established; handlers register only the stream IDs they created.

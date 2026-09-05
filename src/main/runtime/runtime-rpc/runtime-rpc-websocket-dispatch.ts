@@ -153,6 +153,7 @@ export class RuntimeRpcWebSocketDispatch extends RuntimeRpcRequestAdmission {
         // the mobile method allowlist refuses the call a second time.
         createRuntimePairingOffer:
           device.scope === 'runtime' ? (this.mintRuntimePairingOffer ?? undefined) : undefined,
+        webPreviewHttpOrigin: this.resolveWebPreviewHttpOrigin(),
         signal: abortRegistration?.signal,
         sendBinary,
         registerBinaryStreamHandler: (streamId, handler) =>

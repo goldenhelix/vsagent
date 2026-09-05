@@ -99,6 +99,7 @@ export class RpcDispatcher {
           clientCapabilities: options?.clientCapabilities,
           updateClientCapabilities: options?.updateClientCapabilities,
           createRuntimePairingOffer: options?.createRuntimePairingOffer,
+          webPreviewHttpOrigin: options?.webPreviewHttpOrigin,
           orchestrationCapability: request.orchestrationCapability,
           authenticatedCallerFingerprint: options?.authenticatedCallerFingerprint
         },
