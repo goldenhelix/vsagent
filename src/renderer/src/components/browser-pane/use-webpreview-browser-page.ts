@@ -74,7 +74,11 @@ export function useWebPreviewBrowserPage(page: BrowserPage): WebPreviewBrowserPa
   // a pre-redirect URL the user never actually visited.
   const expectingLoadEchoRef = useRef(false)
   const displayedUrlRef = useRef(displayedUrl)
-  displayedUrlRef.current = displayedUrl
+  // Synced in an effect (declared before the effects below, so it lands first in the
+  // same commit) because a render-phase write can leak from a render React discards.
+  useEffect(() => {
+    displayedUrlRef.current = displayedUrl
+  }, [displayedUrl])
 
   const pushHistory = useCallback(
     (upstreamUrl: string) => {
