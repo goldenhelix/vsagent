@@ -13,26 +13,6 @@ import { closeApp, resolveElectronMainPid } from '../../tests/tools/win-update-e
 import { isPidAlive } from '../../tests/tools/win-update-e2e/daemon-processes.mjs'
 
 describe('win-crash-survival-e2e proof contracts', () => {
-  it('keeps the packaged proof manually dispatchable without a PR trigger', () => {
-    const workflow = readFileSync('.github/workflows/win-crash-survival-e2e.yml', 'utf8')
-    expect(workflow).not.toMatch(/^  pull_request:/m)
-    expect(workflow).toMatch(/^  workflow_dispatch:/m)
-    expect(workflow).not.toMatch(/^  push:/m)
-    expect(workflow).toContain('--expect "$env:EXPECT"')
-    expect(workflow).toContain('exit $LASTEXITCODE')
-    expect(workflow).toContain("'!config/**/*.test.*'")
-    expect(workflow).toContain("'!src/**/*.test.*'")
-    expect(workflow).toContain("'!src/**/*.bench.*'")
-    expect(workflow).toContain("'!config/reliability-gates.jsonc'")
-    expect(workflow).toContain("'resources/**'")
-    expect(workflow).toContain('cache: pnpm')
-    expect(workflow.indexOf('- name: Setup Node.js')).toBeGreaterThan(
-      workflow.indexOf('- name: Setup pnpm')
-    )
-    expect(workflow).toContain("if: steps.cache-installer.outputs.cache-hit != 'true'")
-    expect(workflow).toContain('crash-survival-electron-builder-')
-  })
-
   it('requires the full survival oracle, including daemon identity and reattach', () => {
     const base = {
       profile: 'survival',

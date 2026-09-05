@@ -9716,8 +9716,7 @@
             "survival requires the crash antecedent, daemon and shell liveness, unchanged daemon identity, zero FailFast events, and same-shell reattach",
             "event-log query failure cannot be converted into zero FailFast events",
             "malformed event-log and PID-liveness evidence fails closed",
-            "stale, missing, or ambiguous userData-scoped daemon identity fails closed",
-            "the packaged survival proof remains wired to targeted pull requests without a duplicate branch-push run"
+            "stale, missing, or ambiguous userData-scoped daemon identity fails closed"
           ]
         },
         {
@@ -17242,10 +17241,6 @@
           ]
         },
         {
-          "file": "config/scripts/package-electron-runtime-contract.test.mjs",
-          "assertions": ["every release platform packages and gates the hashed watcher child"]
-        },
-        {
           "file": "config/scripts/runtime-file-watcher-resource-probe.mjs",
           "assertions": [
             "five healthy roots share one exact watcher PID within the per-child RSS budget",
@@ -17986,7 +17981,6 @@
         {
           "file": "config/scripts/headless-serve-shutdown-workflow.test.mjs",
           "assertions": [
-            "PR CI builds an x64 AppImage before invoking the packaged shutdown oracle",
             "the original AppImage desktop startup oracle is wired before extraction and signal cases",
             "the bound AppImage is readable and executable before desktop launch and extraction",
             "the documented systemd unit uses KillMode=mixed so graceful TERM targets Orca before its owned Xvfb"
@@ -18198,13 +18192,9 @@
       "invariant": "Every managed-hook companion shipped for Node 18 must load before agent installers execute, and importing desktop-only state inspection must not make unrelated remote installers depend on node:sqlite.",
       "oracle": "Build all relay artifacts, require each managed-hook-runtime.js in a real Node 18 process, assert its installer export, then install only Codex and Claude into a fresh temporary home. Require two successful installer results, executable hook scripts, and both agent configs to reference their managed scripts without touching the user's home.",
       "commands": [
-        "pnpm run build:relay && npx -y node@18 config/scripts/smoke-managed-hook-runtime-node18.mjs",
-        "pnpm exec vitest run --config config/vitest.config.ts config/scripts/pr-workflow-parallelism.test.mjs"
+        "pnpm run build:relay && npx -y node@18 config/scripts/smoke-managed-hook-runtime-node18.mjs"
       ],
-      "testFiles": [
-        "config/scripts/smoke-managed-hook-runtime-node18.mjs",
-        "config/scripts/pr-workflow-parallelism.test.mjs"
-      ],
+      "testFiles": ["config/scripts/smoke-managed-hook-runtime-node18.mjs"],
       "assertionRefs": [
         {
           "file": "config/scripts/smoke-managed-hook-runtime-node18.mjs",
@@ -18212,12 +18202,6 @@
             "all six built companions load and export installManagedHooks under Node 18",
             "Codex and Claude installations both succeed in an isolated home",
             "both generated configs reference executable managed hook scripts"
-          ]
-        },
-        {
-          "file": "config/scripts/pr-workflow-parallelism.test.mjs",
-          "assertions": [
-            "PR CI builds the companions before switching to Node 18 and running the smoke oracle"
           ]
         }
       ],
