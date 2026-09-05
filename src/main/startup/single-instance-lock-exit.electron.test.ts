@@ -106,9 +106,7 @@ describe('pre-ready termination under real Electron', () => {
   }, 90_000)
 
   it('#17615 stops serve when display setup fails instead of entering Chromium startup', () => {
-    const termination = readPreReadyTermination(
-      'if (state.isServeMode && !state.headlessBrowserDisplayAvailable) {'
-    )
+    const termination = readPreReadyTermination('if (state.isServeMode && displayResult.fatal) {')
 
     const run = runPreReadyGate(termination)
 

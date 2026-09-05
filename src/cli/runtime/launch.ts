@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { runProcessSync } from '../../shared/child-process/run-process'
+import { displaylessServeLaunchArgs } from '../../shared/displayless-serve-fallback'
 import {
   SERVE_UPDATE_HANDOFF_PATH_ENV,
   getServeUpdateHandoffPath
@@ -81,6 +82,9 @@ function spawnDetached(command: string, args: string[], options: SpawnOptions): 
 export function serveOrcaApp(args: ServeChildArgs = {}): Promise<number> {
   const executable = resolveForegroundOrcaExecutable()
   const childArgs = [...getExecutableAppArgs(executable), ...buildServeChildArgs(args)]
+  // Why: Chromium fixes its Ozone platform from the real command line before any JS runs, so a
+  // display-less host can only be honored here — not from the app itself.
+  childArgs.push(...displaylessServeLaunchArgs())
 
   const handoffPath =
     args.recipeJson !== true && getMacAppBundlePath(executable)

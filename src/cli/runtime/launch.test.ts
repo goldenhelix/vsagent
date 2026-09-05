@@ -437,6 +437,39 @@ describe('serveOrcaApp', () => {
     )
   })
 
+  // Why here and not in the app: Chromium fixes its Ozone platform from the real command line
+  // before any JS runs, so the display-less opt-in only takes effect on the spawn argv.
+  it('adds the headless Ozone switch when the display-less opt-in is armed on Linux', async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    process.env.ORCA_ALLOW_DISPLAYLESS_SERVE = '1'
+    const child = {
+      kill: vi.fn(),
+      once: vi.fn(
+        (event: string, handler: (code: number | null, signal: string | null) => void) => {
+          if (event === 'exit') {
+            queueMicrotask(() => handler(0, null))
+          }
+          return child
+        }
+      )
+    }
+    spawnMock.mockReturnValue(child)
+
+    try {
+      await expect(serveOrcaApp({ port: '6768' })).resolves.toBe(0)
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        '/Applications/Orca.app/Contents/MacOS/Orca',
+        ['--serve', '--serve-port', '6768', '--ozone-platform=headless'],
+        expect.objectContaining({ cwd: resolve(__dirname, '../../..') })
+      )
+    } finally {
+      delete process.env.ORCA_ALLOW_DISPLAYLESS_SERVE
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    }
+  })
+
   it('passes the app root before serve flags for dev Electron executables', async () => {
     process.env.ORCA_APP_EXECUTABLE = '/repo/node_modules/.bin/electron'
     process.env.ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT = '1'

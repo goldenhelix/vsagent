@@ -25,6 +25,7 @@ vi.mock('electron', () => ({ app: appMock }))
 
 const ORIGINAL_PLATFORM = process.platform
 const ORIGINAL_DISPLAY = process.env.DISPLAY
+const ORIGINAL_DISPLAYLESS_FALLBACK = process.env.ORCA_ALLOW_DISPLAYLESS_SERVE
 
 function setPlatform(platform: NodeJS.Platform): void {
   Object.defineProperty(process, 'platform', { value: platform, configurable: true })
@@ -65,6 +66,7 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     appMock.commandLine.getSwitchValue.mockReset().mockReturnValue('')
     appMock.once.mockReset()
     delete process.env.DISPLAY
+    delete process.env.ORCA_ALLOW_DISPLAYLESS_SERVE
   })
 
   afterEach(async () => {
@@ -78,13 +80,21 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     } else {
       process.env.DISPLAY = ORIGINAL_DISPLAY
     }
+    if (ORIGINAL_DISPLAYLESS_FALLBACK === undefined) {
+      delete process.env.ORCA_ALLOW_DISPLAYLESS_SERVE
+    } else {
+      process.env.ORCA_ALLOW_DISPLAYLESS_SERVE = ORIGINAL_DISPLAYLESS_FALLBACK
+    }
   })
 
   it('is a no-op (supported) on non-Linux platforms', async () => {
     setPlatform('darwin')
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: true,
+      fatal: false
+    })
     expect(spawnMock).not.toHaveBeenCalled()
   })
 
@@ -94,7 +104,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
 
     // Desktop Linux (non-serve) is reported unsupported for the offscreen path
     // here, and never spawns Xvfb.
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: false })).toBe(false)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: false })).toEqual({
+      browserPanes: false,
+      fatal: false
+    })
     expect(spawnMock).not.toHaveBeenCalled()
   })
 
@@ -104,7 +117,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     mockLiveXDisplay()
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: true,
+      fatal: false
+    })
     expect(spawnMock).not.toHaveBeenCalled()
     expect(process.env.DISPLAY).toBe(':0')
     expect(appMock.disableHardwareAcceleration).toHaveBeenCalled()
@@ -118,7 +134,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     const { ensureVirtualDisplayForHeadlessServe, MISSING_LINUX_DISPLAY_MESSAGE } =
       await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(false)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: false,
+      fatal: true
+    })
     expect(spawnMock).toHaveBeenCalledWith('Xvfb', expect.any(Array), expect.any(Object))
     expect(MISSING_LINUX_DISPLAY_MESSAGE).toContain('endpoint is unavailable')
     expect(MISSING_LINUX_DISPLAY_MESSAGE).toContain('XDG_RUNTIME_DIR')
@@ -136,7 +155,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     })
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(false)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: false,
+      fatal: true
+    })
     expect(spawnMock).not.toHaveBeenCalled()
     expect(rmSyncMock).not.toHaveBeenCalled()
     expect(process.env.DISPLAY).toBe(':77')
@@ -153,7 +175,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     })
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: true,
+      fatal: false
+    })
     expect(spawnMock).not.toHaveBeenCalled()
     expect(rmSyncMock).not.toHaveBeenCalled()
     expect(process.env.DISPLAY).toBe(':0')
@@ -167,7 +192,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     mockXvfbTakesDisplay()
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: true,
+      fatal: false
+    })
     // Cleaned up and respawned rather than trusted.
     expect(rmSyncMock).toHaveBeenCalled()
     expect(spawnMock).toHaveBeenCalledWith(
@@ -185,7 +213,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never) // PID alive
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: true,
+      fatal: false
+    })
     expect(killSpy).toHaveBeenCalledWith(4321, 0)
     expect(spawnMock).not.toHaveBeenCalled()
     expect(rmSyncMock).not.toHaveBeenCalled()
@@ -212,7 +243,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     })
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: true,
+      fatal: false
+    })
     // Stale artifacts cleaned, then a fresh server started.
     expect(rmSyncMock).toHaveBeenCalled()
     expect(spawnMock).toHaveBeenCalledWith(
@@ -240,7 +274,10 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     spawnMock.mockReturnValue({ pid: 4242, once: vi.fn(), kill: vi.fn(), killed: false })
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(false)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: false,
+      fatal: true
+    })
     expect(process.env.DISPLAY).toBeUndefined()
   })
 
@@ -262,8 +299,74 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     })
     const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
 
-    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
+    expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+      browserPanes: true,
+      fatal: false
+    })
     expect(process.env.DISPLAY).toBe(':99')
+  })
+
+  // Chromium fixes its Ozone platform from the launch command line, so the opt-in is honored by
+  // the launcher (see shared/displayless-serve-fallback) and startup only has to read the verdict.
+  describe('displayless serve fallback', () => {
+    beforeEach(() => {
+      setPlatform('linux')
+    })
+
+    it('skips Xvfb and keeps serve alive when launched on the headless Ozone platform', async () => {
+      appMock.commandLine.getSwitchValue.mockReturnValue('headless')
+      process.env.ORCA_ALLOW_DISPLAYLESS_SERVE = '1'
+      const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
+
+      expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+        browserPanes: false,
+        fatal: false
+      })
+      expect(spawnMock).not.toHaveBeenCalled()
+      expect(process.env.DISPLAY).toBeUndefined()
+      // The GPU flags upstream applies for every Linux serve launch still apply.
+      expect(appMock.commandLine.appendSwitch).toHaveBeenCalledWith('disable-dev-shm-usage')
+    })
+
+    // The switch is what proves Chromium is display-less; the env only tells a launcher to pass it.
+    it('reads the verdict off the command line, not the opt-in env', async () => {
+      appMock.commandLine.getSwitchValue.mockReturnValue('HEADLESS ')
+      const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
+
+      expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+        browserPanes: false,
+        fatal: false
+      })
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+
+    // Arming the env without the launch switch cannot be rescued in-process: appending it from JS
+    // does not select the platform (Electron 43 exits 133 / SIGSEGVs), so serve must still stop.
+    it('stays fatal when the opt-in is armed but the launch switch is missing', async () => {
+      process.env.ORCA_ALLOW_DISPLAYLESS_SERVE = '1'
+      spawnMock.mockReturnValue({ pid: undefined, once: vi.fn(), kill: vi.fn(), killed: false })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
+
+      expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+        browserPanes: false,
+        fatal: true
+      })
+      expect(warn.mock.calls.flat().join('\n')).toContain('--ozone-platform=headless')
+      expect(appMock.commandLine.appendSwitch).not.toHaveBeenCalledWith('headless')
+    })
+
+    it('points an unarmed host at the opt-in when no display can be found', async () => {
+      spawnMock.mockReturnValue({ pid: undefined, once: vi.fn(), kill: vi.fn(), killed: false })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const { ensureVirtualDisplayForHeadlessServe } = await import('./ensure-virtual-display')
+
+      expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toEqual({
+        browserPanes: false,
+        fatal: true
+      })
+      expect(warn.mock.calls.flat().join('\n')).toContain('ORCA_ALLOW_DISPLAYLESS_SERVE=1')
+    })
   })
 
   describe('hasUsableLinuxDisplay', () => {

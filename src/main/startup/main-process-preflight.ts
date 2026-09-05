@@ -2,6 +2,7 @@ import { app, ipcMain, powerMonitor, session } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import os from 'node:os'
 import { join } from 'node:path'
+import { applyVSAgentEnvAliases } from '../../shared/vsagent-env-aliases'
 import { maybeRedirectCliLaunch } from './cli-launch-redirect'
 import { argvRequestsServeMode, normalizeServeModeArgv } from './serve-mode-argv'
 import {
@@ -95,6 +96,9 @@ export type MainProcessPreflightOptions = {
 
 /** Performs all module-scope work that must happen before Electron's ready event. */
 export function runMainProcessPreflight(options: MainProcessPreflightOptions): boolean {
+  // Why (VSAgent fork): map VSAGENT_* aliases onto their ORCA_* targets before any env-dependent
+  // startup logic reads them. The CLI does this too, but a systemd unit launches Electron directly.
+  applyVSAgentEnvAliases()
   // Why: on Windows a CLI launch that lost ELECTRON_RUN_AS_NODE would boot the GUI and exit silently; redirect to node mode before the lock gate below.
   // The redirect runs before the serve-argv rewrite so it still matches on the launch argv verbatim.
   // Direct serve stays in-process so its signal handlers own all children.
@@ -329,11 +333,13 @@ export function runMainProcessPreflight(options: MainProcessPreflightOptions): b
     enableMainProcessGpuFeatures()
   }
   // Why: headless serve's offscreen BrowserWindows need an X display (Xvfb) on Linux; the result gates whether the offscreen backend is installed.
-  state.headlessBrowserDisplayAvailable = ensureVirtualDisplayForHeadlessServe({
+  const displayResult = ensureVirtualDisplayForHeadlessServe({
     isServeMode: state.isServeMode
   })
-  // Why: continuing without Xvfb lets Ozone initialize without a display and SIGSEGV (#17615).
-  if (state.isServeMode && !state.headlessBrowserDisplayAvailable) {
+  state.headlessBrowserDisplayAvailable = displayResult.browserPanes
+  // Why: continuing without Xvfb lets Ozone initialize without a display and SIGSEGV (#17615)
+  // — unless the operator armed the displayless fallback, which switched Ozone to headless.
+  if (state.isServeMode && displayResult.fatal) {
     process.stderr.write(`${MISSING_LINUX_DISPLAY_MESSAGE}\n`)
     app.exit(1)
   }
