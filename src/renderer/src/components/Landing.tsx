@@ -13,6 +13,8 @@ import { ShortcutKeyCombo } from './ShortcutKeyCombo'
 import { useShortcutKeyDetails, type ShortcutKeyComboDetails } from '@/hooks/useShortcutLabel'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import logo from '../../../../resources/logo.svg'
+import vsagentLogo from '../../../../resources/vsagent.svg'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 import { hasGitHubBackedProject, type PreflightIssue } from './landing-preflight-issues'
 import { useLandingPreflightRuntime } from './landing-preflight-runtime'
@@ -219,6 +221,8 @@ function PreflightBanner({
 export default function Landing(): React.JSX.Element {
   const repos = useAppStore((s) => s.repos)
   const openModal = useAppStore((s) => s.openModal)
+  // Why (VSAgent fork): the web deployment is branded VSAgent, not Orca.
+  const isVSAgentBrand = isVSAgentWebMode()
 
   const createTargetLabel =
     repos.length > 0 && repos.every((repo) => isGitRepoKind(repo)) ? 'Worktree' : 'Workspace'
@@ -254,13 +258,17 @@ export default function Landing(): React.JSX.Element {
             style={{ backgroundColor: '#12181e' }}
           >
             <img
-              src={logo}
-              alt={translate('auto.components.Landing.520304a067', 'Orca logo')}
+              src={isVSAgentBrand ? vsagentLogo : logo}
+              alt={
+                isVSAgentBrand
+                  ? 'VSAgent logo'
+                  : translate('auto.components.Landing.520304a067', 'Orca logo')
+              }
               className="size-12"
             />
           </div>
           <h1 className="text-4xl font-bold text-foreground tracking-tight">
-            {translate('auto.components.Landing.6ca6ff404e', 'ORCA')}
+            {isVSAgentBrand ? 'VSAgent' : translate('auto.components.Landing.6ca6ff404e', 'ORCA')}
           </h1>
 
           {preflightIssues.length > 0 && <PreflightBanner issues={preflightIssues} repos={repos} />}
@@ -308,7 +316,9 @@ export default function Landing(): React.JSX.Element {
         </div>
       </div>
 
-      {showGitHubSupportFooter && (
+      {/* Why (VSAgent fork): the "Star/Open GitHub" nag points at the upstream
+          Orca repo, which is irrelevant in the VSAgent web deployment. */}
+      {showGitHubSupportFooter && !isVSAgentBrand && (
         <div className="absolute bottom-6 left-0 right-0 flex justify-center">
           <GitHubStarButton hasRepos={repos.length > 0} state={starState} setState={setStarState} />
         </div>
