@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import type { RuntimeTransportMetadata } from '../../../shared/runtime-bootstrap'
 import type { OrcaRuntimeService } from '../orca-runtime'
+import { loadOrCreateTlsCertificate } from '../tls-certificate'
 import { RpcDispatcher } from '../rpc/dispatcher'
 import { ALL_RPC_METHODS } from '../rpc/methods'
 import type { RpcTransport } from '../rpc/transport'
@@ -39,6 +41,15 @@ export class RuntimeRpcState {
   protected readonly preferPinnedWsPort: boolean
   protected readonly exposeNetworkByDefault: boolean
   protected readonly pinnedBindHost: string | null
+  protected readonly serveTls: boolean
+  protected readonly serveTlsCertPath: string | undefined
+  protected readonly serveTlsKeyPath: string | undefined
+  // Why: read by the pairing offer producers, which live further down the mixin chain.
+  protected readonly serverDisplayName: string | null
+  protected readonly defaultPairingAddress: string | null
+  // Why cached: the pairing-time rebind restarts the listener, and a regenerated self-signed cert
+  // would break every client that pinned the fingerprint the first listener presented.
+  private serveTlsMaterial: { cert: string; key: string } | null = null
   protected readonly webClientRoot: string | undefined
   // Why: STA-2370 — the host the WS listener is currently bound to, so pairing can widen loopback→all-interfaces once.
   protected wsBoundHost: string | null = null
@@ -100,6 +111,11 @@ export class RuntimeRpcState {
     preferPinnedWsPort = false,
     exposeNetworkByDefault = false,
     pinnedBindHost,
+    serveTls = false,
+    serveTlsCertPath,
+    serveTlsKeyPath,
+    serverDisplayName = null,
+    defaultPairingAddress = null,
     webClientRoot,
     keepaliveIntervalMs = KEEPALIVE_INTERVAL_MS,
     longPollCap = LONG_POLL_CAP,
@@ -116,6 +132,11 @@ export class RuntimeRpcState {
     this.preferPinnedWsPort = preferPinnedWsPort
     this.exposeNetworkByDefault = exposeNetworkByDefault
     this.pinnedBindHost = pinnedBindHost ?? null
+    this.serveTls = serveTls
+    this.serveTlsCertPath = serveTlsCertPath
+    this.serveTlsKeyPath = serveTlsKeyPath
+    this.serverDisplayName = serverDisplayName
+    this.defaultPairingAddress = defaultPairingAddress
     this.webClientRoot = webClientRoot
     this.keepaliveIntervalMs = keepaliveIntervalMs
     this.longPollCap = longPollCap
@@ -129,5 +150,26 @@ export class RuntimeRpcState {
     this.browserHostLongPollCapPerDevice = Math.max(1, Math.floor(this.browserHostLongPollCap / 2))
     this.specializedLongPollCap = Math.max(1, Math.floor(longPollCap * SPECIALIZED_LONG_POLL_SHARE))
     this.relayRevokeOutbox = new RelayRevokeOutbox(userDataPath)
+  }
+
+  // Why: an operator-provided pair wins outright; otherwise the cached self-signed certificate keeps
+  // `--serve-https` a zero-setup switch. Undefined when TLS is off, so the transport stays plain HTTP.
+  protected resolveServeTlsMaterial(): { cert: string; key: string } | undefined {
+    if (!this.serveTls) {
+      return undefined
+    }
+    if (this.serveTlsMaterial) {
+      return this.serveTlsMaterial
+    }
+    if (this.serveTlsCertPath && this.serveTlsKeyPath) {
+      this.serveTlsMaterial = {
+        cert: readFileSync(this.serveTlsCertPath, 'utf-8'),
+        key: readFileSync(this.serveTlsKeyPath, 'utf-8')
+      }
+      return this.serveTlsMaterial
+    }
+    const generated = loadOrCreateTlsCertificate(this.userDataPath)
+    this.serveTlsMaterial = { cert: generated.cert, key: generated.key }
+    return this.serveTlsMaterial
   }
 }

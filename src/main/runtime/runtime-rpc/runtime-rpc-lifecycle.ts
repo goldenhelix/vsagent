@@ -177,10 +177,14 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
     if (!deviceRegistry || !e2eeKeypair) {
       throw new Error('WebSocket transport requires an initialized pairing identity')
     }
+    // Why resolved here and not once at start(): the pairing-time rebind comes back through this
+    // method, and the cached material keeps the rebound listener on the same certificate.
+    const tlsMaterial = this.resolveServeTlsMaterial()
     const wsTransport = new WebSocketTransport({
       host: options.host,
       port: options.port,
       staticRoot: this.webClientRoot,
+      ...(tlsMaterial ? { tlsCert: tlsMaterial.cert, tlsKey: tlsMaterial.key } : {}),
       ...(options.fallbackPort !== undefined ? { fallbackPort: options.fallbackPort } : {}),
       ...(options.preferPinnedPort ? { preferPinnedPort: true } : {}),
       // Why (VSAgent fork): the webpreview reverse proxy serves in-app browser iframes for web
@@ -218,7 +222,7 @@ export class RuntimeRpcLifecycle extends RuntimeRpcWebSocketDispatch {
     this.wsBoundHost = options.host
     return {
       transport: wsTransport,
-      endpoint: formatWsEndpoint(options.host, wsTransport.resolvedPort)
+      endpoint: formatWsEndpoint(options.host, wsTransport.resolvedPort, Boolean(tlsMaterial))
     }
   }
 

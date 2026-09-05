@@ -372,6 +372,12 @@ a file Orca does not own already holds that name (ownership is a marker on the
 second line of the file). A host that really does run the screen reader keeps
 its own `orca`.
 
+Set `ORCA_MANAGED_INSTALL=1` (`VSAGENT_MANAGED_INSTALL=1` works too) when an
+external installer already links the CLI launchers — a tarball install, a
+package manager, or a hand-managed `~/.local/bin`. It skips both serve-time
+installs: the `orca-ide` CLI registration and the bare `orca` dispatcher above.
+Without it the serve process would race the installer for the same names.
+
 ## Pairing troubleshooting
 
 - A pairing offer is a capability containing a device credential and E2EE
