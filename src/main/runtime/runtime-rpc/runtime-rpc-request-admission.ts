@@ -36,7 +36,10 @@ export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
 
     try {
       return await this.dispatcher.dispatch(request, {
-        signal: longPoll ? context?.signal : undefined
+        signal: longPoll ? context?.signal : undefined,
+        // Why: this socket is local trust — the 0o600 metadata file is the credential — so the bundled
+        // CLI's `pairing-url` command may mint a runtime pairing offer.
+        createRuntimePairingOffer: this.mintRuntimePairingOffer ?? undefined
       })
     } finally {
       this.releaseLongPoll(longPoll)

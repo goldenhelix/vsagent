@@ -9,6 +9,10 @@ import type {
   PairingProvisionRelayParams
 } from '../../../shared/mobile-relay-credential-contract'
 import type { RuntimeCapability } from '../../../shared/protocol-version'
+import type {
+  RuntimePairingOfferParams,
+  RuntimePairingOfferResult
+} from '../../../shared/runtime-pairing-offer'
 import type { OrchestrationCompatibilityEvidence } from '../../../shared/orchestration-compatibility-evidence'
 
 export type PairingRpcContext = {
@@ -100,6 +104,10 @@ export type RpcContext = {
   // Why: federation pins the authenticated saved-environment caller without exposing its token to handlers or storage.
   authenticatedCallerFingerprint?: string
   pairing?: PairingRpcContext
+  // Why: minting a pairing offer hands out a runtime-scope credential, so the transports provide it
+  // only where the caller already holds one — the 0o600 Unix socket and runtime-scope WebSocket
+  // devices. Absent (and the method then fails) for mobile-scope devices.
+  createRuntimePairingOffer?: (args: RuntimePairingOfferParams) => RuntimePairingOfferResult
   // Why: mobile terminal traffic bypasses JSON streaming; undefined on Unix/socket and non-E2EE WebSocket paths.
   sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
   // Why: binary terminal frames arrive outside JSON-RPC once a stream is established; handlers register only the stream IDs they created.

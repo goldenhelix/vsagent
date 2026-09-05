@@ -190,6 +190,8 @@ export function formatFlagHelp(flag: string): string {
     cursor: '--cursor <n>           Line cursor from a previous read (returns only new output)',
     action: '--action <name>       Secondary accessibility action name',
     activate: '--activate             Reveal the new worktree in the Orca app',
+    address: '--address <host>       Host/IP (optionally :port) advertised in the pairing endpoint',
+    rotate: '--rotate               Mint a fresh device token instead of reusing the pending one',
     app: '--app <app>            App name, bundle ID, or pid:N',
     direction:
       '--direction <dir>      Direction: up|down|left|right for scroll, horizontal|vertical for split',

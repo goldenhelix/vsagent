@@ -14,7 +14,7 @@ export type HandlerGroup = {
 export const HANDLER_GROUPS: readonly HandlerGroup[] = [
   {
     name: 'core',
-    keys: ['claude-teams', 'open', 'serve', 'status'],
+    keys: ['claude-teams', 'open', 'pairing-url', 'serve', 'status'],
     load: async () => (await import('./handlers/core.js')).CORE_HANDLERS
   },
   {
