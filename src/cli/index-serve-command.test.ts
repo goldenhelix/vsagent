@@ -170,6 +170,25 @@ describe('orca cli worktree awareness', () => {
     process.exitCode = priorExitCode
   })
 
+  it('rejects a TLS keypair passed without --https', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const priorExitCode = process.exitCode
+
+    await main(
+      ['serve', '--cert', '/etc/orca/server.crt', '--key', '/etc/orca/server.key'],
+      '/tmp/repo'
+    )
+
+    expect(serveOrcaAppMock).not.toHaveBeenCalled()
+    expect([...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')).toContain(
+      'Use --cert and --key with --https'
+    )
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
+  })
+
   it('rejects a value-less --host before launching the app', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})

@@ -26,7 +26,7 @@ export const SERVE_COMMAND_SPECS: CommandSpec[] = [
       '--host binds a single interface (for example a Tailscale address) instead of every interface, and becomes the advertised address unless --pairing-address overrides it.',
       '--pairing-address changes only the client-advertised address; use a reachable LAN, Tailscale, SSH-forward, or reverse-proxy endpoint.',
       '--name labels this server in pairing offers; clients use it as the default saved-server name. Defaults to the machine hostname.',
-      '--https serves wss:// and https:// directly with a self-signed certificate, which browsers warn about once. Pass --cert and --key together to use your own certificate.',
+      '--https serves wss:// and https:// directly with a self-signed certificate, which browsers warn about once. Pass --cert and --key together, alongside --https, to use your own certificate.',
       'Use --recipe-json with --project-root from VM recipes to print the recipe result JSON and leave the server running.',
       'Use --mobile-pairing to print a mobile-scoped pairing QR/link instead of the default runtime-environment pairing link.',
       'When the web client bundle is available, the server also prints a browser URL with the pairing data embedded.'

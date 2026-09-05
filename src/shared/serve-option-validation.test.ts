@@ -24,22 +24,32 @@ describe('getServeOptionValidationError', () => {
       /requires runtime pairing.*--mobile-pairing/i
     ],
     [{ recipeJson: true }, /requires --project-root/i],
-    [{ tlsCertPath: '/tmp/server.crt' }, /--cert and --key together/i],
-    [{ tlsKeyPath: '/tmp/server.key' }, /--cert and --key together/i]
+    [{ https: true, tlsCertPath: '/tmp/server.crt' }, /--cert and --key together/i],
+    [{ https: true, tlsKeyPath: '/tmp/server.key' }, /--cert and --key together/i],
+    // A full keypair with no --https is read by nothing, so the server would serve plain HTTP.
+    [
+      { tlsCertPath: '/tmp/server.crt', tlsKeyPath: '/tmp/server.key' },
+      /--cert and --key with --https/i
+    ]
   ])('rejects incompatible options', (override, expected) => {
     expect(
       getServeOptionValidationError({ ...validOptions, ...override } as typeof validOptions)
     ).toMatch(expected)
   })
 
-  it('accepts a complete TLS keypair', () => {
+  it('accepts a complete TLS keypair with --https', () => {
     expect(
       getServeOptionValidationError({
         ...validOptions,
+        https: true,
         tlsCertPath: '/tmp/server.crt',
         tlsKeyPath: '/tmp/server.key'
       })
     ).toBeNull()
+  })
+
+  it('accepts --https with no explicit keypair', () => {
+    expect(getServeOptionValidationError({ ...validOptions, https: true })).toBeNull()
   })
 })
 

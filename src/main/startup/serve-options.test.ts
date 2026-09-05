@@ -260,6 +260,19 @@ describe('getServeOptions', () => {
     ).toThrow(/--cert and --key together/i)
   })
 
+  it('rejects a TLS keypair that no --https would ever read', () => {
+    expect(() =>
+      getServeOptions([
+        '/AppRun',
+        '--serve',
+        '--serve-cert',
+        '/tmp/server.crt',
+        '--serve-key',
+        '/tmp/server.key'
+      ])
+    ).toThrow(/--cert and --key with --https/i)
+  })
+
   it.each([
     ['--serve-cert', '/tmp/server.crt', '--serve-key', '/tmp/server.key'],
     ['--serve-cert=/tmp/server.crt', '--serve-key=/tmp/server.key'],
