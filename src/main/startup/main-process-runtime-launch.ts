@@ -16,6 +16,7 @@ import { browserManager } from '../browser/browser-manager'
 import type { MobileRelayStatusDetail } from '../../shared/mobile-relay-status'
 import { DesktopRelayService } from '../runtime/relay/desktop-relay-service'
 import { getServeOptions, getBundledWebClientRoot, printServeReady } from './main-process-serve'
+import { buildServeRuntimeRpcOptions } from './serve-runtime-rpc-options'
 import {
   bindTerminalRuntimeStartupServices,
   handleCodexHomePtySpawned,
@@ -88,6 +89,7 @@ function installRuntimeRpc(
           preferPinnedWsPort: true
         }
       : {}),
+    ...buildServeRuntimeRpcOptions(serveOptions),
     webClientRoot: getBundledWebClientRoot()
   })
   state.runtimeRpc = runtimeRpc
@@ -165,8 +167,14 @@ async function launchServeMode(
   settleDesktopActivation()
   // Why: every attempt must reach app.quit(); a page beforeunload can veto an earlier signal.
   registerServeSignalHandlers(process, () => app.quit())
+  // Why (VSAgent fork): a tarball install links the CLI launchers itself, so the serve process must
+  // neither race nor overwrite them. Gates both install blocks below.
+  const cliLaunchersExternallyManaged = process.env.ORCA_MANAGED_INSTALL === '1'
   // Why: headless serve has no renderer to run the normal cli:install flow; do it here for macOS/Linux only (Windows-excluded: install() only mutates registry PATH, not child terminals).
-  if (process.platform === 'darwin' || process.platform === 'linux') {
+  if (
+    !cliLaunchersExternallyManaged &&
+    (process.platform === 'darwin' || process.platform === 'linux')
+  ) {
     try {
       // Why: serve is headless — a fallback osascript admin prompt would hang it; skip elevation since ~/.local/bin needs none.
       const cliStatus = await new CliInstaller({
@@ -185,7 +193,12 @@ async function launchServeMode(
     }
   }
   // Why: Linux CLI installs as `orca-ide`, but the Claude Team launcher invokes bare `orca`; drop a ~/.local/bin dispatcher (ahead of /usr/bin) so it resolves. Best-effort.
-  if (process.platform === 'linux' && app.isPackaged && process.resourcesPath) {
+  if (
+    !cliLaunchersExternallyManaged &&
+    process.platform === 'linux' &&
+    app.isPackaged &&
+    process.resourcesPath
+  ) {
     try {
       const dispatcher = await installLinuxBareOrcaDispatcher({
         resourcesPath: process.resourcesPath

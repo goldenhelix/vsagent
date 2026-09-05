@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { resolveAdvertisedPairingEndpoint } from '../runtime/pairing-endpoint'
 import { notifyServeSupervisorReady } from '../serve-update-handoff'
 import { mainProcessState as state } from './main-process-state'
+import { describeServeBindExposure } from './serve-bind-exposure'
 import { getServeOptions, type ServeOptions } from './serve-options'
 
 export { getServeOptions, type ServeOptions }
@@ -51,6 +52,12 @@ export async function printServeReady(options: ServeOptions): Promise<void> {
     }
   }
   const boundEndpoint = runtimeRpc.getWebSocketEndpoint()
+  // Why the endpoint and not the flag: with no --host the serve default is the wide bind, so the
+  // flag alone cannot describe what got bound. stderr keeps it clear of the readiness payload.
+  const bindHost = boundEndpoint ? new URL(boundEndpoint).hostname : options.bindHost
+  if (bindHost) {
+    console.error(`[serve] ${describeServeBindExposure(bindHost)}`)
+  }
   const advertised = boundEndpoint
     ? resolveAdvertisedPairingEndpoint(boundEndpoint, options.pairingAddress)
     : null

@@ -23,8 +23,10 @@ export const WS_BIND_HOST_ALL_INTERFACES = '0.0.0.0'
 
 // Why brackets: `ws://::1:6768` is not a URL, and every consumer of this endpoint parses it
 // with `new URL`. An IPv6 bind address would otherwise publish an unparseable endpoint.
-export function formatWsEndpoint(host: string, port: number): string {
-  return `ws://${host.includes(':') ? `[${host}]` : host}:${port}`
+// Why `secure`: a served-over-TLS listener must publish `wss://`, or the derived web-client URL
+// stays `http://` and `isMixedContentWebSocket` silently refuses the pairing link.
+export function formatWsEndpoint(host: string, port: number, secure = false): string {
+  return `${secure ? 'wss' : 'ws'}://${host.includes(':') ? `[${host}]` : host}:${port}`
 }
 
 export type OrcaRuntimeRpcServerOptions = {
@@ -49,6 +51,20 @@ export type OrcaRuntimeRpcServerOptions = {
    * has to outrank both, and `ensureNetworkExposure()` has to refuse rather than widen.
    */
   pinnedBindHost?: string
+  /**
+   * Serve the WebSocket/web-client listener over TLS (`wss://` + `https://`) so a container can
+   * expose HTTPS with no reverse proxy. Self-signed by default; the two paths below hand it an
+   * operator-provided certificate instead, and are read only while this is set.
+   */
+  serveTls?: boolean
+  serveTlsCertPath?: string
+  serveTlsKeyPath?: string
+  // Why: display name carried in pairing offers so a client saves a meaningful server name
+  // (`orca serve --name` / the host's hostname) rather than a generic label.
+  serverDisplayName?: string | null
+  // Why: on-demand offers minted after startup have no address of their own, so without the serve's
+  // configured one they would advertise an unreachable 127.0.0.1.
+  defaultPairingAddress?: string | null
   webClientRoot?: string
   // Why: test-only overrides for the two constants below; production must not pass these (defaults set by §3.1).
   keepaliveIntervalMs?: number
