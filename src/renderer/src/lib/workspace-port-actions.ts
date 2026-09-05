@@ -15,6 +15,10 @@ import type {
 import type { LocalhostWorktreeLabelRoute } from '../../../shared/localhost-worktree-labels'
 import { runWorkspacePortScanForTarget } from './workspace-port-scan-client'
 import { browserUrlForPort } from './workspace-port-urls'
+import {
+  canRoutePortThroughWebPreview,
+  openPortThroughWebPreviewWindow
+} from './workspace-port-webpreview-open'
 import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { RUNTIME_BROWSER_UNAVAILABLE_MESSAGE } from './client-creation-action-policy'
 
@@ -120,6 +124,12 @@ export async function openWorkspacePortInBrowser(args: {
       url = rawUrl
     }
   }
+  // Why (web client): this URL is the serve host's loopback, which the user's own
+  // machine cannot reach — shell.openUrl would open a dead address. Route the new
+  // tab through a webpreview session on the host instead.
+  if (args.openInOrcaBrowser === false && canRoutePortThroughWebPreview()) {
+    return openPortThroughWebPreviewWindow(url)
+  }
   if (args.openInOrcaBrowser === false && args.runtimeTarget.kind === 'local') {
     try {
       await window.api.shell.openUrl(url)
@@ -138,7 +148,12 @@ export async function openWorkspacePortInBrowser(args: {
   // Why: the browser tab opened below is this jump's surface; seeding a shell would add a
   // PTY the user never asked for in a workspace whose last terminal they closed.
   activateAndRevealWorktree(worktreeId, { providesInitialSurface: true })
-  if (args.runtimeTarget.kind === 'environment') {
+  // Why (web client): fall through to the client-local tab below, which renders
+  // WebBrowserPane and proxies the URL itself. browser.tabCreate would start the
+  // host's screencast machinery and let host snapshots overwrite the locally
+  // navigated URL, so the page is deliberately left without a
+  // browserRuntimeEnvironmentId.
+  if (args.runtimeTarget.kind === 'environment' && !canRoutePortThroughWebPreview()) {
     try {
       await assertRuntimeEnvironmentCapability(
         args.runtimeTarget.environmentId,
