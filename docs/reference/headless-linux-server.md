@@ -946,9 +946,12 @@ profile` and the unit exits `3`: another process already owns the profile, so
   keep it and leave the unit down), then run
   `sudo systemctl reset-failed orca-serve && sudo systemctl start orca-serve` —
   `reset-failed` clears the failed state and any start-limit counter. If no owner
-  exists, the lock is stale (Chromium recorded a pid that
-  has since been reused): remove `SingletonLock` and `SingletonSocket` from the
-  userData directory and start again. If an earlier crash-loop already leaked
+  exists, the lock is stale (Chromium recorded a pid or hostname — container
+  restarts get a new one — that no longer matches): Orca reclaims a provably-dead
+  `SingletonLock`/`SingletonSocket`/`SingletonCookie` automatically before
+  acquiring the lock, so this is normally self-healing on the next start. Set
+  `ORCA_SERVE_KEEP_STALE_SINGLETON_LOCK=1` in the service environment to opt out
+  and remove the files by hand instead. If an earlier crash-loop already leaked
   AppImage mounts, list them with `findmnt -rn -t fuse.orca-linux.AppImage` and
   release only the ones with no live owner using `fusermount -uz <target>` (or
   `umount -l <target>`), leaving the running instance's mount alone.

@@ -22,6 +22,7 @@ import {
   installUnhandledRejectionLogging
 } from './main-process-error-guards'
 import { hydrateShellPath, mergePathSegments } from './hydrate-shell-path'
+import { reclaimStaleSingletonLock } from './reclaim-stale-singleton-lock'
 import { configureRemoteServerUpdater } from '../runtime/remote-server-updater'
 import {
   getRemoteServerUpdaterSnapshot,
@@ -194,6 +195,16 @@ export function runMainProcessPreflight(options: MainProcessPreflightOptions): b
   // Why the diff-cache counters ride along: a stamp the filesystem reports unstably makes the cache
   // look exactly like a cold start, and only the hit/miss/unprovable split tells the two apart.
   startMainThreadChurnProbe({ extraStats: () => ({ diffCache: settledDiffCache.stats() }) })
+  // Why (VSAgent): a container restart leaves a stale Chromium SingletonLock on a
+  // persistent userData volume (new hostname per container), which reads as "profile
+  // in use" and kills the launch via a confusing X11 crash. Reclaim it before
+  // acquisition when the holder is provably unreachable (opt out with
+  // ORCA_SERVE_KEEP_STALE_SINGLETON_LOCK=1). Uses app.getPath('userData') — already
+  // the canonical/VSAgent path here, set by configureDevUserDataPath above.
+  const singletonReclaim = reclaimStaleSingletonLock({
+    userDataPath: app.getPath('userData'),
+    isServeMode: state.isServeMode
+  })
   // Why: acquire AFTER configureDevUserDataPath — Electron derives lock identity from `userData`, so dev/packaged lock in separate namespaces.
   // Why skip in dev: parallel `pnpm dev` from multiple worktrees would make the second exit silently; packaged keeps the lock (corruption PR #1326 / #1312).
   const bypass = shouldBypassSingleInstanceLock({ isDev, isServeMode: state.isServeMode })
@@ -207,7 +218,9 @@ export function runMainProcessPreflight(options: MainProcessPreflightOptions): b
     logStartupDiagnostic('single-instance-lock-result', {
       acquired: hasLock,
       bypassed: bypass,
-      skippedForDev: skip
+      skippedForDev: skip,
+      staleLockReclaimed: singletonReclaim.reclaimed,
+      staleLockReason: singletonReclaim.reason
     })
   }
   if (!hasLock) {

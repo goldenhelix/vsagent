@@ -26,6 +26,10 @@ const NATIVE_MODULES = [
     : [])
 ]
 const NODE_PTY_CONPTY_RUNTIME_FILES = ['conpty.dll', 'OpenConsole.exe']
+
+// Why: cached lazily by getElectronAbiVersion(); declared before the
+// top-level dispatch below runs so the first call is not a TDZ access.
+let cachedElectronAbi
 const CHILD_CHECK_FLAG = '--check-only'
 
 if (process.argv.includes(CHILD_CHECK_FLAG)) {
@@ -338,11 +342,60 @@ function getPatchedNodePtyRebuildReason() {
   const artifactPaths = patchedNodePtyArtifactPaths(nodePtyDir)
   const missingArtifact = artifactPaths.find((artifactPath) => !existsSync(artifactPath))
 
-  if (!missingArtifact) {
-    return null
+  if (missingArtifact) {
+    return 'Patched node-pty build artifacts are missing; rebuilding native deps.'
   }
 
-  return 'Patched node-pty build artifacts are missing; rebuilding native deps.'
+  // Why: node-pty is pure N-API, so the Electron load probe passes even when
+  // the artifact was compiled against a different runtime's ABI (dlopen does
+  // no NODE_MODULE_VERSION check) — the drift then crashes at runtime instead.
+  // Compare the recorded build ABI against Electron's and rebuild on mismatch.
+  if (runtime === 'electron') {
+    const builtAbi = getBuiltNodePtyAbi(nodePtyDir)
+    const electronAbi = getElectronAbiVersion()
+    if (builtAbi !== null && electronAbi !== null && builtAbi !== electronAbi) {
+      return `node-pty was built for Node ABI ${builtAbi}; Electron needs ${electronAbi}. Rebuilding native deps.`
+    }
+  }
+
+  return null
+}
+
+function getBuiltNodePtyAbi(nodePtyDir) {
+  const configGypiPath = resolve(nodePtyDir, 'build', 'config.gypi')
+  if (!existsSync(configGypiPath)) {
+    return null
+  }
+  try {
+    const match = readFileSync(configGypiPath, 'utf8').match(
+      /["']?node_module_version["']?\s*[:=]\s*(\d+)/
+    )
+    return match ? Number(match[1]) : null
+  } catch {
+    return null
+  }
+}
+
+function getElectronAbiVersion() {
+  if (cachedElectronAbi !== undefined) {
+    return cachedElectronAbi
+  }
+  cachedElectronAbi = null
+  const executable = resolveInstalledElectronExecutable()
+  if (executable && executable.path) {
+    try {
+      const result = spawnSync(executable.path, ['-p', 'process.versions.modules'], {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        encoding: 'utf8',
+        timeout: 30_000
+      })
+      const parsed = Number(String(result.stdout ?? '').trim())
+      cachedElectronAbi = Number.isInteger(parsed) && parsed > 0 ? parsed : null
+    } catch {
+      cachedElectronAbi = null
+    }
+  }
+  return cachedElectronAbi
 }
 
 function patchedNodePtyArtifactPaths(nodePtyDir) {
