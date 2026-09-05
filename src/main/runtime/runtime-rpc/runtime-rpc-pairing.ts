@@ -7,6 +7,7 @@ import type {
   RelayRevokeOutboxItem
 } from '../relay/relay-revoke-outbox'
 import { encodePairingOffer, PAIRING_OFFER_VERSION } from '../../../shared/pairing'
+import { boundedPairingOfferName } from '../../../shared/mobile-relay-pairing-offer'
 import type { RuntimePairingReach } from '../../../shared/runtime-pairing-reach'
 import { resolveAdvertisedPairingEndpoint } from '../pairing-endpoint'
 import { RuntimeRpcNetworkExposure } from './runtime-rpc-network-exposure'
@@ -128,6 +129,7 @@ export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
         endpoint: string
         deviceId: string
         webClientUrl: string | null
+        serverName: string | null
       } {
     if (this.pairingInitializationFailure) {
       return this.pairingInitializationFailure
@@ -164,12 +166,16 @@ export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
       console.error('[runtime] Failed to persist pairing credential:', error)
       return pairingUnavailable('device_registry_unavailable', DEVICE_REGISTRY_UNAVAILABLE_GUIDANCE)
     }
+    // Why (VSAgent fork): `--serve-name` / hostname rides along so a paired web
+    // client can label the server without asking the operator to retype it.
+    const serverName = boundedPairingOfferName(this.serverDisplayName)
     const pairingUrl = encodePairingOffer({
       v: PAIRING_OFFER_VERSION,
       endpoint,
       deviceToken: device.token,
       publicKeyB64,
       pairedDeviceId: device.deviceId,
+      ...(serverName ? { name: serverName } : {}),
       scope
     })
     return {
@@ -177,6 +183,7 @@ export class RuntimeRpcPairing extends RuntimeRpcNetworkExposure {
       pairingUrl,
       endpoint,
       deviceId: device.deviceId,
+      serverName: serverName ?? null,
       webClientUrl:
         this.webClientRoot && scope === 'runtime' ? createWebClientUrl(endpoint, pairingUrl) : null
     }

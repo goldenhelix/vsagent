@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   PAIRING_DEVICE_TOKEN_MAX_CHARACTERS,
   PAIRING_ENDPOINT_MAX_CHARACTERS,
+  PAIRING_OFFER_NAME_MAX_CHARACTERS,
   PAIRING_PUBLIC_KEY_MAX_CHARACTERS,
   PAIRING_RELAY_URL_MAX_CHARACTERS
 } from './mobile-pairing-protocol-limits'
@@ -76,6 +77,10 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
       // offer, while relayHostId is verified from its decoded bytes later.
       publicKeyB64: z.string().min(1).max(PAIRING_PUBLIC_KEY_MAX_CHARACTERS),
       pairedDeviceId: z.string().min(1).max(128).optional(),
+      // Why (VSAgent fork): optional server display name (`--serve-name` /
+      // hostname) so a paired client can label the server without asking. Old
+      // decoders ignore it; this schema strips it from anything it re-encodes.
+      name: z.string().min(1).max(PAIRING_OFFER_NAME_MAX_CHARACTERS).optional(),
       scope: PairingScopeSchema.optional(),
       relay: relaySchema.optional()
     })
@@ -99,6 +104,14 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
         })
       }
     })
+}
+
+// Why: the schema rejects an over-long or blank `name`, so every producer has
+// to bound its own label — otherwise a long `--serve-name` turns into a thrown
+// offer instead of a truncated one. `undefined` keeps the field off the wire.
+export function boundedPairingOfferName(value: string | null | undefined): string | undefined {
+  const bounded = value?.trim().slice(0, PAIRING_OFFER_NAME_MAX_CHARACTERS).trim()
+  return bounded ? bounded : undefined
 }
 
 export const PairingOfferSchema = createPairingOfferSchema()

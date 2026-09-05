@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { decideWebPairingStartup, parseWebPairingInput, type WebPairingOffer } from './web-pairing'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  decideWebPairingStartup,
+  defaultWebEnvironmentName,
+  parseWebPairingInput,
+  type WebPairingOffer
+} from './web-pairing'
 
 describe('web pairing input', () => {
   const offer: WebPairingOffer = {
@@ -93,5 +98,62 @@ describe('web pairing input', () => {
     ).toEqual({
       kind: 'use-stored-environment'
     })
+  })
+
+  it('decodes the optional server display name', () => {
+    expect(parseWebPairingInput(`orca://pair?code=${encodeOffer({ name: 'rudy01' })}`)).toEqual({
+      ...offer,
+      name: 'rudy01'
+    })
+  })
+
+  it('drops a blank server name and caps an over-long one', () => {
+    expect(parseWebPairingInput(`orca://pair?code=${encodeOffer()}`)?.name).toBeUndefined()
+    expect(
+      parseWebPairingInput(`orca://pair?code=${encodeOffer({ name: '   ' })}`)?.name
+    ).toBeUndefined()
+    expect(
+      parseWebPairingInput(`orca://pair?code=${encodeOffer({ name: 42 })}`)?.name
+    ).toBeUndefined()
+    expect(
+      parseWebPairingInput(`orca://pair?code=${encodeOffer({ name: 'x'.repeat(200) })}`)?.name
+    ).toHaveLength(64)
+  })
+})
+
+describe('defaultWebEnvironmentName', () => {
+  const offer: WebPairingOffer = {
+    v: 2,
+    endpoint: 'wss://dev-rudy01.ts.net:8445',
+    deviceToken: 'token',
+    publicKeyB64: 'public-key'
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('prefers the offer name, then the endpoint hostname', () => {
+    expect(defaultWebEnvironmentName({ ...offer, name: 'VSWarehouse' })).toBe('VSWarehouse')
+    expect(defaultWebEnvironmentName(offer)).toBe('dev-rudy01.ts.net')
+  })
+
+  it('falls back to the generic label for loopback endpoints and no offer', () => {
+    expect(defaultWebEnvironmentName({ ...offer, endpoint: 'ws://127.0.0.1:6768' })).toBe(
+      'Orca Server'
+    )
+    expect(defaultWebEnvironmentName({ ...offer, endpoint: 'ws://localhost:6768' })).toBe(
+      'Orca Server'
+    )
+    expect(defaultWebEnvironmentName({ ...offer, endpoint: 'not a url' })).toBe('Orca Server')
+    expect(defaultWebEnvironmentName(null)).toBe('Orca Server')
+  })
+
+  it('brands the generic label through the web-mode i18n seam', () => {
+    vi.stubGlobal('window', { __ORCA_WEB_CLIENT__: true })
+
+    expect(defaultWebEnvironmentName(null)).toBe('VSAgent Server')
+    // Why: a server-supplied name is a real identity, never rebranded.
+    expect(defaultWebEnvironmentName({ ...offer, name: 'Orca box' })).toBe('Orca box')
   })
 })

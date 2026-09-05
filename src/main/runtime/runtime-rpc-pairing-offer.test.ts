@@ -241,6 +241,58 @@ describe('OrcaRuntimeRpcServer', () => {
     }
   })
 
+  it('carries the serve display name in the offer, capped at 64 characters', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
+    const server = new OrcaRuntimeRpcServer({
+      runtime: new OrcaRuntimeService(),
+      userDataPath,
+      enableWebSocket: true,
+      wsPort: 0,
+      webClientRoot: userDataPath,
+      serverDisplayName: `  ${'n'.repeat(200)}  `
+    })
+
+    await server.start()
+
+    try {
+      const offer = server.createPairingOffer({ address: '100.64.1.20', name: 'Named test' })
+      expect(offer.available).toBe(true)
+      if (!offer.available) {
+        throw new Error('WebSocket pairing unavailable')
+      }
+
+      expect(offer.serverName).toBe('n'.repeat(64))
+      expect(parsePairingCode(offer.pairingUrl)?.name).toBe('n'.repeat(64))
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('omits the offer name when no serve display name is configured', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
+    const server = new OrcaRuntimeRpcServer({
+      runtime: new OrcaRuntimeService(),
+      userDataPath,
+      enableWebSocket: true,
+      wsPort: 0
+    })
+
+    await server.start()
+
+    try {
+      const offer = server.createPairingOffer({ name: 'Unnamed test' })
+      expect(offer.available).toBe(true)
+      if (!offer.available) {
+        throw new Error('WebSocket pairing unavailable')
+      }
+
+      expect(offer.serverName).toBeNull()
+      expect(parsePairingCode(offer.pairingUrl)?.name).toBeUndefined()
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('creates mobile-scoped pairing offers for headless mobile pairing', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
     const runtime = new OrcaRuntimeService()
