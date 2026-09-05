@@ -6,6 +6,7 @@ import {
   shouldShowCopyFileAction,
   shouldShowOpenInTerminalAction,
   shouldShowRemoteDownloadAction,
+  shouldShowRevealInFileManagerAction,
   shouldShowViewFileAction
 } from './file-explorer-row-action-visibility'
 import { directoryNode, fileNode } from './file-explorer-tree-node-test-fixtures'
@@ -110,6 +111,14 @@ describe('FileExplorerRow collapse folder action', () => {
 
     expect(shouldShowRemoteDownloadAction(fileNode, 'ssh-1')).toBe(false)
     expect(shouldShowRemoteDownloadAction(fileNode, null, runtimeContext)).toBe(false)
+  })
+
+  it('hides the reveal-in-file-manager action only in VSAgent web mode', () => {
+    expect(shouldShowRevealInFileManagerAction()).toBe(true)
+
+    ;(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
+
+    expect(shouldShowRevealInFileManagerAction()).toBe(false)
   })
 
   it('shows OS file copy for single local rows and SSH file rows on desktop', () => {

@@ -35,6 +35,7 @@ import {
   shouldShowFindInFolderAction,
   shouldShowOpenInTerminalAction,
   shouldShowRemoteDownloadAction,
+  shouldShowRevealInFileManagerAction,
   shouldShowViewFileAction
 } from './file-explorer-row-action-visibility'
 import { copyFileToOsClipboard, downloadRemoteFile } from './file-explorer-row-file-transfer'
@@ -269,29 +270,31 @@ export function FileExplorerRowContextMenu({
           ) : null}
         </ContextMenuItem>
       )}
-      <ContextMenuItem
-        onSelect={() => {
-          const state = useAppStore.getState()
-          const activeWorktree = Object.values(state.worktreesByRepo)
-            .flat()
-            .find((worktree) => worktree.id === activeWorktreeId)
-          const activeRepo = activeWorktree
-            ? state.repos.find((repo) => repo.id === activeWorktree.repoId)
-            : null
-          if (
-            isLocalPathOpenBlocked(state.settings, {
-              connectionId: activeRepo?.connectionId ?? null
-            })
-          ) {
-            showLocalPathOpenBlockedToast()
-            return
-          }
-          window.api.shell.openPath(node.path)
-        }}
-      >
-        <ExternalLink />
-        {revealLabel}
-      </ContextMenuItem>
+      {shouldShowRevealInFileManagerAction() && (
+        <ContextMenuItem
+          onSelect={() => {
+            const state = useAppStore.getState()
+            const activeWorktree = Object.values(state.worktreesByRepo)
+              .flat()
+              .find((worktree) => worktree.id === activeWorktreeId)
+            const activeRepo = activeWorktree
+              ? state.repos.find((repo) => repo.id === activeWorktree.repoId)
+              : null
+            if (
+              isLocalPathOpenBlocked(state.settings, {
+                connectionId: activeRepo?.connectionId ?? null
+              })
+            ) {
+              showLocalPathOpenBlockedToast()
+              return
+            }
+            window.api.shell.openPath(node.path)
+          }}
+        >
+          <ExternalLink />
+          {revealLabel}
+        </ContextMenuItem>
+      )}
       <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => onStartRename(node)}>
         <Pencil />

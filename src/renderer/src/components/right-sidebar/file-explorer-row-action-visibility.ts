@@ -36,6 +36,11 @@ export function shouldShowRemoteDownloadAction(
   )
 }
 
+export function shouldShowRevealInFileManagerAction(): boolean {
+  // Why: reveal opens the *host's* file manager, which the browser client cannot see.
+  return (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ !== true
+}
+
 export function shouldShowCopyFileAction(
   node: TreeNode,
   connectionId?: string | null,

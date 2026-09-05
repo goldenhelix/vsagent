@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { shouldShowRevealInFileManagerAction } from '@/components/right-sidebar/file-explorer-row-action-visibility'
 import { translate } from '@/i18n/i18n'
 import type { DiscoveredSkill, SkillProvider } from '../../../../shared/skills'
 import { sourceKindLabel } from './skill-display-labels'
@@ -113,12 +114,18 @@ export function SkillRow({
       disabled: !shareable,
       onSelect: onShare
     },
-    {
-      key: 'reveal',
-      label: translate('auto.components.skills.SkillsPage.dc4c3328ee', 'Reveal file'),
-      icon: <FolderOpen />,
-      onSelect: () => void revealSkill()
-    },
+    // Why (VSAgent web): reveal opens the server host's file manager, which is
+    // meaningless from the browser client — hide it there.
+    ...(shouldShowRevealInFileManagerAction()
+      ? [
+          {
+            key: 'reveal',
+            label: translate('auto.components.skills.SkillsPage.dc4c3328ee', 'Reveal file'),
+            icon: <FolderOpen />,
+            onSelect: () => void revealSkill()
+          }
+        ]
+      : []),
     {
       key: 'copy-path',
       label: translate('auto.components.skills.SkillRow.copyPath', 'Copy path'),

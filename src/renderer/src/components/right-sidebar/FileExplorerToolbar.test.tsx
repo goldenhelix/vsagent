@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Ellipsis, ListCollapse, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu'
+import { DropdownMenuCheckboxItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { WorktreeOpenInMenuItems } from '@/components/sidebar/WorktreeOpenInMenu'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { FileExplorerToolbar } from './FileExplorerToolbar'
 import { visit, type ReactElementLike } from './file-explorer-element-tree-test-harness'
+
+// Default: desktop. The VSAgent-web case below opts in per-test.
+vi.mock('@/lib/vsagent-web-mode', () => ({ isVSAgentWebMode: vi.fn(() => false) }))
 
 function findRefreshButton(node: unknown): ReactElementLike {
   let found: ReactElementLike | null = null
@@ -321,5 +325,16 @@ describe('FileExplorerToolbar', () => {
     expect(queryMoreActionsButton(element)).not.toBeNull()
     expect(queryGitIgnoredMenuItem(element)).toBeNull()
     expect(findOpenInMenuItems(element).props.labelPrefix).toBe('Open in ')
+  })
+
+  it('drops the separator ahead of the (now empty) "Open in" entries in VSAgent web mode', () => {
+    vi.mocked(isVSAgentWebMode).mockReturnValue(true)
+    try {
+      const element = makeToolbar()
+
+      expect(hasIcon(element, DropdownMenuSeparator)).toBe(false)
+    } finally {
+      vi.mocked(isVSAgentWebMode).mockReturnValue(false)
+    }
   })
 })

@@ -14,6 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { translate } from '@/i18n/i18n'
 
 function openFailureMessage(reason: string): string {
@@ -182,35 +183,42 @@ export function KeybindingsFileActions(): React.JSX.Element {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => void openKeybindingsFile()}>
-            <ExternalLink className="size-3.5" />
-            {translate(
-              'auto.components.settings.KeybindingsFileActions.98f1a23e1c',
-              'Open with Default App'
-            )}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void openKeybindingsInExternalEditor('code')}>
-            <Code2 className="size-3.5" />
-            {translate(
-              'auto.components.settings.KeybindingsFileActions.1637f64033',
-              'Open in VS Code'
-            )}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void openKeybindingsInExternalEditor('cursor')}>
-            <Code2 className="size-3.5" />
-            {translate(
-              'auto.components.settings.KeybindingsFileActions.9e24c0e858',
-              'Open in Cursor'
-            )}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void revealKeybindingsFile()}>
-            <FolderOpen className="size-3.5" />
-            {translate(
-              'auto.components.settings.KeybindingsFileActions.a8a8d6b9d3',
-              'Reveal in File Manager'
-            )}
-          </DropdownMenuItem>
+          {/* Why (VSAgent web): default-app open, external editors, and file-manager
+              reveal all act on the server host — hidden in the browser client.
+              "Edit File in Orca" and "Reload from Disk" stay (in-app / server read). */}
+          {!isVSAgentWebMode() && (
+            <>
+              <DropdownMenuItem onSelect={() => void openKeybindingsFile()}>
+                <ExternalLink className="size-3.5" />
+                {translate(
+                  'auto.components.settings.KeybindingsFileActions.98f1a23e1c',
+                  'Open with Default App'
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void openKeybindingsInExternalEditor('code')}>
+                <Code2 className="size-3.5" />
+                {translate(
+                  'auto.components.settings.KeybindingsFileActions.1637f64033',
+                  'Open in VS Code'
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void openKeybindingsInExternalEditor('cursor')}>
+                <Code2 className="size-3.5" />
+                {translate(
+                  'auto.components.settings.KeybindingsFileActions.9e24c0e858',
+                  'Open in Cursor'
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void revealKeybindingsFile()}>
+                <FolderOpen className="size-3.5" />
+                {translate(
+                  'auto.components.settings.KeybindingsFileActions.a8a8d6b9d3',
+                  'Reveal in File Manager'
+                )}
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuItem onSelect={() => void reloadKeybindings()}>
             <RefreshCw className="size-3.5" />
             {translate(
