@@ -185,6 +185,9 @@
           "environment": {
             "07f788de83": "ウェブソケット"
           }
+        },
+        "pairing": {
+          "defaultServerName": "Orca サーバー"
         }
       }
     },
@@ -7365,7 +7368,9 @@
           "integrationsHint": "すべてのプロバイダーの認証情報は次の場所でも管理できます：",
           "integrationsLink": "連携",
           "skillHint": "。Linear の接続後、使用例は設定 → Linear で確認できます。",
-          "incompleteBannerBodyWithLinear": "使用しないプロバイダーを非表示にするか、カードを展開して手順を完了してください。Linear では API アクセス、Agent スキル、タスクへの表示が必要です。"
+          "incompleteBannerBodyWithLinear": "使用しないプロバイダーを非表示にするか、カードを展開して手順を完了してください。Linear では API アクセス、Agent スキル、タスクへの表示が必要です。",
+          "giteaLabel": "Gitea",
+          "giteaDescription": "サーバーで設定されたトークンを使って Gitea の Issue を参照し、タスクに表示します。"
         },
         "TerminalAppearanceSection": {
           "a14a427ae4": "ペイン分割線の太さ。",

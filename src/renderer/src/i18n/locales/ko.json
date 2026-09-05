@@ -185,6 +185,9 @@
           "environment": {
             "07f788de83": "웹소켓"
           }
+        },
+        "pairing": {
+          "defaultServerName": "Orca 서버"
         }
       }
     },
@@ -7333,7 +7336,9 @@
           "integrationsHint": "모든 제공업체의 자격 증명은 다음에서도 관리할 수 있습니다:",
           "integrationsLink": "연동",
           "skillHint": ". Linear를 연결한 후 사용 예시는 설정 → Linear에서 확인할 수 있습니다.",
-          "incompleteBannerBodyWithLinear": "사용하지 않는 제공업체를 숨기거나 카드를 펼쳐 단계를 완료하세요. Linear에는 API 액세스, 에이전트 스킬, 작업에 표시가 필요합니다."
+          "incompleteBannerBodyWithLinear": "사용하지 않는 제공업체를 숨기거나 카드를 펼쳐 단계를 완료하세요. Linear에는 API 액세스, 에이전트 스킬, 작업에 표시가 필요합니다.",
+          "giteaLabel": "Gitea",
+          "giteaDescription": "서버에 구성된 토큰으로 Gitea 이슈를 탐색하고 작업에 표시하세요."
         },
         "TerminalAppearanceSection": {
           "a14a427ae4": "창 구분선의 두께입니다.",

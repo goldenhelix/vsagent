@@ -253,6 +253,9 @@
           "environment": {
             "07f788de83": "WebSocket"
           }
+        },
+        "pairing": {
+          "defaultServerName": "Serveur Orca"
         }
       }
     },
@@ -8180,7 +8183,9 @@
           "integrationsHint": "Les identifiants de tous les fournisseurs se trouvent aussi sous",
           "integrationsLink": "Intégrations",
           "skillHint": ". Une fois Linear connecté, des exemples d'utilisation restent disponibles sous Paramètres → Linear.",
-          "incompleteBannerBodyWithLinear": "Masquez les fournisseurs que vous n'utilisez pas, ou dépliez une carte et terminez ses étapes. Pour Linear : accès API, skill d'agent et Afficher dans Tâches."
+          "incompleteBannerBodyWithLinear": "Masquez les fournisseurs que vous n'utilisez pas, ou dépliez une carte et terminez ses étapes. Pour Linear : accès API, skill d'agent et Afficher dans Tâches.",
+          "giteaLabel": "Gitea",
+          "giteaDescription": "Parcourez les issues Gitea avec un token configuré sur le serveur et affichez-les dans Tâches."
         },
         "TerminalAppearanceSection": {
           "a14a427ae4": "Épaisseur de la ligne de séparation des volets.",

@@ -185,6 +185,9 @@
           "environment": {
             "07f788de83": "WebSocket"
           }
+        },
+        "pairing": {
+          "defaultServerName": "Servidor Orca"
         }
       }
     },
@@ -7343,7 +7346,9 @@
           "integrationsHint": "Las credenciales de todos los proveedores también están en",
           "integrationsLink": "Integraciones",
           "skillHint": ". Después de conectar Linear, los ejemplos de uso están en Ajustes → Linear.",
-          "incompleteBannerBodyWithLinear": "Oculta los proveedores que no uses o expande una tarjeta y completa sus pasos. Para Linear: acceso a la API, la habilidad del agente y Mostrar en Tareas."
+          "incompleteBannerBodyWithLinear": "Oculta los proveedores que no uses o expande una tarjeta y completa sus pasos. Para Linear: acceso a la API, la habilidad del agente y Mostrar en Tareas.",
+          "giteaLabel": "Gitea",
+          "giteaDescription": "Explora incidencias de Gitea con un token configurado en el servidor y muéstralas en Tareas."
         },
         "TerminalAppearanceSection": {
           "a14a427ae4": "Grosor de la línea divisoria del panel.",
