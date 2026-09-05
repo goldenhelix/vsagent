@@ -10,7 +10,9 @@ name: Release (Linux x64 tarball)
 #   - build:cli            (orca CLI + out/package.json boundary)
 #   - build:electron-vite  (main + preload + renderer bundles; must follow
 #                           build:cli so its clean out/main wins)
-#   - build:web            (browser web client at out/web/web-index.html)
+#   - verify:built-skills-cli    (the built CLI's require()/import() graph)
+#   - build:web-from-renderer    (browser web client at out/web/web-index.html,
+#                                 projected out of out/renderer)
 # All wrapped in config/scripts/build-release-tarball.mjs.
 
 on:
