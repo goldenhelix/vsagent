@@ -13,7 +13,10 @@ export function useGitLabPrimaryActions(
   itemId: string | null,
   repoSelector: GitLabDialogRepoSelector | null,
   state: GitLabItemDialogState,
-  handleRefresh: () => void
+  handleRefresh: () => void,
+  // Why: Gitea reuses this dialog; its issue comments route to the gitea
+  // preload namespace. MR mutations (close/reopen/merge) never fire for Gitea.
+  provider: 'gitlab' | 'gitea' = 'gitlab'
 ) {
   const {
     commentDraft,
@@ -137,8 +140,10 @@ export function useGitLabPrimaryActions(
     }
     setCommentSubmitting(true)
     try {
-      // Why: the IPC for issue comments takes `number`, MR takes `iid`.
-      // Branch on the item type to hit the right channel.
+      // Why: the IPC for issue comments takes `number`, MR takes `iid`. Branch
+      // on the item type to hit the right channel; issue comments additionally
+      // route to `gitea` when this dialog is showing a Gitea item.
+      const issueApi = provider === 'gitea' ? window.api.gitea : window.api.gl
       const res =
         item.type === 'mr'
           ? await window.api.gl.addMRComment({
@@ -146,7 +151,7 @@ export function useGitLabPrimaryActions(
               iid: item.number,
               body: bodyState.body
             })
-          : await window.api.gl.addIssueComment({
+          : await issueApi.addIssueComment({
               ...repoSelector,
               number: item.number,
               body: bodyState.body
@@ -179,6 +184,7 @@ export function useGitLabPrimaryActions(
     item,
     itemId,
     mountedRef,
+    provider,
     repoSelector,
     setCommentDraftState,
     setCommentSubmitting
