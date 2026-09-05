@@ -31,14 +31,16 @@ export const PROJECT_COMMAND_SPECS: CommandSpec[] = [
     path: ['project', 'setup-existing-folder'],
     summary: 'Make a project available on a host by importing an existing folder',
     usage:
-      'orca project setup-existing-folder --project <id> --host <host-id> --path <path> [--kind git|folder] [--display-name <name>] [--json]',
+      'orca project setup-existing-folder --host <host-id> --path <path> [--project <id>] [--kind git|folder] [--display-name <name>] [--json]',
     allowedFlags: [...GLOBAL_FLAGS, 'project', 'host', 'path', 'kind', 'display-name'],
     notes: [
       'For remote runtimes, --path must be an absolute path on the remote server.',
       '--host runtime:<environment-id> targets that paired Orca server; use the id from `orca environment list`, not the environment name.',
-      'SSH targets are set up through the desktop UI because the desktop client owns SSH connections.'
+      'SSH targets are set up through the desktop UI because the desktop client owns SSH connections.',
+      'Without --project, the project identity is derived from the folder (idempotent upsert); --kind is auto-detected from the presence of .git when omitted (local host only — SSH targets default to git).'
     ],
     examples: [
+      'orca project setup-existing-folder --host local --path /data/my-scripts --json',
       'orca project setup-existing-folder --project github:stablyai/orca --host local --path ~/orca',
       'orca project setup-existing-folder --project github:stablyai/orca --host runtime:03ef704c-b180-4b10-998d-e28fbd5de9a3 --path /home/me/orca --kind git --json'
     ]

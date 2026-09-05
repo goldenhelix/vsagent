@@ -33,7 +33,9 @@ const RequestedHostId = requiredString('Missing host ID').transform((value, ctx)
 })
 
 const ProjectHostSetupExistingFolder = z.object({
-  projectId: requiredString('Missing project ID'),
+  // Why (VSAgent fork): optional — omitted means "use the identity derived
+  // from the folder" (idempotent open-this-folder upsert).
+  projectId: OptionalString,
   projectProviderIdentity: ProjectProviderIdentity.optional(),
   hostId: RequestedHostId,
   path: requiredString('Missing project path'),

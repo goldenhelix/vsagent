@@ -1,7 +1,11 @@
 // The CLI/runtime RPC used to refuse `--host ssh:*` with "set the project up from the Orca desktop
 // app" — while the desktop IPC handler in the *same process* routed it correctly through
 // addRemoteRepoFromPath. Safe but wrong: the process refusing is the one that owns the connection.
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { isGitRepoMock } = vi.hoisted(() => ({ isGitRepoMock: vi.fn() }))
+vi.mock('../git/repo-detection', () => ({ isGitRepo: isGitRepoMock }))
+
 import { RuntimeProjectHostSetupController } from './runtime-project-host-setup-controller'
 import { getProjectHostSetupForRepo } from '../../shared/project-host-setup-lookup'
 import { projectHostSetupProjectionFromRepos } from '../../shared/project-host-setup-projection'
@@ -116,5 +120,70 @@ describe('RuntimeProjectHostSetupController host routing', () => {
       })
     ).rejects.toThrow(/Cloning onto an SSH host is not supported/)
     expect(cloneRepo).not.toHaveBeenCalled()
+  })
+})
+
+// VSAgent fork (B2.6): `--project` is optional — server-side deployments import a folder before
+// they know which project it belongs to, so the identity derived from the folder is used instead.
+describe('RuntimeProjectHostSetupController identity-free upsert', () => {
+  beforeEach(() => {
+    isGitRepoMock.mockReset()
+  })
+
+  it('upserts idempotently when projectId is omitted, deriving the identity from the folder', async () => {
+    const { controller, projectId } = makeController()
+
+    const first = await controller.setupExistingFolder({
+      hostId: 'local',
+      path: REMOTE_PATH,
+      kind: 'git'
+    })
+    const second = await controller.setupExistingFolder({
+      hostId: 'local',
+      path: REMOTE_PATH,
+      kind: 'git'
+    })
+
+    expect(first.project.id).toBe(projectId)
+    expect(second.project.id).toBe(projectId)
+  })
+
+  it('still throws when the given projectId does not match the derived identity', async () => {
+    const { controller } = makeController()
+
+    await expect(
+      controller.setupExistingFolder({
+        projectId: 'not-the-real-project',
+        hostId: 'local',
+        path: REMOTE_PATH,
+        kind: 'git'
+      })
+    ).rejects.toThrow(/Imported folder does not match the selected project identity/)
+  })
+
+  it('auto-detects kind from the local filesystem when the host is local and kind is omitted', async () => {
+    const { controller, addRepo, projectId } = makeController()
+    isGitRepoMock.mockReturnValue(false)
+
+    await controller.setupExistingFolder({ projectId, hostId: 'local', path: REMOTE_PATH })
+
+    expect(isGitRepoMock).toHaveBeenCalledWith(REMOTE_PATH)
+    expect(addRepo).toHaveBeenCalledWith(REMOTE_PATH, 'folder', 'local')
+  })
+
+  it('does not auto-detect kind on an SSH host, defaulting to git instead of probing the client filesystem', async () => {
+    const { controller, addRemoteRepo, projectId } = makeController()
+    isGitRepoMock.mockReturnValue(false)
+
+    await controller.setupExistingFolder({
+      projectId,
+      hostId: `ssh:${TARGET_ID}`,
+      path: REMOTE_PATH
+    })
+
+    expect(isGitRepoMock).not.toHaveBeenCalled()
+    expect(addRemoteRepo).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: TARGET_ID, kind: 'git' })
+    )
   })
 })
