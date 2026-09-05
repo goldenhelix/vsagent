@@ -158,6 +158,15 @@ export async function getRuntimeBackedStoredSettings(): Promise<GlobalSettings> 
     if (typeof result.settings.agentSkillSharingEnabled === 'boolean') {
       runtimeSettings.agentSkillSharingEnabled = result.settings.agentSkillSharingEnabled
     }
+    // Same read-only mirror, but these two also cross the host's "filesystem defaults stay
+    // host-private" line on purpose: a browser client has no local filesystem, so the workspace
+    // root has to come from the host or new-workspace creation has no default.
+    if (typeof result.settings.workspaceDir === 'string' && result.settings.workspaceDir) {
+      runtimeSettings.workspaceDir = result.settings.workspaceDir
+    }
+    if (typeof result.settings.nestWorkspaces === 'boolean') {
+      runtimeSettings.nestWorkspaces = result.settings.nestWorkspaces
+    }
     const next = mergeSettings(local, runtimeSettings)
     writeStoredSettings(next)
     return settingsForActiveVisibilityOwner(next)

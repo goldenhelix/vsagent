@@ -42,7 +42,10 @@ describe('OrcaRuntimeService', () => {
       minimaxGroupId: 'group-42',
       minimaxUsageModels: 'general,abab6.5',
       // Why: without this the paired client silently falls back to 'overseas' and shows the wrong region.
-      minimaxEndpoint: 'cn'
+      minimaxEndpoint: 'cn',
+      // A browser client has no local filesystem, so the workspace root has to come from the host.
+      workspaceDir: '/tmp/workspaces',
+      nestWorkspaces: false
     })
     expect(runtime.getClientSettings()).not.toHaveProperty('terminalQuickCommands')
     expect(runtime.getClientSettings().hostSettingOverrides).toEqual({
@@ -85,6 +88,16 @@ describe('OrcaRuntimeService', () => {
       { notifyListeners: true }
     )
     expect(runtime.getClientSettings()).not.toHaveProperty('terminalQuickCommands')
+  })
+
+  it('defaults the projected workspace nesting on for a host that never stored it', () => {
+    const { nestWorkspaces: _unset, ...settingsWithoutNesting } = store.getSettings()
+    const runtime = new OrcaRuntimeService({
+      ...store,
+      getSettings: () => settingsWithoutNesting
+    } as never)
+
+    expect(runtime.getClientSettings().nestWorkspaces).toBe(true)
   })
 
   it('applies native-chat option deltas atomically on the runtime host', () => {
