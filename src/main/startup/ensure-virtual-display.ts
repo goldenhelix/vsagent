@@ -2,12 +2,23 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { readFileSync, rmSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { app } from 'electron'
+import {
+  DISPLAYLESS_SERVE_ACTIVE_MESSAGE,
+  DISPLAYLESS_SERVE_LAUNCH_HINT,
+  DISPLAYLESS_SERVE_OPT_IN_HINT,
+  HEADLESS_OZONE_PLATFORM,
+  isDisplaylessServeFallbackEnabled
+} from '../../shared/displayless-serve-fallback'
 
 // Why: headless `orca serve` backs browser panes with offscreen BrowserWindows.
 // On Linux, Electron has no display platform without an X server and segfaults
-// when such a window loads a page (verified: --headless/--ozone-platform=headless
-// also crash; only a virtual display works). So before app.whenReady, ensure a
-// virtual X display via Xvfb when none is present. macOS/Windows need nothing.
+// when such a window loads a page. Appending --headless/--ozone-platform=headless
+// from the app cannot rescue that (verified on Electron 43: the platform is
+// already chosen, and `appendSwitch('headless')` SIGSEGVs), so before
+// app.whenReady, ensure a virtual X display via Xvfb when none is present.
+// macOS/Windows need nothing. An operator who accepts losing browser panes can
+// have the LAUNCHER select the headless Ozone platform instead — see
+// `shared/displayless-serve-fallback.ts`.
 
 const XVFB_STARTUP_TIMEOUT_MS = 5_000
 const XVFB_POLL_INTERVAL_MS = 50
@@ -217,17 +228,52 @@ function hasUsableWaylandDisplay(env: NodeJS.ProcessEnv): boolean {
   return Boolean(runtimeDir && isAbsolute(runtimeDir) && isUnixSocket(join(runtimeDir, display)))
 }
 
+export type HeadlessServeDisplayResult = {
+  /** Offscreen browser panes can be backed on this host. */
+  browserPanes: boolean
+  /** Serve must stop: Ozone would initialize without a display and SIGSEGV (#17615). */
+  fatal: boolean
+}
+
+// Chromium's Ozone platform is fixed by the launch command line; an armed operator whose launcher
+// dropped the switch gets told that, not the generic "install Xvfb" advice.
+function displayUnavailableForServe(): HeadlessServeDisplayResult {
+  console.warn(
+    isDisplaylessServeFallbackEnabled()
+      ? DISPLAYLESS_SERVE_LAUNCH_HINT
+      : DISPLAYLESS_SERVE_OPT_IN_HINT
+  )
+  return { browserPanes: false, fatal: true }
+}
+
+function isHeadlessOzonePlatform(): boolean {
+  return (
+    app.commandLine.getSwitchValue('ozone-platform').trim().toLowerCase() ===
+    HEADLESS_OZONE_PLATFORM
+  )
+}
+
 /**
- * Ensure a usable X display for headless Linux serve. Returns true when a
- * display is available (pre-existing or freshly started), false when browser
- * panes cannot be supported on this host. Safe to call on any platform.
+ * Ensure a usable X display for headless Linux serve. `browserPanes` reports whether a display is
+ * available (pre-existing or freshly started); `fatal` tells serve whether to stop rather than let
+ * Chromium reach Ozone init without one. Safe to call on any platform.
  */
-export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boolean }): boolean {
+export function ensureVirtualDisplayForHeadlessServe(options: {
+  isServeMode: boolean
+}): HeadlessServeDisplayResult {
   if (!options.isServeMode || process.platform !== 'linux') {
-    return process.platform !== 'linux'
+    // Non-Linux needs no display setup; a non-serve Linux launch owns its own display decisions.
+    return { browserPanes: process.platform !== 'linux', fatal: false }
   }
 
   configureHeadlessServeChromiumFlags()
+
+  // Why: the launcher already put Chromium on the display-less Ozone platform, so there is no
+  // display to find and no #17615 crash to avoid — Xvfb would only add a process nothing can use.
+  if (isHeadlessOzonePlatform()) {
+    console.warn(DISPLAYLESS_SERVE_ACTIVE_MESSAGE)
+    return { browserPanes: false, fatal: false }
+  }
 
   // Offscreen serve windows require X11; Wayland alone still needs Xvfb.
   // Never delete artifacts from an externally managed display: a container may
@@ -235,13 +281,13 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
   const configuredDisplay = process.env.DISPLAY?.trim()
   if (configuredDisplay) {
     if (hasUsableXDisplay(configuredDisplay)) {
-      return true
+      return { browserPanes: true, fatal: false }
     }
     console.warn(
       `[serve] DISPLAY=${configuredDisplay} is not verifiably live; leaving it untouched. ` +
         'Unset DISPLAY to let Orca start its own Xvfb.'
     )
-    return false
+    return displayUnavailableForServe()
   }
 
   // Why: reuse an existing display ONLY if a live X server actually backs it.
@@ -250,7 +296,7 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
   if (isUnixSocket(xvfbSocketPath(VIRTUAL_DISPLAY_NUMBER))) {
     if (isManagedDisplayServerAlive(VIRTUAL_DISPLAY_NUMBER)) {
       process.env.DISPLAY = VIRTUAL_DISPLAY
-      return true
+      return { browserPanes: true, fatal: false }
     }
     // Why: stale socket/lock — clean them up so Xvfb can rebind the display
     // below instead of refusing to start on an "in use" number.
@@ -273,14 +319,14 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
     // PATH lookup failures emit asynchronously, but a successful spawn has a PID immediately.
     if (xvfbProcess.pid === undefined) {
       xvfbProcess = null
-      return false
+      return displayUnavailableForServe()
     }
   } catch (error) {
     console.warn(
       '[serve] Could not start Xvfb:',
       error instanceof Error ? error.message : String(error)
     )
-    return false
+    return displayUnavailableForServe()
   }
 
   const ready = waitForDisplayReady(VIRTUAL_DISPLAY_NUMBER, Date.now() + XVFB_STARTUP_TIMEOUT_MS)
@@ -290,7 +336,7 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
         'A stale socket from another user can block the rebind.'
     )
     stopVirtualDisplay()
-    return false
+    return displayUnavailableForServe()
   }
 
   process.env.DISPLAY = VIRTUAL_DISPLAY
@@ -299,7 +345,7 @@ export function ensureVirtualDisplayForHeadlessServe(options: { isServeMode: boo
   process.once('exit', stopVirtualDisplay)
   app.once('ready', () => process.removeListener('exit', stopVirtualDisplay))
 
-  return true
+  return { browserPanes: true, fatal: false }
 }
 
 export function stopVirtualDisplay(): void {

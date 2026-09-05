@@ -14,6 +14,32 @@ whose lock names a dead process is refused rather than replaced, and `orca serve
 exits — unset `DISPLAY` to let Orca start its own Xvfb. A socket published with
 no lock at all (a container bind-mounting `/tmp/.X11-unix`, or WSLg) is accepted.
 
+## Hosts that cannot run Xvfb
+
+Without a display, `orca serve` stops with an explicit error instead of letting
+Chromium crash in Ozone initialization. On a locked-down image where Xvfb cannot
+be installed, `ORCA_ALLOW_DISPLAYLESS_SERVE=1` trades browser panes for a server
+that still starts: `orca serve` then launches Chromium on the headless Ozone
+platform, terminals and agents work as usual, and browser panes stay
+unavailable. Leave the variable unset wherever Xvfb is available — it is a
+fallback, not a tuning knob.
+
+Chromium reads its Ozone platform from the launch command line before the app
+runs, so the switch cannot be applied from inside a running Orca. The `orca
+serve` CLI appends `--ozone-platform=headless` for you when the variable is set;
+a unit that execs the Electron binary directly must pass that switch itself. If
+the variable is set but the switch never reached the command line, serve says so
+and still exits rather than starting a process that would segfault.
+
+The unit in [Systemd Service](#systemd-service) execs the binary directly, so it
+is exactly that case — set both lines there, and drop `Environment=DISPLAY=` if
+the [Managed Xvfb Service](#managed-xvfb-service) variant was used:
+
+```ini
+Environment=ORCA_ALLOW_DISPLAYLESS_SERVE=1
+ExecStart=/opt/orca/orca-linux.AppImage --ozone-platform=headless serve --port 6768 --pairing-address 100.64.1.20
+```
+
 The supported deployment matrix covers Ubuntu 20.04, 22.04, and 24.04 and
 current Debian stable — anything with glibc 2.31 or newer (see
 [Linux glibc compatibility](./linux-glibc-compatibility.md)). Package names can
@@ -199,7 +225,9 @@ it. `--appimage-extract` writes `squashfs-root` as `drwx------ root root`, so th
 at startup. `chmod 755 /opt/orca` alone does not reach into it.
 
 For most hosts, one `orca serve` service is enough because Orca starts Xvfb on
-display `:99` when no display exists:
+display `:99` when no display exists (if Xvfb cannot be installed at all, see
+[Hosts that cannot run Xvfb](#hosts-that-cannot-run-xvfb) for the two lines this
+unit needs):
 
 ```ini
 # /etc/systemd/system/orca-serve.service
@@ -938,6 +966,12 @@ refuse to run there and print the command to run on the machine you want.
   service and set `DISPLAY=:99`.
 - `[serve] Xvfb failed to start` or `[serve] Could not start Xvfb`: confirm
   `command -v Xvfb` and that it is on the service `PATH`.
+- `Orca needs a usable display server` and the unit exits `1` where Xvfb cannot
+  be installed: set `ORCA_ALLOW_DISPLAYLESS_SERVE=1` to start without browser
+  panes (see [Hosts that cannot run Xvfb](#hosts-that-cannot-run-xvfb)). If that
+  variable is already set and serve still exits, the launcher dropped
+  `--ozone-platform=headless`; Chromium only accepts it on the launch command
+  line, and the log line names the switch.
 - GPU or DRI warnings on a VPS: keep `LIBGL_ALWAYS_SOFTWARE=1` in the service
   environment.
 - Chromium sandbox errors: confirm the service is running as the non-root
