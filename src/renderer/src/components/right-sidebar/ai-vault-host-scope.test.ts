@@ -2,15 +2,20 @@
 
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useAppStore } from '@/store'
 import type { AppState } from '@/store/types'
 import type { AiVaultSessionResumeTargetState } from './ai-vault-session-resume'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import {
   buildAiVaultHostScopeOptions,
   buildRuntimeAiVaultHostScopeOptions,
   useAiVaultExecutionHostScope
 } from './ai-vault-host-scope'
 import type { ExecutionHostScope } from '../../../../shared/execution-host'
+
+// Default: native mode (local host present). Web-mode cases opt in per-test.
+vi.mock('@/lib/vsagent-web-mode', () => ({ isVSAgentWebMode: vi.fn(() => false) }))
 
 type HostScopeResult = ReturnType<typeof useAiVaultExecutionHostScope>
 
@@ -69,6 +74,8 @@ function stateForWorktree(args: {
   } as unknown as Pick<AppState, 'folderWorkspaces' | 'projectGroups' | 'repos' | 'worktreesByRepo'>
 }
 
+const initialSettings = useAppStore.getInitialState().settings
+
 afterEach(() => {
   if (root) {
     act(() => root?.unmount())
@@ -76,6 +83,8 @@ afterEach(() => {
   root = null
   latest = null
   document.body.replaceChildren()
+  vi.mocked(isVSAgentWebMode).mockReturnValue(false)
+  useAppStore.setState({ settings: initialSettings })
 })
 
 describe('useAiVaultExecutionHostScope', () => {
@@ -134,6 +143,43 @@ describe('useAiVaultExecutionHostScope', () => {
     })
 
     expect(latest?.executionHostScope).toBe('local')
+  })
+
+  it('falls back to the focused runtime host (not the phantom local host) in VSAgent web mode', async () => {
+    vi.mocked(isVSAgentWebMode).mockReturnValue(true)
+    useAppStore.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-a' } as AppState['settings']
+    })
+
+    await renderHook({
+      activeWorktreeId: null,
+      resumeTargetState: {
+        folderWorkspaces: [],
+        projectGroups: [],
+        repos: [],
+        worktreesByRepo: {}
+      } as unknown as AiVaultSessionResumeTargetState
+    })
+
+    expect(latest?.executionHostScope).toBe('runtime:env-a')
+  })
+
+  it('widens to all hosts (not the phantom local host) in VSAgent web mode with no focused runtime', async () => {
+    vi.mocked(isVSAgentWebMode).mockReturnValue(true)
+    // Default settings: activeRuntimeEnvironmentId is null (e.g. before first pairing).
+
+    await renderHook({
+      activeWorktreeId: null,
+      resumeTargetState: {
+        folderWorkspaces: [],
+        projectGroups: [],
+        repos: [],
+        worktreesByRepo: {}
+      } as unknown as AiVaultSessionResumeTargetState
+    })
+
+    expect(latest?.executionHostScope).not.toBe('local')
+    expect(latest?.executionHostScope).toBe('all')
   })
 
   it('defaults runtime worktrees to their runtime execution host', async () => {
@@ -218,6 +264,22 @@ describe('buildAiVaultHostScopeOptions', () => {
     ).toEqual([
       { id: 'local', label: expect.any(String) },
       { id: 'runtime:remote-server', label: 'remote-server' },
+      { id: 'all', label: 'All hosts' }
+    ])
+  })
+
+  it('omits the phantom local host in VSAgent web mode', () => {
+    vi.mocked(isVSAgentWebMode).mockReturnValueOnce(true)
+    const runtimeHostOptions = buildRuntimeAiVaultHostScopeOptions([
+      { id: 'remote-server', name: 'Orca Server' }
+    ])
+    expect(
+      buildAiVaultHostScopeOptions({
+        activeExecutionHostScope: 'runtime:remote-server',
+        runtimeHostOptions
+      })
+    ).toEqual([
+      { id: 'runtime:remote-server', label: 'Orca Server' },
       { id: 'all', label: 'All hosts' }
     ])
   })

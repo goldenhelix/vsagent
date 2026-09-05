@@ -6,6 +6,7 @@ import {
   resolveComposerActiveRepoId
 } from '@/lib/new-workspace-composer-repo'
 import { buildExecutionHostRegistry } from '../../../../shared/execution-host-registry'
+import { dropLocalHostByIdInWebMode } from '@/lib/vsagent-web-mode-hosts'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
 import type { GitHubWorkItem } from '../../../../shared/github/work-item-types'
 import type { TaskSourceContext } from '../../../../shared/task-source-context'
@@ -131,16 +132,18 @@ export function useComposerTargetStore(options: ComposerStateInput, decisions: C
 
   const hostOptions = useMemo(
     () =>
-      buildExecutionHostRegistry({
-        repos,
-        settings,
-        hostSource: 'configured-only',
-        sshTargetLabels,
-        sshConnectionStates,
-        runtimeEnvironments,
-        runtimeStatusByEnvironmentId,
-        hostLabelOverrides: getHostDisplayLabelOverrides(settings)
-      }),
+      dropLocalHostByIdInWebMode(
+        buildExecutionHostRegistry({
+          repos,
+          settings,
+          hostSource: 'configured-only',
+          sshTargetLabels,
+          sshConnectionStates,
+          runtimeEnvironments,
+          runtimeStatusByEnvironmentId,
+          hostLabelOverrides: getHostDisplayLabelOverrides(settings)
+        })
+      ),
     [
       repos,
       settings,

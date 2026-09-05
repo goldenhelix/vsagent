@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getExecutionHostLabel } from '../../../../shared/execution-host'
 import {
   buildSidebarHostOptions,
@@ -9,6 +9,10 @@ import {
 } from './sidebar-host-options'
 
 const LOCAL_HOST_LABEL = getExecutionHostLabel('local')
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('sidebar host options', () => {
   it('hides host controls for local-only workspaces', () => {
@@ -211,5 +215,20 @@ describe('sidebar host options', () => {
     expect(getSidebarHostHealthLabel('connecting')).toBe('Connecting')
     expect(getSidebarHostHealthLabel('blocked')).toBe('Update needed')
     expect(getSidebarHostHealthLabel('error')).toBe('Needs attention')
+  })
+
+  it('drops the phantom local host in VSAgent web mode (S21)', () => {
+    vi.stubGlobal('window', { __ORCA_WEB_CLIENT__: true })
+
+    const hosts = buildSidebarHostOptions({
+      repos: [{ connectionId: 'ssh-1' }],
+      sshTargetLabels: new Map([['ssh-1', 'Builder']]),
+      settings: { activeRuntimeEnvironmentId: 'runtime-1' }
+    })
+
+    expect(hosts.map((host) => host.kind)).not.toContain('local')
+    expect(new Set(hosts.map((host) => host.id))).toEqual(
+      new Set(['ssh:ssh-1', 'runtime:runtime-1'])
+    )
   })
 })

@@ -6,6 +6,7 @@ import {
   type ExecutionHostId
 } from '../../../../shared/execution-host'
 import { buildExecutionHostRegistry } from '../../../../shared/execution-host-registry'
+import { dropLocalHostByIdInWebMode } from '@/lib/vsagent-web-mode-hosts'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
 import type { ProjectHostSetup } from '../../../../shared/project-types'
 import type { Repo } from '../../../../shared/repo-types'
@@ -83,16 +84,18 @@ export function RepositoryHostSetupsSection({
   const hostLabelOverrides = useMemo(() => getHostDisplayLabelOverrides(settings), [settings])
   const hostOptions = useMemo(
     () =>
-      buildExecutionHostRegistry({
-        repos,
-        settings,
-        hostSource: 'configured-only',
-        sshTargetLabels,
-        sshConnectionStates,
-        runtimeEnvironments,
-        runtimeStatusByEnvironmentId,
-        hostLabelOverrides
-      }),
+      dropLocalHostByIdInWebMode(
+        buildExecutionHostRegistry({
+          repos,
+          settings,
+          hostSource: 'configured-only',
+          sshTargetLabels,
+          sshConnectionStates,
+          runtimeEnvironments,
+          runtimeStatusByEnvironmentId,
+          hostLabelOverrides
+        })
+      ),
     [
       repos,
       settings,
