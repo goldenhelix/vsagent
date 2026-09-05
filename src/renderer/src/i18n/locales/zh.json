@@ -185,6 +185,9 @@
           "environment": {
             "07f788de83": "WebSocket"
           }
+        },
+        "pairing": {
+          "defaultServerName": "Orca 服务器"
         }
       }
     },
@@ -7377,7 +7380,9 @@
           "integrationsHint": "所有提供商的凭据也可在此管理：",
           "integrationsLink": "集成",
           "skillHint": "。连接 Linear 后，可在设置 → Linear 中查看使用示例。",
-          "incompleteBannerBodyWithLinear": "隐藏不使用的提供商，或展开卡片并完成其中的步骤。Linear 需要 API 访问权限、智能体技能以及在任务中显示。"
+          "incompleteBannerBodyWithLinear": "隐藏不使用的提供商，或展开卡片并完成其中的步骤。Linear 需要 API 访问权限、智能体技能以及在任务中显示。",
+          "giteaLabel": "Gitea",
+          "giteaDescription": "使用服务器配置的 token 浏览 Gitea 议题并将其显示在任务中。"
         },
         "TerminalAppearanceSection": {
           "a14a427ae4": "窗格分隔线的厚度。",
