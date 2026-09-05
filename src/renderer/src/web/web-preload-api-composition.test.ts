@@ -44,6 +44,7 @@ describe('web preload API composition', () => {
       'emulator',
       'gh',
       'gl',
+      'gitea',
       'hostedReview',
       'linear',
       'hooks',

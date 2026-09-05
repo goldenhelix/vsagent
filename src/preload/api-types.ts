@@ -28,6 +28,7 @@ import type { EphemeralVmApi } from './api/ephemeral-vm-api'
 import type { ExportApi, FilesystemApi } from './api/filesystem-api'
 import type { GitInspectionApi } from './api/git-inspection-api'
 import type { GitOperationApi } from './api/git-operation-api'
+import type { GiteaApi } from './api/gitea-api'
 import type { GithubPullRequestApi } from './api/github-pull-request-api'
 import type { GithubWorkItemApi } from './api/github-work-item-api'
 import type { GitLabApi } from './api/gitlab-api'
@@ -88,6 +89,7 @@ export type PreloadApi = {
   gh: Merged<GithubPullRequestApi & GithubWorkItemApi>
   hostedReview: HostedReviewApi
   gl: GitLabApi
+  gitea: GiteaApi
   bitbucket: BitbucketApi
   linear: LinearApi
   jira: JiraApi
