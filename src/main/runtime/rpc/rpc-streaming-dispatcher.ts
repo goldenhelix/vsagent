@@ -123,6 +123,7 @@ export class RpcStreamingDispatcher {
             orchestrationMutation: mutation?.identity,
             pairing: options?.pairing,
             createRuntimePairingOffer: options?.createRuntimePairingOffer,
+            webPreviewHttpOrigin: options?.webPreviewHttpOrigin,
             sendBinary: options?.sendBinary,
             registerBinaryStreamHandler: options?.registerBinaryStreamHandler,
             registerBinaryMessageHandler: options?.registerBinaryMessageHandler,
@@ -171,6 +172,7 @@ export class RpcStreamingDispatcher {
           orchestrationCapability: request.orchestrationCapability,
           pairing: options?.pairing,
           createRuntimePairingOffer: options?.createRuntimePairingOffer,
+          webPreviewHttpOrigin: options?.webPreviewHttpOrigin,
           sendBinary: options?.sendBinary,
           registerBinaryStreamHandler: options?.registerBinaryStreamHandler,
           registerBinaryMessageHandler: options?.registerBinaryMessageHandler

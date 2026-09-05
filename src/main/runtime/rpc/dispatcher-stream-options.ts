@@ -17,6 +17,7 @@ export type RpcDispatchStreamingOptions = {
   updateClientCapabilities?: (capabilities: readonly RuntimeCapability[]) => void
   pairing?: PairingRpcContext
   createRuntimePairingOffer?: (args: RuntimePairingOfferParams) => RuntimePairingOfferResult
+  webPreviewHttpOrigin?: string | null
   sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
   registerBinaryStreamHandler?: (
     streamId: number,

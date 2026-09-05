@@ -32,6 +32,16 @@ export function formatWsEndpoint(host: string, port: number, secure = false): st
   return `${secure ? 'wss' : 'ws'}://${host.includes(':') ? `[${host}]` : host}:${port}`
 }
 
+// Why: webpreview.create/setOrigin return an absolute URL (not a bare path) because a paired
+// web client can hold more than one runtime environment in a single page; a relative path would
+// resolve against whichever environment served the currently-loaded bundle, not the one that
+// actually owns the proxy session.
+export function httpOriginFromWsEndpoint(wsEndpoint: string): string {
+  return wsEndpoint.startsWith('wss://')
+    ? `https://${wsEndpoint.slice('wss://'.length)}`
+    : `http://${wsEndpoint.slice('ws://'.length)}`
+}
+
 export type OrcaRuntimeRpcServerOptions = {
   runtime: OrcaRuntimeService
   userDataPath: string

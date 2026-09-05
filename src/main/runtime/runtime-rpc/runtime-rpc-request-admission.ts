@@ -5,6 +5,8 @@ import type { RpcRequest, RpcResponse } from '../rpc/core'
 import { errorResponse } from '../rpc/errors'
 import { RuntimeRpcBinaryRouting } from './runtime-rpc-binary-routing'
 import { classifyRuntimeLongPoll, type RuntimeLongPollClass } from './runtime-rpc-long-poll'
+import { httpOriginFromWsEndpoint } from './runtime-rpc-pairing-types'
+import { resolveAdvertisedPairingEndpoint } from '../pairing-endpoint'
 
 export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
   // Why: Unix socket dispatch is one-shot and auths via the shared token from the 0o600 metadata file. See §3.1.
@@ -39,7 +41,8 @@ export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
         signal: longPoll ? context?.signal : undefined,
         // Why: this socket is local trust — the 0o600 metadata file is the credential — so the bundled
         // CLI's `pairing-url` command may mint a runtime pairing offer.
-        createRuntimePairingOffer: this.mintRuntimePairingOffer ?? undefined
+        createRuntimePairingOffer: this.mintRuntimePairingOffer ?? undefined,
+        webPreviewHttpOrigin: this.resolveWebPreviewHttpOrigin()
       })
     } finally {
       this.releaseLongPoll(longPoll)
@@ -136,6 +139,20 @@ export class RuntimeRpcRequestAdmission extends RuntimeRpcBinaryRouting {
     }
 
     return { request }
+  }
+
+  // Why: the webpreview RPC methods run on this same server, but a handler has no live HTTP
+  // request to derive its own address from — only the transport layer knows the bound host/port.
+  // The raw bind endpoint is not necessarily client-reachable (a wide bind listens on the
+  // 0.0.0.0 wildcard, which no client can dial), so this reuses the same wildcard-safe
+  // resolution the pairing offer already applies rather than handing back the literal bind host.
+  protected resolveWebPreviewHttpOrigin(): string | null {
+    const ws = this.transports.find((meta) => meta.kind === 'websocket')
+    if (!ws) {
+      return null
+    }
+    const advertised = resolveAdvertisedPairingEndpoint(ws.endpoint, this.defaultPairingAddress)
+    return advertised.ok ? httpOriginFromWsEndpoint(advertised.endpoint) : null
   }
 
   protected buildError(id: string, code: string, message: string): RpcResponse {
