@@ -14,6 +14,7 @@ import { useTaskPageJiraListState } from '../use-task-page-jira-list-state'
 import { useTaskPageResumeRestoration } from '../use-task-page-resume-restoration'
 import { useTaskPageProviderMetadata } from '../use-task-page-provider-metadata'
 import { useTaskPageGitLabLoading } from '../use-task-page-gitlab-loading'
+import { useTaskPageGiteaMilestones } from '../use-task-page-gitea-milestones'
 import { useTaskPageLinearListSelection } from '../use-task-page-linear-list-selection'
 import { useTaskPageLinearListProjection } from '../use-task-page-linear-list-projection'
 import { useTaskPageLinearBoard } from '../use-task-page-linear-board'
@@ -56,29 +57,30 @@ export default function TaskPage(): React.JSX.Element {
   const stage13 = useTaskPageResumeRestoration(stage12)
   const stage14 = useTaskPageProviderMetadata(stage13)
   const stage15 = useTaskPageGitLabLoading(stage14)
-  const stage16 = useTaskPageLinearListSelection(stage15)
-  const stage17 = useTaskPageLinearListProjection(stage16)
-  const stage18 = useTaskPageLinearBoard(stage17)
-  const stage19 = useTaskPageJiraListProjection(stage18)
-  const stage20 = useTaskPageLinearCreationState(stage19)
-  const stage21 = useTaskPageGitHubMutationState(stage20)
-  const stage22 = useTaskPageJiraCreationState(stage21)
-  const stage23 = useTaskPageJiraCreationMetadata(stage22)
-  const stage24 = useTaskPageGitHubListProjection(stage23)
-  const stage25 = useTaskPageGitHubSearchPagination(stage24)
-  const stage26 = useTaskPageGitHubLandingRefresh(stage25)
-  const stage27 = useTaskPageGitHubQuietRefresh(stage26)
-  const stage28 = useTaskPageSearchActions(stage27)
-  const stage29 = useTaskPageWorkspaceActions(stage28)
-  const stage30 = useTaskPageGitHubIssueCreation(stage29)
-  const stage31 = useTaskPageLinearProjectCreation(stage30)
-  const stage32 = useTaskPageLinearIssueCreation(stage31)
-  const stage33 = useTaskPageJiraIssueCreation(stage32)
-  const stage34 = useTaskPageGlobalEffects(stage33)
-  const stage35 = useTaskPageLinearListEffects(stage34)
-  const stage36 = useTaskPageLinearInOrcaEffects(stage35)
-  const stage37 = useTaskPageLinearCollectionEffects(stage36)
-  const stage38 = useTaskPageJiraListEffects(stage37)
-  const stage39 = useTaskPageComposerActions(stage38)
-  return <TaskPageSurface model={stage39} />
+  const stage16 = useTaskPageGiteaMilestones(stage15)
+  const stage17 = useTaskPageLinearListSelection(stage16)
+  const stage18 = useTaskPageLinearListProjection(stage17)
+  const stage19 = useTaskPageLinearBoard(stage18)
+  const stage20 = useTaskPageJiraListProjection(stage19)
+  const stage21 = useTaskPageLinearCreationState(stage20)
+  const stage22 = useTaskPageGitHubMutationState(stage21)
+  const stage23 = useTaskPageJiraCreationState(stage22)
+  const stage24 = useTaskPageJiraCreationMetadata(stage23)
+  const stage25 = useTaskPageGitHubListProjection(stage24)
+  const stage26 = useTaskPageGitHubSearchPagination(stage25)
+  const stage27 = useTaskPageGitHubLandingRefresh(stage26)
+  const stage28 = useTaskPageGitHubQuietRefresh(stage27)
+  const stage29 = useTaskPageSearchActions(stage28)
+  const stage30 = useTaskPageWorkspaceActions(stage29)
+  const stage31 = useTaskPageGitHubIssueCreation(stage30)
+  const stage32 = useTaskPageLinearProjectCreation(stage31)
+  const stage33 = useTaskPageLinearIssueCreation(stage32)
+  const stage34 = useTaskPageJiraIssueCreation(stage33)
+  const stage35 = useTaskPageGlobalEffects(stage34)
+  const stage36 = useTaskPageLinearListEffects(stage35)
+  const stage37 = useTaskPageLinearInOrcaEffects(stage36)
+  const stage38 = useTaskPageLinearCollectionEffects(stage37)
+  const stage39 = useTaskPageJiraListEffects(stage38)
+  const stage40 = useTaskPageComposerActions(stage39)
+  return <TaskPageSurface model={stage40} />
 }

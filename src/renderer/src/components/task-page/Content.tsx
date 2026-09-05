@@ -67,7 +67,8 @@ export function TaskPageContent({
     <TaskPageGitHubList model={model} />
   ) : taskSource === 'gitlab' && gitlabView === 'todos' ? (
     <TaskPageGitLabTodoList model={model} />
-  ) : taskSource === 'gitlab' ? (
+  ) : // Why: Gitea reuses the GitLab item list (issues only), so it must route here — the fall-through below renders Jira.
+  taskSource === 'gitlab' || taskSource === 'gitea' ? (
     <TaskPageGitLabItemList model={model} />
   ) : (
     <TaskPageJiraContent model={model} />

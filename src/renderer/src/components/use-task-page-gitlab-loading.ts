@@ -19,23 +19,31 @@ export function useTaskPageGitLabLoading(model: TaskPageProviderMetadataModel) {
     gitlabView,
     setGitlabTodos,
     setGitlabTodosLoading,
-    activeGitlabFilter
+    activeGitlabFilter,
+    activeGiteaMilestone
   } = model
   // Why: fetch GitLab Issues and MRs separately so errors stay isolated per tab (mirrors GitHub's split endpoints).
   useEffect(() => {
-    if (taskSource !== 'gitlab') {
+    // Why: Gitea reuses this list state/effect but is issues-only, so it shares the 'issues' path and routes to the gitea preload namespace.
+    if (taskSource !== 'gitlab' && taskSource !== 'gitea') {
       return
     }
-    if (gitlabView === 'todos') {
+    // Why: the model already pins the Gitea view; repeat it here so no model shape can make this effect issue a GitLab MR/todo fetch against the Gitea tab.
+    const effectiveGitlabView = taskSource === 'gitea' ? 'issues' : gitlabView
+    if (effectiveGitlabView === 'todos') {
       return
     }
     const activeIssueFilter =
-      gitlabView === 'issues' && isGitLabIssueFilter(activeGitlabFilter) ? activeGitlabFilter : null
+      effectiveGitlabView === 'issues' && isGitLabIssueFilter(activeGitlabFilter)
+        ? activeGitlabFilter
+        : null
     const activeMRFilter =
-      gitlabView === 'mrs' && isGitLabMRFilter(activeGitlabFilter) ? activeGitlabFilter : null
+      effectiveGitlabView === 'mrs' && isGitLabMRFilter(activeGitlabFilter)
+        ? activeGitlabFilter
+        : null
     if (
-      (gitlabView === 'issues' && !activeIssueFilter) ||
-      (gitlabView === 'mrs' && !activeMRFilter)
+      (effectiveGitlabView === 'issues' && !activeIssueFilter) ||
+      (effectiveGitlabView === 'mrs' && !activeMRFilter)
     ) {
       return
     }
@@ -50,18 +58,24 @@ export function useTaskPageGitLabLoading(model: TaskPageProviderMetadataModel) {
     let stale = false
     setGitlabLoading(true)
     setGitlabError(null)
+    const issueProvider = taskSource === 'gitea' ? 'gitea' : 'gitlab'
+    const issueApi = taskSource === 'gitea' ? window.api.gitea : window.api.gl
     const fetchItems =
-      gitlabView === 'issues'
+      effectiveGitlabView === 'issues'
         ? (repo: (typeof eligibleRepos)[0]) => {
             const isAssignedToMe = activeIssueFilter === 'assigned-to-me'
-            return window.api.gl
+            return issueApi
               .listIssues({
                 repoPath: repo.path,
                 repoId: repo.id,
-                sourceContext: getTaskPageRepoSourceContext(repo, 'gitlab'),
+                sourceContext: getTaskPageRepoSourceContext(repo, issueProvider),
                 state: 'opened',
                 assignee: isAssignedToMe ? '@me' : undefined,
-                limit: 50
+                limit: 50,
+                // Why: milestone is Gitea-only and server-side; spread so it stays off the GitLab path, whose listIssues has no milestone.
+                ...(taskSource === 'gitea' && activeGiteaMilestone !== 'all'
+                  ? { milestone: activeGiteaMilestone }
+                  : {})
               })
               .then((result) => {
                 const typed = result as {
@@ -110,7 +124,8 @@ export function useTaskPageGitLabLoading(model: TaskPageProviderMetadataModel) {
         if (stale) {
           return
         }
-        const merged: GitLabWorkItem[] = []
+        // Why: the same underlying repo can be selected as two project entries (one checkout per host), so one issue arrives from two per-repo fetches. Dedup by the fully-qualified item URL — stable across repo entries, unlike the repo-scoped `id`.
+        const mergedByKey = new Map<string, GitLabWorkItem>()
         const errs: string[] = []
         for (const r of results) {
           if (r.status !== 'fulfilled') {
@@ -118,15 +133,20 @@ export function useTaskPageGitLabLoading(model: TaskPageProviderMetadataModel) {
             continue
           }
           for (const item of r.value.items) {
-            merged.push({
+            const withRepo = {
               ...item,
               repoId: r.value.repoId
-            })
+            }
+            const key = item.url || withRepo.id
+            if (!mergedByKey.has(key)) {
+              mergedByKey.set(key, withRepo)
+            }
           }
           if (r.value.error) {
             errs.push(r.value.error.message)
           }
         }
+        const merged = [...mergedByKey.values()]
         merged.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
         setGitlabItems(merged)
         // Why: only banner when every eligible repo failed; a partial one would hide working rows in a mixed (non-GitLab) selection.
@@ -143,7 +163,14 @@ export function useTaskPageGitLabLoading(model: TaskPageProviderMetadataModel) {
       stale = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedReposKey covers every selectedRepos field read above (see its GitHub-scoped-context note); keying off the array ref would re-run on every parent render.
-  }, [taskSource, gitlabView, activeGitlabFilter, gitlabRefreshNonce, selectedReposKey])
+  }, [
+    taskSource,
+    gitlabView,
+    activeGitlabFilter,
+    activeGiteaMilestone,
+    gitlabRefreshNonce,
+    selectedReposKey
+  ])
 
   // Why: Todos fetch has its own effect — different trigger (no chip filter) and data path (gl.todos is user-scoped, not repo-scoped).
   useEffect(() => {
