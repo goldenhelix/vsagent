@@ -110,6 +110,44 @@ describe('subscribeRuntimeClientEvents', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 
+  it('forwards relayed file open/diff frames from a headless serve', async () => {
+    let capturedOnResponse: ((response: unknown) => void) | undefined
+    const subscribe = vi.fn(async (_args, nextCallbacks) => {
+      capturedOnResponse = (nextCallbacks as { onResponse: (response: unknown) => void }).onResponse
+      return { unsubscribe: vi.fn(), sendBinary: vi.fn() }
+    })
+    const onEvent = vi.fn()
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { subscribe } } })
+
+    await subscribeRuntimeClientEvents('env-1', onEvent)
+    if (!capturedOnResponse) {
+      throw new Error('Expected subscription callbacks')
+    }
+
+    capturedOnResponse({
+      ok: true,
+      result: {
+        type: 'openFile',
+        worktreeId: 'worktree-1',
+        filePath: '/srv/repo/README.md',
+        relativePath: 'README.md'
+      }
+    })
+    capturedOnResponse({
+      ok: true,
+      result: {
+        type: 'openDiff',
+        worktreeId: 'worktree-1',
+        filePath: '/srv/repo/README.md',
+        relativePath: 'README.md',
+        staged: true,
+        runtimeEnvironmentId: 'env-2'
+      }
+    })
+
+    expect(onEvent.mock.calls.map(([event]) => event.type)).toEqual(['openFile', 'openDiff'])
+  })
+
   it('signals a replay-tagged response so event-derived state can resync after a reconnect', async () => {
     let capturedOnResponse: ((response: unknown) => void) | undefined
     const subscribe = vi.fn(async (_args, nextCallbacks) => {
