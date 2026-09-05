@@ -9,6 +9,7 @@ import { RecoverableRenderErrorBoundary } from '../components/error-boundaries/R
 import {
   clearPairingInputFromAddressBar,
   decideWebPairingStartup,
+  defaultWebEnvironmentName,
   readPairingInputFromLocation
 } from './web-pairing'
 import {
@@ -43,7 +44,7 @@ function WebRoot(): React.JSX.Element {
     if (startupDecision.kind === 'auto-save-runtime-offer') {
       saveStoredWebRuntimeEnvironment(
         createStoredWebRuntimeEnvironment({
-          name: 'Orca Server',
+          name: defaultWebEnvironmentName(startupDecision.offer),
           offer: startupDecision.offer,
           previousEnvironment: readStoredWebRuntimeEnvironment()
         })

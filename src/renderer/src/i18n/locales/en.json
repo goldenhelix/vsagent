@@ -370,6 +370,9 @@
           "environment": {
             "07f788de83": "WebSocket"
           }
+        },
+        "pairing": {
+          "defaultServerName": "Orca Server"
         }
       }
     },

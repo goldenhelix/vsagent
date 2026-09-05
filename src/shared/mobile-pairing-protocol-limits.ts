@@ -4,3 +4,6 @@ export const PAIRING_ENDPOINT_MAX_CHARACTERS = 16 * 1024
 export const PAIRING_DEVICE_TOKEN_MAX_CHARACTERS = 64 * 1024
 export const PAIRING_PUBLIC_KEY_MAX_CHARACTERS = 4 * 1024
 export const PAIRING_RELAY_URL_MAX_CHARACTERS = 2048
+// Why: the offer's server display name is a UI label, not protocol material —
+// keep it short enough that a stray hostname cannot inflate the pairing code.
+export const PAIRING_OFFER_NAME_MAX_CHARACTERS = 64

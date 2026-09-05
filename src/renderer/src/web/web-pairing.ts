@@ -1,4 +1,6 @@
 import type { DeviceScope } from '../../../shared/runtime-types'
+import { PAIRING_OFFER_NAME_MAX_CHARACTERS } from '../../../shared/mobile-pairing-protocol-limits'
+import { translate } from '@/i18n/i18n'
 
 const PAIRING_OFFER_VERSION = 2
 
@@ -9,12 +11,36 @@ export type WebPairingOffer = {
   publicKeyB64: string
   pairedDeviceId?: string
   scope?: DeviceScope
+  // Why (VSAgent fork): optional server display name (`--serve-name` /
+  // hostname) used as the default saved-server label.
+  name?: string
 }
 
 export type WebPairingStartupDecision =
   | { kind: 'auto-save-runtime-offer'; offer: WebPairingOffer }
   | { kind: 'show-connect'; initialPairingInput: string | null }
   | { kind: 'use-stored-environment' }
+
+// Why (VSAgent fork): the saved-server label defaults to what the server called
+// itself, then the endpoint hostname, then a generic label — a loopback host is
+// no more informative than the label, so it does not win. The generic label goes
+// through translate() so the web client's brand seam owns the product name.
+export function defaultWebEnvironmentName(offer: WebPairingOffer | null): string {
+  if (offer?.name) {
+    return offer.name
+  }
+  if (offer) {
+    try {
+      const host = new URL(offer.endpoint).hostname
+      if (host && host !== '127.0.0.1' && host !== 'localhost') {
+        return host
+      }
+    } catch {
+      // fall through to the generic label
+    }
+  }
+  return translate('auto.web.web.pairing.defaultServerName', 'Orca Server')
+}
 
 export function parseWebPairingInput(input: string): WebPairingOffer | null {
   const trimmed = input.trim()
@@ -104,12 +130,19 @@ function decodePairingPayload(base64url: string): WebPairingOffer | null {
     typeof parsed.pairedDeviceId === 'string' && parsed.pairedDeviceId.length > 0
       ? parsed.pairedDeviceId
       : null
+  // Why: a display label from an unverified payload — bound it here, the same
+  // way the shared offer schema bounds it on the producing side.
+  const name =
+    typeof parsed.name === 'string'
+      ? parsed.name.trim().slice(0, PAIRING_OFFER_NAME_MAX_CHARACTERS).trim()
+      : ''
   return {
     v: PAIRING_OFFER_VERSION,
     endpoint: normalizeWebSocketEndpoint(parsed.endpoint),
     deviceToken: parsed.deviceToken,
     publicKeyB64: parsed.publicKeyB64,
     ...(pairedDeviceId ? { pairedDeviceId } : {}),
+    ...(name ? { name } : {}),
     ...(scope ? { scope } : {})
   }
 }
