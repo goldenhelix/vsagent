@@ -1,4 +1,5 @@
 import type { PreloadApi } from '../../../../preload/api-types'
+import { subscribeWebWindowShortcut } from '@/lib/vsagent-web-window-shortcuts'
 import { assertClipboardTextWithinLimitWithYield } from '../../../../shared/clipboard-text'
 import type { ReadClipboardTextOptions } from '../../../../shared/clipboard-text'
 import { normalizeFeatureInteractions } from '../../../../shared/feature-interactions'
@@ -154,7 +155,7 @@ export function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
       zoomLevel = level
     },
     isMaximized: () => Promise.resolve(false),
-    onOpenSettings: () => noopUnsubscribe,
+    onOpenSettings: (cb) => subscribeWebWindowShortcut('ui:openSettings', cb),
     // Why: the web client has no native tray/menu bar, so there's never a queued open-settings intent to consume.
     consumePendingOpenSettings: () => Promise.resolve(false),
     onOpenSkillShare: () => noopUnsubscribe,
@@ -169,16 +170,16 @@ export function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     onStateChanged: () => noopUnsubscribe,
     onToggleLeftSidebar: () => noopUnsubscribe,
     onToggleRightSidebar: () => noopUnsubscribe,
-    onToggleWorktreePalette: () => noopUnsubscribe,
-    onToggleFloatingTerminal: () => noopUnsubscribe,
+    onToggleWorktreePalette: (cb) => subscribeWebWindowShortcut('ui:toggleWorktreePalette', cb),
+    onToggleFloatingTerminal: (cb) => subscribeWebWindowShortcut('ui:toggleFloatingTerminal', cb),
     onTerminalShortcutCaptured: () => noopUnsubscribe,
-    onOpenQuickOpen: () => noopUnsubscribe,
+    onOpenQuickOpen: (cb) => subscribeWebWindowShortcut('ui:openQuickOpen', cb),
     onToggleQuickCommandsMenu: () => noopUnsubscribe,
     onOpenTasks: () => noopUnsubscribe,
-    onOpenNewWorkspace: () => noopUnsubscribe,
+    onOpenNewWorkspace: (cb) => subscribeWebWindowShortcut('ui:openNewWorkspace', cb),
     onDeleteCurrentWorkspace: () => noopUnsubscribe,
     onOpenWorkspaceBoard: () => noopUnsubscribe,
-    onToggleAgentDashboard: () => noopUnsubscribe,
+    onToggleAgentDashboard: (cb) => subscribeWebWindowShortcut('ui:toggleAgentDashboard', cb),
     onJumpToWorktreeIndex: () => noopUnsubscribe,
     onJumpToTabIndex: () => noopUnsubscribe,
     onWorktreeHistoryNavigate: () => noopUnsubscribe,
