@@ -101,6 +101,44 @@ describe('resolveClientCreationActionPolicy', () => {
     ).toEqual({ state: 'hidden', reason: MANAGED_BROWSER_UNAVAILABLE_MESSAGE })
   })
 
+  // Why (VSAgent fork): a displayless serve host never advertises browser.screencast.v1,
+  // but its webpreview proxy backs the iframe pane — browser tabs stay creatable there.
+  it('enables client-local browser creation on a webpreview-proxy host', () => {
+    expect(
+      resolveClientCreationActionPolicy({
+        surface: 'paired-web',
+        runtimeStatus: runtimeStatus(['webpreview.proxy.v1']),
+        webPreviewProxyAvailable: true
+      })['managed-browser']
+    ).toEqual({ state: 'enabled', provider: 'local-client' })
+
+    // Preferred over streaming when the host advertises both: the pane mounts the iframe either way.
+    expect(
+      resolveClientCreationActionPolicy({
+        surface: 'paired-web',
+        runtimeStatus: runtimeStatus(['browser.screencast.v1', 'webpreview.proxy.v1']),
+        webPreviewProxyAvailable: true
+      })['managed-browser']
+    ).toEqual({ state: 'enabled', provider: 'local-client' })
+
+    // The floating workspace stays impossible, and Electron keeps its own resolution.
+    expect(
+      resolveClientCreationActionPolicy({
+        surface: 'paired-web',
+        runtimeStatus: runtimeStatus(['webpreview.proxy.v1']),
+        webPreviewProxyAvailable: true,
+        floatingWorkspace: true
+      })['managed-browser']
+    ).toEqual({ state: 'hidden', reason: FLOATING_BROWSER_UNAVAILABLE_MESSAGE })
+    expect(
+      resolveClientCreationActionPolicy({
+        surface: 'electron',
+        runtimeStatus: runtimeStatus(['webpreview.proxy.v1']),
+        webPreviewProxyAvailable: true
+      })['managed-browser']
+    ).toEqual({ state: 'enabled', provider: 'local-client' })
+  })
+
   it('hides web-client floating browsers and mobile emulators as impossible surfaces', () => {
     const policy = resolveClientCreationActionPolicy({
       surface: 'paired-web',
@@ -138,6 +176,35 @@ describe('client creation action guards', () => {
     expect(() => assertManagedBrowserMaterializationAllowed(state as never, null)).toThrow(
       LOCAL_BROWSER_UNAVAILABLE_MESSAGE
     )
+  })
+
+  it('materializes client-local browser tabs when the host proxies webpreview', () => {
+    vi.stubGlobal('__ORCA_WEB_CLIENT__', true)
+    vi.stubGlobal('window', {
+      __ORCA_WEB_CLIENT__: true,
+      api: { webPreview: {} },
+      location: { pathname: '/web-index.html' }
+    })
+    const state = {
+      settings: { activeRuntimeEnvironmentId: 'runtime-1' },
+      runtimeStatusByEnvironmentId: new Map([
+        ['runtime-1', { status: runtimeStatus(['webpreview.proxy.v1']), checkedAt: 1 }]
+      ])
+    }
+
+    expect(getClientCreationActionPolicy(state as never, null)['managed-browser']).toEqual({
+      state: 'enabled',
+      provider: 'local-client'
+    })
+    expect(() => assertManagedBrowserMaterializationAllowed(state as never, null)).not.toThrow()
+    // The floating workspace still has no browser surface, so its tabs stay rejected.
+    expect(() =>
+      assertManagedBrowserMaterializationAllowed(
+        state as never,
+        null,
+        FLOATING_TERMINAL_WORKTREE_ID
+      )
+    ).toThrow(LOCAL_BROWSER_UNAVAILABLE_MESSAGE)
   })
 
   it('permits host-confirmed remote browser materialization in paired web', () => {

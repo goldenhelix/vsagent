@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { useAppStore } from '@/store'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
-import { isWebClientLocation } from '@/lib/web-client-location'
-import { WEBPREVIEW_PROXY_RUNTIME_CAPABILITY } from '../../../../../shared/protocol-version'
+import {
+  hostAdvertisesWebPreviewProxy,
+  clientCanUseWebPreviewProxy
+} from '@/lib/webpreview-browser-availability'
 import type { BrowserWorkspace as BrowserWorkspaceState } from '../../../../../shared/browser-workspace-types'
 import { destroyPersistentWebview } from '../host-guest/webview-registry'
 import { useBrowserAutomationVisiblePageIds } from '../host-guest/browser-automation-visibility'
@@ -39,9 +41,9 @@ export default function BrowserPane({
   )
   const hostAdvertisesWebPreview = useAppStore((s) =>
     activeRuntimeEnvironmentId
-      ? (s.runtimeStatusByEnvironmentId
-          ?.get(activeRuntimeEnvironmentId)
-          ?.status?.capabilities?.includes(WEBPREVIEW_PROXY_RUNTIME_CAPABILITY) ?? false)
+      ? hostAdvertisesWebPreviewProxy(
+          s.runtimeStatusByEnvironmentId?.get(activeRuntimeEnvironmentId)?.status
+        )
       : false
   )
   const browserPages = useAppStore((s) =>
@@ -113,7 +115,7 @@ export default function BrowserPane({
   // is untouched (webPreview exists only in the web preload). Placed after every hook so the async
   // capability flipping cannot change the hook count; without the capability we fall through to the
   // streamed pane rather than mounting an iframe the host would 404.
-  if (window.api?.webPreview && isWebClientLocation() && hostAdvertisesWebPreview) {
+  if (clientCanUseWebPreviewProxy() && hostAdvertisesWebPreview) {
     return <WebBrowserPane browserTab={browserTab} isActive={isActive} />
   }
 
