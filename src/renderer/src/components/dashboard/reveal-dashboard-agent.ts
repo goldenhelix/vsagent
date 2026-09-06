@@ -1,5 +1,9 @@
+import { toast } from 'sonner'
 import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
 import { activateAndRevealWorkspace } from '@/lib/worktree-activation'
+import { translate } from '@/i18n/i18n'
+import { parseExecutionHostId } from '../../../../shared/execution-host'
+import { useAppStore } from '@/store'
 import type { DashboardRevealAgentArgs } from '../../../../shared/dashboard-snapshot'
 
 /**
@@ -16,8 +20,29 @@ export function revealDashboardAgent(args: DashboardRevealAgentArgs): boolean {
     args.executionHostId ? { executionHostId: args.executionHostId } : undefined
   )
   if (activated === false) {
+    // Why (VSAgent fork): a card whose workspace the client can no longer resolve
+    // (its owning server disconnected, or the workspace is gone) used to fail
+    // silently — the dashboard closed and nothing opened. Say which host it wanted.
+    toast.error(
+      translate(
+        'dashboardPopout.reveal.unavailable',
+        'Could not open this agent’s workspace{{value0}}.',
+        { value0: revealHostSuffix(args) }
+      )
+    )
     return false
   }
   activateTabAndFocusPane(args.tabId, args.leafId, { flashFocusedPane: true })
   return true
+}
+
+function revealHostSuffix(args: DashboardRevealAgentArgs): string {
+  const parsed = parseExecutionHostId(args.executionHostId)
+  if (parsed?.kind !== 'runtime') {
+    return ''
+  }
+  const environment = useAppStore
+    .getState()
+    .runtimeEnvironments.find((candidate) => candidate.id === parsed.environmentId)
+  return ` (${environment?.name ?? parsed.environmentId})`
 }

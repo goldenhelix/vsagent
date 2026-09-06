@@ -51,4 +51,40 @@ describe('DashboardHostBadge', () => {
     )
     expect(screen.queryByLabelText(/host/i)).not.toBeInTheDocument()
   })
+
+  // Why (VSAgent fork): with several paired servers in one web client, the icon
+  // and its hover tooltip cannot say which server an agent belongs to.
+  it('names the host on the badge itself when asked', () => {
+    const { rerender } = render(
+      <TooltipProvider>
+        <DashboardHostBadge
+          hostKind="remote"
+          executionHostId="runtime:server-1"
+          hostLabel="Build Mac"
+          showLabel
+        />
+      </TooltipProvider>
+    )
+    expect(screen.getByLabelText('Remote Orca host · Build Mac')).toHaveTextContent('Build Mac')
+
+    // Falls back to the environment id when the server has no saved name.
+    rerender(
+      <TooltipProvider>
+        <DashboardHostBadge hostKind="remote" executionHostId="runtime:server-1" showLabel />
+      </TooltipProvider>
+    )
+    expect(screen.getByLabelText('Remote Orca host · server-1')).toHaveTextContent('server-1')
+
+    // Default stays icon-only, so desktop and single-server web are unchanged.
+    rerender(
+      <TooltipProvider>
+        <DashboardHostBadge
+          hostKind="remote"
+          executionHostId="runtime:server-1"
+          hostLabel="Build Mac"
+        />
+      </TooltipProvider>
+    )
+    expect(screen.getByLabelText('Remote Orca host · Build Mac')).not.toHaveTextContent('Build Mac')
+  })
 })

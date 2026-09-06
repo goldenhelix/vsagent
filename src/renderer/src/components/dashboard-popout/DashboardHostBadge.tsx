@@ -9,6 +9,9 @@ type DashboardHostBadgeProps = {
   hostKind?: DashboardCardHostKind
   executionHostId?: ExecutionHostId
   hostLabel?: string
+  /** Why (VSAgent fork): with several paired servers in one web client, an icon
+   *  and a hover tooltip cannot say WHICH server an agent is running on. */
+  showLabel?: boolean
   keyboardFocusable?: boolean
   className?: string
   iconClassName?: string
@@ -48,6 +51,7 @@ export function DashboardHostBadge({
   hostKind,
   executionHostId,
   hostLabel,
+  showLabel = false,
   keyboardFocusable = false,
   className,
   iconClassName
@@ -56,12 +60,14 @@ export function DashboardHostBadge({
   if (!tooltipLabel) {
     return null
   }
+  const visibleLabel = showLabel ? hostLabel?.trim() || fallbackHostLabel(executionHostId) : null
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           className={cn(
             'inline-flex shrink-0 items-center justify-center text-muted-foreground',
+            visibleLabel && 'shrink px-1',
             keyboardFocusable &&
               'pointer-events-auto focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
             className
@@ -71,6 +77,11 @@ export function DashboardHostBadge({
           tabIndex={keyboardFocusable ? 0 : undefined}
         >
           <Server className={cn('size-3', iconClassName)} aria-hidden />
+          {visibleLabel ? (
+            <span className="ml-1 max-w-[7rem] truncate text-[11px] font-normal">
+              {visibleLabel}
+            </span>
+          ) : null}
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4}>
