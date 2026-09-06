@@ -15,4 +15,12 @@ describe('terminalPreviewUnavailableMessage', () => {
     expect(fromPtyId).not.toMatch(/pane has closed/)
     expect(terminalPreviewUnavailableMessage({ hostKind: 'ssh' })).toBe(fromPtyId)
   })
+
+  // Why (VSAgent fork): the web client reaches every pane through the paired host,
+  // so a missing preview there is loss of contact, not a closed pane.
+  it('treats a paired-runtime pty as remote', () => {
+    const fromPtyId = terminalPreviewUnavailableMessage({ ptyId: 'remote:env-1@@handle-9' })
+    expect(fromPtyId).toMatch(/remote session/)
+    expect(terminalPreviewUnavailableMessage({ hostKind: 'remote' })).toBe(fromPtyId)
+  })
 })

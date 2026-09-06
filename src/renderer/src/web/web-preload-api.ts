@@ -46,6 +46,7 @@ import { createShellApi } from './preload-api/web-shell-api'
 import { createWebStarNagApi } from './preload-api/web-star-nag-api'
 import { createWebTelemetryApi } from './preload-api/web-telemetry-api'
 import { createPtyApi, createSshApi } from './preload-api/web-terminal-api'
+import { createWebTerminalPreviewApi } from './preload-api/web-terminal-preview-api'
 import { createWebUiApi } from './preload-api/web-ui-api'
 import { createUpdaterApi } from './preload-api/web-updater-api'
 import { createWebPreviewApi } from './preload-api/web-webpreview-api'
@@ -125,6 +126,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     skills: createSkillsApi(),
     webPreview: createWebPreviewApi(),
     pty: createPtyApi(),
+    terminalPreview: createWebTerminalPreviewApi(),
     ssh: createSshApi(),
     wsl: {
       isAvailable: () => callRuntimeResult<boolean>('host.wsl.isAvailable').catch(() => false),

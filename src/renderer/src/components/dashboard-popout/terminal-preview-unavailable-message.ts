@@ -1,5 +1,6 @@
 import { translate } from '@/i18n/i18n'
 import type { DashboardCardHostKind } from '../../../../shared/dashboard-snapshot'
+import { parseRemoteRuntimePtyId } from '../../../../shared/remote-runtime-pty-id'
 import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
 
 /**
@@ -7,6 +8,8 @@ import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
  * observed it. `SshPtyProvider` reports no authoritative buffer snapshot and the relay
  * exposes no snapshot RPC, so for a remote pty the absence is loss of contact —
  * `unverifiable`, never `exited`. See docs/reference/ssh-execution-boundary.md.
+ * A paired runtime pty is remote in the same sense — the web client only sees it
+ * through the host's stream, so an absent preview is loss of contact too.
  */
 export function terminalPreviewUnavailableMessage(source: {
   ptyId?: string | null
@@ -14,7 +17,9 @@ export function terminalPreviewUnavailableMessage(source: {
 }): string {
   const isRemote =
     source.hostKind === 'ssh' ||
-    (typeof source.ptyId === 'string' && parseAppSshPtyId(source.ptyId) !== null)
+    source.hostKind === 'remote' ||
+    (typeof source.ptyId === 'string' &&
+      (parseAppSshPtyId(source.ptyId) !== null || parseRemoteRuntimePtyId(source.ptyId) !== null))
   return isRemote
     ? translate(
         'dashboardPopout.terminal.remotePreviewUnavailable',

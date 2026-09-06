@@ -1,4 +1,5 @@
 import { Settings } from 'lucide-react'
+import { agentDashboardPopoutSupported } from '@/lib/agent-dashboard-display-mode'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,6 +30,8 @@ export function AgentDashboardSettingsMenu({
   onOpenChange
 }: AgentDashboardSettingsMenuProps): React.JSX.Element {
   const mode = useAppStore((s) => s.settings?.experimentalAgentDashboardMode ?? 'in-window')
+  // Why (VSAgent fork): a browser tab cannot open the pop-out window.
+  const popoutSupported = agentDashboardPopoutSupported()
   const showIdle = useAppStore((s) => s.settings?.experimentalAgentDashboardShowIdle === true)
   const updateSettings = useAppStore((s) => s.updateSettings)
 
@@ -62,51 +65,55 @@ export function AgentDashboardSettingsMenu({
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" sideOffset={8} collisionPadding={8} className="w-72 p-2">
-        <div className="flex items-start justify-between gap-3 rounded-md px-1.5 py-1.5">
-          <span className="min-w-0 space-y-0.5">
-            <span className="block text-[12px] font-medium leading-4 text-foreground">
-              {translate(
-                'auto.components.settings.ExperimentalPane.agentDashboard.modeLabel',
-                'Open as'
-              )}
-            </span>
-            <span className="block text-[11px] leading-4 text-muted-foreground">
-              {translate(
-                'auto.components.settings.ExperimentalPane.agentDashboard.modeCopy',
-                'Show the dashboard as an in-window board beside the sidebar or a separate pop-out window.'
-              )}
-            </span>
-          </span>
-        </div>
-        <div className="px-1.5 pb-1">
-          <SettingsSegmentedControl
-            value={mode}
-            onChange={handleModeChange}
-            ariaLabel={translate(
-              'auto.components.settings.ExperimentalPane.agentDashboard.modeAriaLabel',
-              'Agent Dashboard open mode'
-            )}
-            size="sm"
-            equalWidth
-            options={[
-              {
-                value: 'in-window',
-                label: translate(
-                  'auto.components.settings.ExperimentalPane.agentDashboard.modeInWindow',
-                  'In-window'
-                )
-              },
-              {
-                value: 'popout',
-                label: translate(
-                  'auto.components.settings.ExperimentalPane.agentDashboard.modePopout',
-                  'Pop-out'
-                )
-              }
-            ]}
-          />
-        </div>
-        <DropdownMenuSeparator />
+        {popoutSupported ? (
+          <>
+            <div className="flex items-start justify-between gap-3 rounded-md px-1.5 py-1.5">
+              <span className="min-w-0 space-y-0.5">
+                <span className="block text-[12px] font-medium leading-4 text-foreground">
+                  {translate(
+                    'auto.components.settings.ExperimentalPane.agentDashboard.modeLabel',
+                    'Open as'
+                  )}
+                </span>
+                <span className="block text-[11px] leading-4 text-muted-foreground">
+                  {translate(
+                    'auto.components.settings.ExperimentalPane.agentDashboard.modeCopy',
+                    'Show the dashboard as an in-window board beside the sidebar or a separate pop-out window.'
+                  )}
+                </span>
+              </span>
+            </div>
+            <div className="px-1.5 pb-1">
+              <SettingsSegmentedControl
+                value={mode}
+                onChange={handleModeChange}
+                ariaLabel={translate(
+                  'auto.components.settings.ExperimentalPane.agentDashboard.modeAriaLabel',
+                  'Agent Dashboard open mode'
+                )}
+                size="sm"
+                equalWidth
+                options={[
+                  {
+                    value: 'in-window',
+                    label: translate(
+                      'auto.components.settings.ExperimentalPane.agentDashboard.modeInWindow',
+                      'In-window'
+                    )
+                  },
+                  {
+                    value: 'popout',
+                    label: translate(
+                      'auto.components.settings.ExperimentalPane.agentDashboard.modePopout',
+                      'Pop-out'
+                    )
+                  }
+                ]}
+              />
+            </div>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <div className="flex items-start justify-between gap-3 rounded-md px-1.5 py-1.5">
           <span className="min-w-0 space-y-0.5">
             <span className="block text-[12px] font-medium leading-4 text-foreground">

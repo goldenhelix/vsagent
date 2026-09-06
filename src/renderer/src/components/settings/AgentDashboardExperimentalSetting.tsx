@@ -1,4 +1,5 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
+import { agentDashboardPopoutSupported } from '@/lib/agent-dashboard-display-mode'
 import { translate } from '@/i18n/i18n'
 import { Label } from '../ui/label'
 import { SearchableSetting } from './SearchableSetting'
@@ -16,6 +17,7 @@ export function AgentDashboardExperimentalSetting({
 }: AgentDashboardExperimentalSettingProps): React.JSX.Element {
   const enabled = settings.experimentalAgentDashboardPopout === true
   const mode = settings.experimentalAgentDashboardMode ?? 'in-window'
+  const popoutSupported = agentDashboardPopoutSupported()
 
   return (
     <SearchableSetting
@@ -55,7 +57,7 @@ export function AgentDashboardExperimentalSetting({
           onChange={() => updateSettings({ experimentalAgentDashboardPopout: !enabled })}
         />
       </div>
-      {enabled ? (
+      {enabled && popoutSupported ? (
         <div className="ml-4 space-y-3 border-l border-border pl-4">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 shrink space-y-0.5">
