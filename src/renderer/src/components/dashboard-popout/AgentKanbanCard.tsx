@@ -188,6 +188,9 @@ type AgentKanbanCardProps = {
   /** The card repo's icon. null renders the default folder glyph. */
   repoIcon?: RepoIcon | null
   now: number
+  /** Name the owning host on the card, not just in the badge tooltip (several
+   *  paired servers in view). */
+  showHostLabel?: boolean
   /** Opens the board-level terminal dialog. The dialog is NOT owned by the
    *  card: bucket moves remount the card, and an embedded dialog would close
    *  the chat mid-conversation. */
@@ -200,6 +203,7 @@ export const AgentKanbanCard = memo(
     card,
     repoIcon = null,
     now,
+    showHostLabel = false,
     onOpenTerminal
   }: AgentKanbanCardProps): React.JSX.Element {
     useTranslation()
@@ -336,6 +340,7 @@ export const AgentKanbanCard = memo(
             hostKind={card.hostKind}
             executionHostId={card.executionHostId}
             hostLabel={card.hostLabel}
+            showLabel={showHostLabel}
             className="size-[18px] rounded-[5px] bg-muted-foreground/10 transition-colors group-hover:text-foreground"
           />
           {worktreeInFooter ? <span className="truncate">{card.worktreeName}</span> : null}
@@ -351,6 +356,7 @@ export const AgentKanbanCard = memo(
   },
   (previous, next) =>
     previous.onOpenTerminal === next.onOpenTerminal &&
+    previous.showHostLabel === next.showHostLabel &&
     sameCard(previous.card, next.card) &&
     sameRepoIcon(previous.repoIcon, next.repoIcon) &&
     (displayTimestamp(previous.card) <= 0 ||

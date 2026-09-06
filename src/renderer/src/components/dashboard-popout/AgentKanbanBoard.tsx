@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/dashboard-snapshot'
 import type { RepoIcon } from '../../../../shared/repo-icon'
 import { cn } from '@/lib/utils'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
 import { AgentKanbanCard } from './AgentKanbanCard'
@@ -71,12 +72,14 @@ function KanbanColumn({
   cards,
   repoIconsByRepoId,
   now,
+  showHostLabels,
   onOpenTerminal
 }: {
   bucket: DashboardBucket
   cards: DashboardCard[]
   repoIconsByRepoId: Record<string, RepoIcon | null> | undefined
   now: number
+  showHostLabels: boolean
   onOpenTerminal: (card: DashboardCard) => void
 }): React.JSX.Element {
   return (
@@ -103,6 +106,7 @@ function KanbanColumn({
               card={card}
               repoIcon={repoIconsByRepoId?.[card.repoId] ?? null}
               now={now}
+              showHostLabel={showHostLabels}
               onOpenTerminal={onOpenTerminal}
             />
           ))
@@ -222,6 +226,14 @@ export function AgentKanbanBoard({
   // Seen-state is the app-wide ack map (same signal as the sidebar's bold/mute
   // rows): opening a dialog acks the agent, and the next snapshot comes back
   // with unseen=false.
+  // Why (VSAgent fork): several paired servers can show agents side by side in the
+  // web client, where the bare host icon cannot say which server a card belongs to.
+  const showHostLabels = useMemo(
+    () =>
+      isVSAgentWebMode() &&
+      new Set(snapshot.cards.map((card) => card.executionHostId ?? '')).size > 1,
+    [snapshot.cards]
+  )
   const handleOpenTerminal = useCallback(
     (card: DashboardCard) => {
       onAckAgent(card.paneKey)
@@ -290,6 +302,7 @@ export function AgentKanbanBoard({
                 cards={grouped[bucket]}
                 repoIconsByRepoId={snapshot.repoIconsByRepoId}
                 now={now}
+                showHostLabels={showHostLabels}
                 onOpenTerminal={handleOpenTerminal}
               />
             ))}
