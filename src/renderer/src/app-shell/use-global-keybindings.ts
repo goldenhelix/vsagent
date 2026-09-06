@@ -5,7 +5,7 @@ import { canShowRightSidebarForView } from '@/lib/right-sidebar-visibility'
 import { isEditableTarget } from '../lib/editable-target'
 import { getSelectedTextForFileSearch } from '../lib/file-search-selection'
 import { isVSAgentWebMode } from '../lib/vsagent-web-mode'
-import { openNewWorkspaceFromShortcut } from '../hooks/ipc-events/new-workspace-command'
+import { dispatchWebWindowShortcut } from '../lib/vsagent-web-window-shortcuts'
 import { registerAppCommandDispatcher } from '@/lib/app-command-dispatch'
 import { executePluginCommand } from '@/lib/plugin-command-execution'
 import { findPluginCommandForKeybinding } from '@/lib/plugin-command-keybindings'
@@ -137,6 +137,22 @@ export function useGlobalKeybindings(args: {
         })
       }
 
+      // Why (VSAgent web): the desktop main process intercepts this allowlist in
+      // before-input-event — ahead of every renderer handler and regardless of focus —
+      // and sends the action to the renderer. A browser tab has no main process.
+      if (
+        isVSAgentWebMode() &&
+        dispatchWebWindowShortcut({
+          input,
+          platform: shortcutPlatform,
+          keybindings,
+          matchOptions: { context, terminalShortcutPolicy },
+          onTerminalCapture: notifyTerminalCapture
+        })
+      ) {
+        return
+      }
+
       const canRevealRightSidebar = !creationLayoutActive && canShowRightSidebarForView(activeView)
 
       if (matchShortcut('sidebar.search.toggle') && canRevealRightSidebar) {
@@ -235,15 +251,6 @@ export function useGlobalKeybindings(args: {
           })
           return
         }
-      }
-
-      // Why (VSAgent web): Cmd/Ctrl+N reaches the desktop app through the main
-      // process before-input-event allowlist, which never fires in a browser tab.
-      // Handle the browser-safe remap (vsagent-web-keybindings.ts) here.
-      if (isVSAgentWebMode() && matchShortcut('workspace.create')) {
-        input.preventDefault()
-        openNewWorkspaceFromShortcut(useAppStore.getState())
-        return
       }
 
       const handlers = createAppCommandHandlers(state, input, context)
