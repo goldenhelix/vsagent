@@ -9,6 +9,24 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Why (VSAgent fork): browsers hide crypto.randomUUID outside secure contexts
+         (plain-http LAN clients), and bundled modules call it while loading — before
+         any code in main.tsx can run, since a module body runs after its imports.
+         A classic inline script is the one thing guaranteed to execute first.
+         Tested by src/web/web-insecure-context-crypto-polyfill.test.ts. -->
+    <script data-vsagent="crypto-polyfill">
+      ;(function (c) {
+        if (!c || typeof c.randomUUID === 'function' || typeof c.getRandomValues !== 'function') return
+        c.randomUUID = function () {
+          var b = c.getRandomValues(new Uint8Array(16))
+          b[6] = (b[6] & 0x0f) | 0x40
+          b[8] = (b[8] & 0x3f) | 0x80
+          var h = ''
+          for (var i = 0; i < 16; i++) h += (b[i] < 16 ? '0' : '') + b[i].toString(16)
+          return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20)
+        }
+      })(globalThis.crypto)
+    </script>
     <script type="module" src="/src/web/main.tsx"></script>
   </body>
 </html>
