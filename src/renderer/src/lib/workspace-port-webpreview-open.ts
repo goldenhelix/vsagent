@@ -3,12 +3,10 @@
 // it through the server-side webpreview proxy WebBrowserPane already uses.
 // Split out of workspace-port-actions.ts, which has no room for these bodies.
 import { acquireWebPreviewSession } from '@/components/browser-pane/webpreview-proxy-navigation'
-import { isWebClientLocation } from './web-client-location'
+import { clientCanUseWebPreviewProxy } from './webpreview-browser-availability'
 
 export function canRoutePortThroughWebPreview(): boolean {
-  // Why: capability check first — only the web preload defines webPreview, and
-  // test environments stub window without a location for isWebClientLocation.
-  return Boolean(window.api?.webPreview) && isWebClientLocation()
+  return clientCanUseWebPreviewProxy()
 }
 
 /**

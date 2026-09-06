@@ -30,7 +30,11 @@ export function createBrowserTabActions(
 > {
   return {
     createBrowserTab: (worktreeId, url, options) => {
-      assertManagedBrowserMaterializationAllowed(get(), options?.browserRuntimeEnvironmentId)
+      assertManagedBrowserMaterializationAllowed(
+        get(),
+        options?.browserRuntimeEnvironmentId,
+        worktreeId
+      )
       const workspaceId = createBrowserUuid()
       const browserPageId = options?.browserPageId
       if (
