@@ -31,6 +31,22 @@ type TabBarQuickCommandsButtonProps = {
   groupId: string
 }
 
+/**
+ * Host a new command belongs to: the workspace's own host when it owns commands,
+ * else the first host that does. Why (VSAgent fork): the web client has no local
+ * host, so the list is empty until the runtime reports quick-command support —
+ * fall back to the workspace's execution host rather than reading hosts[0] blind.
+ */
+export function resolveQuickCommandDefaultHostId(
+  executionHostId: ExecutionHostId,
+  hosts: readonly { hostId: ExecutionHostId }[]
+): ExecutionHostId {
+  if (hosts.some((host) => host.hostId === executionHostId)) {
+    return executionHostId
+  }
+  return hosts[0]?.hostId ?? executionHostId
+}
+
 export function TabBarQuickCommandsButton({
   worktreeId,
   groupId
@@ -106,9 +122,7 @@ export function TabBarQuickCommandsButton({
 
   const totalVisible = repoCommands.length + globalCommands.length
   const hasAnyCommands = totalVisible > 0
-  const defaultHostId = hosts.some((host) => host.hostId === executionHostId)
-    ? executionHostId
-    : hosts[0].hostId
+  const defaultHostId = resolveQuickCommandDefaultHostId(executionHostId, hosts)
 
   const addRepoCommand = (hostId: ExecutionHostId): void => {
     setEditor({
