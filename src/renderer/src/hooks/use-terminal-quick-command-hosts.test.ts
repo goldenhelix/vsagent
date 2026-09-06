@@ -30,6 +30,10 @@ vi.mock('@/lib/worktree-runtime-owner', () => ({
   getExecutionHostIdForWorktree: () => testState.resolveExecutionHostId()
 }))
 
+// Default: native mode (local host present). Web-mode cases opt in per-test.
+vi.mock('@/lib/vsagent-web-mode', () => ({ isVSAgentWebMode: vi.fn(() => false) }))
+
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import {
   flattenTerminalQuickCommandHosts,
   getTerminalQuickCommandHostOptions,
@@ -70,6 +74,7 @@ describe('useTerminalQuickCommandHosts', () => {
     renderedHosts = []
     remoteHostLoadFailed = false
     remoteHostPending = false
+    vi.mocked(isVSAgentWebMode).mockReturnValue(false)
     const container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
@@ -164,6 +169,30 @@ describe('useTerminalQuickCommandHosts', () => {
       expect(testState.loadRuntimeTerminalQuickCommands).toHaveBeenCalledWith('build')
     }
   )
+
+  // Why: the browser client's settings carry no quick commands (host-owned), so a
+  // "This computer" entry would only duplicate the serve host with an empty list.
+  it('omits the phantom local host in VSAgent web mode', async () => {
+    vi.mocked(isVSAgentWebMode).mockReturnValue(true)
+    testState.runtimeTerminalQuickCommands = new Map([
+      [
+        'build',
+        {
+          commands: [],
+          connectionGeneration: 4,
+          error: null,
+          loading: false,
+          ready: true,
+          supported: true
+        }
+      ]
+    ])
+
+    await act(async () => root.render(createElement(Probe)))
+
+    expect(renderedHosts.map((host) => host.hostId)).toEqual(['runtime:build'])
+    expect(shouldShowTerminalQuickCommandHostOwnership(renderedHosts)).toBe(false)
+  })
 
   it('keeps mutations pending until remote capability ownership resolves', async () => {
     await act(async () => root.render(createElement(Probe)))

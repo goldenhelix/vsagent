@@ -26,6 +26,11 @@ describe('QuickCommandsPane host state', () => {
     ).toBe('local')
   })
 
+  it('falls back to the first real host when web mode drops the local one', () => {
+    expect(getAvailableQuickCommandHostId('local', [{ id: 'runtime:serve' }])).toBe('runtime:serve')
+    expect(getAvailableQuickCommandHostId('runtime:removed', [])).toBe('local')
+  })
+
   it('keeps the selected host while it remains available', () => {
     expect(
       getAvailableQuickCommandHostId('runtime:available', [
