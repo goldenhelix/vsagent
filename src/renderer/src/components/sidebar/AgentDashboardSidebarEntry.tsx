@@ -1,4 +1,5 @@
 import { LayoutDashboard } from 'lucide-react'
+import { effectiveAgentDashboardDisplayMode } from '@/lib/agent-dashboard-display-mode'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { AgentQuestionIcon } from '@/components/AgentQuestionIcon'
@@ -61,7 +62,10 @@ function DashboardBucketCounts({
 export default function AgentDashboardSidebarEntry(): React.JSX.Element {
   const dashboardBucketCounts = useAgentBucketCounts()
   const showIdle = useAppStore((s) => s.settings?.experimentalAgentDashboardShowIdle === true)
-  const openAsPopout = useAppStore((s) => s.settings?.experimentalAgentDashboardMode === 'popout')
+  const openAsPopout = useAppStore(
+    (s) =>
+      effectiveAgentDashboardDisplayMode(s.settings?.experimentalAgentDashboardMode) === 'popout'
+  )
   const drawerOpen = useAppStore((s) => s.agentDashboardDrawerOpen)
   const setAgentDashboardDrawerOpen = useAppStore((s) => s.setAgentDashboardDrawerOpen)
 
