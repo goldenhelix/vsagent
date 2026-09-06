@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { setUsageProviderStores } from '../usage/usage-provider-store-registry'
 import { join } from 'node:path'
 import { AgentAwakeService } from '../agent-awake-service'
 import { normalizeComputerAwakeMode } from '../../shared/computer-awake-mode'
@@ -160,4 +161,11 @@ export function initializeMainProcessObservers(): void {
   state.claudeUsage = new ClaudeUsageStore(store)
   state.codexUsage = new CodexUsageStore(store)
   state.openCodeUsage = new OpenCodeUsageStore(store)
+  // Why (VSAgent fork): paired clients reach these over runtime RPC, which cannot
+  // import electron — so hand the stores to the electron-free registry it reads.
+  setUsageProviderStores({
+    claudeUsage: state.claudeUsage,
+    codexUsage: state.codexUsage,
+    openCodeUsage: state.openCodeUsage
+  })
 }
