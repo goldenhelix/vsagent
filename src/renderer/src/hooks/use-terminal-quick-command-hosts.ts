@@ -10,6 +10,7 @@ import {
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
 import { buildExecutionHostRegistry } from '../../../shared/execution-host-registry'
 import type { PublicKnownRuntimeEnvironment } from '../../../shared/runtime-environments'
+import { isVSAgentWebMode } from '@/lib/vsagent-web-mode'
 import { dropLocalHostByIdInWebMode } from '@/lib/vsagent-web-mode-hosts'
 import { useAppStore } from '@/store'
 import type {
@@ -177,14 +178,18 @@ export function useTerminalQuickCommandHosts(
       return DISABLED_TERMINAL_QUICK_COMMAND_HOSTS
     }
     const hostOptions = getTerminalQuickCommandHostOptions(settings, runtimeEnvironments)
-    const result: TerminalQuickCommandHost[] = [
-      {
+    const result: TerminalQuickCommandHost[] = []
+    // Why (VSAgent fork): the browser client's settings blob carries no quick commands
+    // (host-owned; they arrive through the runtime host below), so a "This computer"
+    // entry would be an empty duplicate of the serve host.
+    if (!isVSAgentWebMode()) {
+      result.push({
         commands: settings?.terminalQuickCommands ?? [],
         hostId: LOCAL_EXECUTION_HOST_ID,
         label:
           hostOptions.find((host) => host.id === LOCAL_EXECUTION_HOST_ID)?.label ?? 'This computer'
-      }
-    ]
+      })
+    }
     if (
       !remoteHostId ||
       !remoteEnvironmentId ||

@@ -57,9 +57,12 @@ export function getAvailableQuickCommandHostId(
   selectedHostId: ExecutionHostId,
   hostOptions: readonly { id: ExecutionHostId }[]
 ): ExecutionHostId {
-  return hostOptions.some((host) => host.id === selectedHostId)
-    ? selectedHostId
-    : LOCAL_EXECUTION_HOST_ID
+  if (hostOptions.some((host) => host.id === selectedHostId)) {
+    return selectedHostId
+  }
+  // Why (VSAgent fork): web mode drops the phantom local host from the options, so
+  // fall back to the first real host (local on native, the serve host in the browser).
+  return hostOptions[0]?.id ?? LOCAL_EXECUTION_HOST_ID
 }
 
 export function isQuickCommandEditorHostCurrent(
