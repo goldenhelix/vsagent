@@ -47,6 +47,7 @@ import { AGENT_SESSION_METHODS } from './agent-session'
 import { STRUCTURED_AGENT_SESSION_METHODS } from './structured-agent-session'
 import { ARTIFACT_METHODS } from './artifacts'
 import { AGENT_HOOK_METHODS } from './agent-hooks'
+import { USAGE_PROVIDER_METHODS } from './usage-providers'
 import { WEBPREVIEW_METHODS } from './webpreview'
 
 // Why: a flat manifest keeps registration order explicit and provides one
@@ -101,5 +102,6 @@ export const ALL_RPC_METHODS: readonly RpcAnyMethod[] = [
   ...EMULATOR_METHODS,
   ...PAIRING_METHODS,
   ...UPDATER_METHODS,
+  ...USAGE_PROVIDER_METHODS,
   ...WEBPREVIEW_METHODS
 ]
