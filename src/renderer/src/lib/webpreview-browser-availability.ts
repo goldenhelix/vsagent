@@ -8,9 +8,9 @@ import { isWebClientLocation } from './web-client-location'
 // so the pane guard and the creation policy cannot drift.
 
 export function clientCanUseWebPreviewProxy(): boolean {
-  // Location check first: it is the one that guards `typeof window`, so this stays
-  // safe wherever window is undefined. Only the web preload defines webPreview.
-  return isWebClientLocation() && Boolean(window.api?.webPreview)
+  // Guard `window` itself: node test environments (and any non-browser host) can
+  // report a web-client location without one. Only the web preload defines webPreview.
+  return typeof window !== 'undefined' && isWebClientLocation() && Boolean(window.api?.webPreview)
 }
 
 export function hostAdvertisesWebPreviewProxy(
