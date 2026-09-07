@@ -177,6 +177,10 @@ const child = spawn(path.join(appDir, 'scripts', 'vsagent-serve'), [], {
   env: {
     ...installEnv,
     VSAGENT_PORT: PORT,
+    // Why: smoke hosts (CI runners, build boxes) have no display, and proving
+    // the packaged bundle boots is the point — take the same display-less
+    // opt-in install.sh writes into the unit on a bare server.
+    VSAGENT_ALLOW_DISPLAYLESS_SERVE: '1',
     HOME: homeDir,
     // Why: point every XDG dir under the scratch HOME so Electron userData and
     // the launcher's state file are isolated regardless of the runner's env.

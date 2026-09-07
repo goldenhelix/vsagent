@@ -71,7 +71,11 @@ cat ~/.local/state/vsagent/web-url
   serve runs a virtual display and in-app browser panes work. **Without a
   display, `serve` exits (code `1`) rather than starting** — set
   `VSAGENT_ALLOW_DISPLAYLESS_SERVE=1` to opt into a display-less boot instead
-  (terminals and agents work fully, browser panes are off). See
+  (terminals and agents work fully, browser panes are off). `install.sh` makes
+  that choice for you: it writes the flag into the systemd unit exactly when it
+  finds neither a display nor Xvfb, so a bare server starts. Install Xvfb and
+  drop the line from `~/.config/systemd/user/vsagent.service` to get browser
+  panes back. See
   [Hosts that cannot run Xvfb](./reference/headless-linux-server.md#hosts-that-cannot-run-xvfb)
   for the full explanation of why this requires an explicit opt-in.
 - **GL/Mesa libraries — required for the display-less fallback.** The Ozone

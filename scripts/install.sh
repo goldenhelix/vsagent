@@ -121,8 +121,12 @@ command -v pnpm >/dev/null 2>&1 || die "pnpm not found and could not be bootstra
 # --------- optional-but-recommended: Xvfb ---------
 # Xvfb enables in-app browser panes. Without it, serve falls back to a
 # display-less headless boot: terminals and agents work, browser panes are off.
+ALLOW_DISPLAYLESS_SERVE=0
 if [[ -z "${DISPLAY:-}" ]] && ! command -v Xvfb >/dev/null 2>&1; then
-  warn "Xvfb not found: browser panes will be unavailable. Install it (apt-get install xvfb) to enable them."
+  # Why the flag: serve refuses a display-less boot unless the host asks for it,
+  # so a bare server needs it or the service would exit(1) at every start.
+  ALLOW_DISPLAYLESS_SERVE=1
+  warn "Xvfb not found: starting display-less (terminals and agents work, browser panes are off). Install it (apt-get install xvfb) to enable them."
 fi
 
 # --------- required for display-less boot: GL/Mesa ---------
@@ -225,6 +229,7 @@ if [[ "$USE_SYSTEMD" -eq 1 ]]; then
     -e "s|__PORT__|$PORT|g" \
     -e "s|__PAIRING_ADDRESS__|$PAIRING_ADDRESS|g" \
     -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
+    -e "s|__ALLOW_DISPLAYLESS_SERVE__|$ALLOW_DISPLAYLESS_SERVE|g" \
     "$TEMPLATE_PATH" > "$UNIT_PATH"
 
   log "wrote $UNIT_PATH"
