@@ -19,8 +19,10 @@ export const DISPLAYLESS_SERVE_ACTIVE_MESSAGE =
   `(${DISPLAYLESS_SERVE_FALLBACK_ENV}=1): terminals work, browser panes are off.`
 
 export const DISPLAYLESS_SERVE_OPT_IN_HINT =
-  `[serve] Set ${DISPLAYLESS_SERVE_FALLBACK_ENV}=1 and start serve through the orca CLI to run ` +
-  'without a display anyway (terminals work, browser panes off).'
+  `[serve] Set ${DISPLAYLESS_SERVE_FALLBACK_ENV}=1 and start serve through the orca CLI (or ` +
+  `scripts/vsagent-serve) to run without a display anyway (terminals work, browser panes off). ` +
+  `A launcher that execs the Electron binary itself must also put ${DISPLAYLESS_SERVE_OZONE_ARG} ` +
+  'on the command line — the variable alone cannot move Chromium off its chosen display platform.'
 
 export const DISPLAYLESS_SERVE_LAUNCH_HINT =
   `[serve] ${DISPLAYLESS_SERVE_FALLBACK_ENV}=1 is set, but Chromium already chose a display ` +

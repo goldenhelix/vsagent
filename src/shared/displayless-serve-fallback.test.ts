@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DISPLAYLESS_SERVE_FALLBACK_ENV,
+  DISPLAYLESS_SERVE_OPT_IN_HINT,
   DISPLAYLESS_SERVE_OZONE_ARG,
   displaylessServeLaunchArgs,
   isDisplaylessServeFallbackEnabled
@@ -64,5 +65,13 @@ describe('displaylessServeLaunchArgs', () => {
     expect(displaylessServeLaunchArgs({ [DISPLAYLESS_SERVE_FALLBACK_ENV]: '1' }, 'win32')).toEqual(
       []
     )
+  })
+
+  // Why: an operator whose launcher execs Electron itself (a container entrypoint,
+  // a CI deploy script) only ever sees this first hint — it has to carry the whole
+  // recipe, or setting the variable alone leaves serve failing the same way.
+  it('tells a custom launcher about the switch, not just the variable', () => {
+    expect(DISPLAYLESS_SERVE_OPT_IN_HINT).toContain(DISPLAYLESS_SERVE_FALLBACK_ENV)
+    expect(DISPLAYLESS_SERVE_OPT_IN_HINT).toContain(DISPLAYLESS_SERVE_OZONE_ARG)
   })
 })
