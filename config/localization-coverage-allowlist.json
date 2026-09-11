@@ -117,5 +117,12 @@
     "text": "VSAgent",
     "dynamic": false,
     "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/web/preload-api/web-export-api.ts",
+    "kind": "object-property:error",
+    "text": "No content to export",
+    "dynamic": false,
+    "count": 1
   }
 ]

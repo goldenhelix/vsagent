@@ -17749,6 +17749,9 @@
       "ssh": "SSH host",
       "remoteNamed": "Remote Orca host · {{host}}",
       "remote": "Remote Orca host"
+    },
+    "reveal": {
+      "unavailable": "Could not open this agent’s workspace{{value0}}."
     }
   },
   "dashboard": {

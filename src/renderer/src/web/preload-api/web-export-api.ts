@@ -56,6 +56,9 @@ export function createWebExportApi(): ExportApi {
   return {
     htmlToPdf: async ({ html }) => {
       if (!html.trim()) {
+        // Why (VSAgent fork): byte-identical to upstream's main-process handler
+        // (src/main/ipc/export.ts), which the caller renders verbatim — localizing
+        // only here would split the web and desktop messages. Allowlisted instead.
         return { success: false, error: 'No content to export' }
       }
       try {
