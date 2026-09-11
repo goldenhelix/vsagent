@@ -31,7 +31,12 @@ export const POSTINSTALL_STAGED_SCRIPTS = [
   // Not an import: rebuild-native-deps require()s this inside the Electron
   // load probe. Missing, the probe reports node-pty as broken and forces a
   // needless source rebuild instead of failing outright.
-  'config/scripts/node-pty-job-ownership.cjs'
+  'config/scripts/node-pty-job-ownership.cjs',
+  // Same shape, for the @vscode/windows-process-tree arm of that probe: the
+  // prebuilt addon is N-API, so a bare require proves nothing about which
+  // source it was built from and this .cjs is what checks the creation-time
+  // export is really there.
+  'config/scripts/windows-process-tree-creation-time.cjs'
 ]
 
 /**
