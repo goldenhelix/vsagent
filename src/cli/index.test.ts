@@ -41,7 +41,7 @@ vi.mock('child_process', async () => {
 })
 
 import { COMMAND_SPECS, main } from './index'
-import { formatFlagHelp } from './help'
+import { formatFlagHelp } from './flag-help-text'
 import { GLOBAL_FLAGS, specPaths } from './args'
 import { okFixture, queueFixtures } from './test-fixtures'
 
