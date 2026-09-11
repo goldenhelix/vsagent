@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 const projectDir = resolve(import.meta.dirname, '../..')
 
+// Why (VSAgent fork): upstream's terminal-ime-e2e.yml is deleted here, so its
+// nested-Wayland job assertions are gone; the runner and spec checks still ship.
 describe('terminal IME e2e workflow', () => {
   it('keeps IBus lifecycle scoped to owned processes', () => {
     const runner = readFileSync(

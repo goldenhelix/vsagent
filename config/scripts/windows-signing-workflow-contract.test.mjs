@@ -39,11 +39,11 @@ describe('Windows signing workflow contract', () => {
   })
 })
 
-// Why this one survives: the NSIS uninstaller is generated inside electron-builder's
-// uninstaller pass and deleted immediately after being embedded, so the only way CI can
-// sign it is the export/import relay through win.signtoolOptions.sign. The workflow legs
-// of that relay lived in the upstream release workflows this fork removed; the
-// electron-builder hook they all depend on is still asserted here.
+// Why (VSAgent fork): upstream's release-cut.yml and windows-signing-rehearsal.yml
+// are deleted here, so the workflow legs of the uninstaller signing relay are gone.
+// The uninstaller is generated inside electron-builder's pass and deleted right after
+// being embedded, so the electron-builder hook every leg depends on still ships and is
+// the one thing left to assert.
 describe('Windows NSIS uninstaller signing', () => {
   it('wires the electron-builder sign hook that the relay depends on', () => {
     const require = createRequire(import.meta.url)

@@ -118,6 +118,12 @@ describe('Electron runtime package contract', () => {
     for (const scriptName of guardedScripts) {
       expect(scripts[scriptName], scriptName).toContain('pnpm run ensure:electron-runtime &&')
     }
+
+    // Why (VSAgent fork): upstream asserts both golden projects inside a test that
+    // reads the release workflows this fork deletes. The claim is about the package
+    // script alone, so it is kept here rather than lost with the workflow test.
+    expect(scripts['test:e2e:terminal-rendering-golden']).toContain('--project electron-headless')
+    expect(scripts['test:e2e:terminal-rendering-golden']).toContain('--project electron-headful')
   })
 
   it('keeps Windows and Linux package builds off macOS native helper builds', () => {

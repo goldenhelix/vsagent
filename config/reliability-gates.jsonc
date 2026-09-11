@@ -19421,25 +19421,16 @@
       "coverageNotes": "Ubuntu 22.04 nested GNOME and IBus Hangul drive three complete native executions in GitHub Actions. GNOME owns IBus; daemon and CLI share its default config discovery path.",
       "motivatingLinks": ["https://github.com/stablyai/orca/pull/19174"],
       "invariant": "Typing d k 1 Return through native IBus Hangul delivers exactly 아1 followed by newline without missing, duplicate, or reordered characters.",
-      "oracle": "Three executions each assert three exact UTF-8 PTY lines. Verify the exact Playwright title, zero skips/retries, each individual native composition receipt, and the nested launch Wayland flag.",
+      "oracle": "Three executions each assert three exact UTF-8 PTY lines. Verify the exact Playwright title, zero skips/retries, and each individual native composition receipt.",
       "commands": [
-        "gh workflow run terminal-ime-e2e.yml",
         "gh run view 34074017928 --log",
-        "pnpm exec playwright test --config tests/playwright.config.ts tests/e2e/terminal-hangul-terminating-digit-native.spec.ts --project=electron-headful --workers=1 --repeat-each=3 --retries=0 --reporter=list,json",
-        "ORCA_BACKGROUND_LAUNCH=1 node_modules/.bin/vitest run --config config/vitest.config.ts config/scripts/terminal-ime-e2e-workflow.test.mjs"
+        "pnpm exec playwright test --config tests/playwright.config.ts tests/e2e/terminal-hangul-terminating-digit-native.spec.ts --project=electron-headful --workers=1 --repeat-each=3 --retries=0 --reporter=list,json"
       ],
-      "testFiles": [
-        "tests/e2e/terminal-hangul-terminating-digit-native.spec.ts",
-        "config/scripts/terminal-ime-e2e-workflow.test.mjs"
-      ],
+      "testFiles": ["tests/e2e/terminal-hangul-terminating-digit-native.spec.ts"],
       "assertionRefs": [
         {
           "file": "tests/e2e/terminal-hangul-terminating-digit-native.spec.ts",
           "assertions": ["a digit typed right after a Hangul syllable reaches the pty"]
-        },
-        {
-          "file": "config/scripts/terminal-ime-e2e-workflow.test.mjs",
-          "assertions": ["runs native Wayland independently with CJK fonts and retained evidence"]
         }
       ],
       "evidenceRuns": [
@@ -19476,7 +19467,8 @@
       "knownGaps": [
         "Only Hangul terminating digits; no native candidate-selection or other input-method coverage claim.",
         "No macOS, Windows, SSH terminal, packaged build, or mixed-version claim.",
-        "Default config paths are shared with GNOME on a disposable hosted CI runner; nested mode refuses non-GitHub-Actions execution."
+        "Default config paths are shared with GNOME on a disposable hosted CI runner; nested mode refuses non-GitHub-Actions execution.",
+        "The nested launch Wayland flag and the CJK-font/evidence-retention wiring had their only static assertion in a workflow contract test; this fork deletes upstream's terminal-ime-e2e.yml (DECISIONS Q11), so neither is checked here."
       ],
       "demotionRule": "Keep experimental on unexplained failures; retain exact bytes and participation checks without retries, skips, or longer deadlines."
     }
