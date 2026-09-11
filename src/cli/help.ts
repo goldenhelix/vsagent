@@ -8,6 +8,10 @@ import { ROOT_HELP_TEXT_SECONDARY } from './root-help-text-secondary'
 
 const ROOT_HELP_TEXT = [ROOT_HELP_TEXT_PRIMARY, ROOT_HELP_TEXT_SECONDARY].join('\n')
 
+// Why (VSAgent fork): keeps help.ts's upstream export surface intact after the
+// flag-help-text.ts split, so upstream importers need no fork edit.
+export { formatFlagHelp } from './flag-help-text'
+
 // Why (VSAgent fork): when launched via the vsagent launcher (which sets
 // VSAGENT_BRAND_CLI=1), rebrand help output at this one seam instead of
 // editing dozens of upstream strings. `orca <cmd>` examples become

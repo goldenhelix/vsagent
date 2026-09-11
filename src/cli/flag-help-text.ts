@@ -1,4 +1,7 @@
-/** Per-flag help text shared by every command, kept out of help.ts so that file stays inside its max-lines budget. */
+// Why (VSAgent fork): verbatim upstream content, split out of help.ts (which was at
+// exactly its 300-line budget upstream) so the fork's own additions fit. Same
+// extraction upstream used for root-help-text-primary/secondary.ts.
+/** Per-flag help text shared by every command. */
 export function formatFlagHelp(flag: string): string {
   const helpByFlag: Record<string, string> = {
     agent: '--agent <id>          Launch a known TUI agent in the first terminal',
