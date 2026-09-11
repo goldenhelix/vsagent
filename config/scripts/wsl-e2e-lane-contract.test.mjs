@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { hasWslSourceChange, selectPrE2eSpecs } from './pr-e2e-source-routing.mjs'
 
-// Why (VSAgent fork): upstream's pr.yml is deleted here, so the assertions
-// wiring the reusable WSL lane to it are gone; the source routing still ships.
+// Why (VSAgent fork): DECISIONS Q11 deletes every upstream workflow, pr.yml and
+// windows-wsl-e2e.yml included, so the assertions reading either one are gone.
+// pr-e2e-source-routing.mjs is upstream logic the fork keeps verbatim, so its
+// routing table — including the .github paths — is still asserted as written.
 describe('real WSL terminal lane', () => {
   it.each([
     'config/scripts/verify-wsl-e2e-participation.mjs',

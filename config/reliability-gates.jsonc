@@ -19264,7 +19264,6 @@
       "invariant": "An agent launched into WSL runs in the guest; keyboard paste reaches exactly one owning PTY and preserves Linux content even after the default shell changes.",
       "oracle": "Run the existing real WSL launch and two paste cases three times; require nine passes and zero skipped, unexpected, or flaky results in the Playwright JSON report.",
       "commands": [
-        "gh workflow run windows-wsl-e2e.yml",
         "pnpm exec playwright test tests/e2e/golden-tab-bar-agent-launch.spec.ts tests/e2e/terminal-windows-shell-paste-ownership.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1",
         "node_modules/.bin/vitest run --config config/vitest.config.ts config/scripts/wsl-e2e-lane-contract.test.mjs config/scripts/verify-wsl-e2e-participation.test.mjs",
         "gh run view 34031806291 --log"
@@ -19348,14 +19347,12 @@
       "invariant": "A paired client and host without client-hosted browser capabilities retain server-hosted browser placement across supported version skew.",
       "oracle": "Require both existing named browser placement scenarios to pass three times with one attempt, zero skips, zero failures, and no report errors.",
       "commands": [
-        "gh workflow run packaged-browser-e2e.yml",
         "pnpm exec playwright test tests/e2e/packaged-mixed-version-browser-placement.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1 --repeat-each=3 --retries=0",
-        "node_modules/.bin/vitest run --config config/vitest.config.ts config/scripts/packaged-browser-lane-contract.test.mjs config/scripts/verify-packaged-browser-participation.test.mjs",
+        "node_modules/.bin/vitest run --config config/vitest.config.ts config/scripts/verify-packaged-browser-participation.test.mjs",
         "gh run view 34069063016 --log"
       ],
       "testFiles": [
         "tests/e2e/packaged-mixed-version-browser-placement.spec.ts",
-        "config/scripts/packaged-browser-lane-contract.test.mjs",
         "config/scripts/verify-packaged-browser-participation.test.mjs"
       ],
       "assertionRefs": [
@@ -19369,13 +19366,6 @@
         {
           "file": "config/scripts/verify-packaged-browser-participation.test.mjs",
           "assertions": ["reject missing, substituted, skipped and retried scenarios"]
-        },
-        {
-          "file": "config/scripts/packaged-browser-lane-contract.test.mjs",
-          "assertions": [
-            "verify pinned package checksum before extraction",
-            "require both directions three times and run report verification even on failure"
-          ]
         }
       ],
       "evidenceRuns": [
