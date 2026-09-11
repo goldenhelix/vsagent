@@ -1,11 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { parse } from 'yaml'
 import { hasNativeImeSourceChange, shouldRunReusablePrE2e } from './pr-e2e-source-routing.mjs'
 
-const workflow = parse(readFileSync('.github/workflows/pr.yml', 'utf8'))
-const filterStep = workflow.jobs.code_paths.steps.find((step) => step.id === 'e2e_filter')
-
+// Why (VSAgent fork): upstream's pr.yml is deleted here, so the assertions on
+// its e2e_filter step are gone; the routing decisions themselves still ship.
 describe('native-only PR E2E routing', () => {
   it('avoids generic E2E allocation for native-only changes while preserving its IME lane', () => {
     for (const file of [
@@ -27,7 +24,5 @@ describe('native-only PR E2E routing', () => {
         true
       )
     }
-    expect(filterStep.run).toContain('pr-e2e-source-routing.mjs --reusable-workflow')
-    expect(filterStep.run).toContain('if [ "$SHOULD_RUN" = true ]; then')
   })
 })
